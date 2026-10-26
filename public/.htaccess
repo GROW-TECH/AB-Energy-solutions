@@ -1,0 +1,15 @@
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # 1. Do NOT rewrite API endpoints or uploads - pass directly to Node.js backend
+  RewriteCond %{REQUEST_URI} (api|uploads) [NC]
+  RewriteRule ^ - [L]
+
+  # 2. Pass existing files and directories directly
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # 3. Only rewrite frontend SPA navigation routes to index.html
+  RewriteRule . index.html [L]
+</IfModule>

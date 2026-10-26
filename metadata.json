@@ -1,0 +1,6 @@
+{
+  "name": "AB Energy Solutions - Solar CRM & Business OS",
+  "description": "Enterprise solar business operating system automating Lead, Survey, Calculator, Quotation, Project, Inventory, Installation, Payment, Commissioning, Warranty, AMC, and Service workflows.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

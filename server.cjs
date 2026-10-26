@@ -1,0 +1,4256 @@
+// server.ts
+import express from "express";
+import { createServer as createViteServer } from "vite";
+import dotenv3 from "dotenv";
+import path3 from "path";
+import { fileURLToPath } from "url";
+import fs3 from "fs";
+
+// server/routes/index.ts
+import { Router as Router12 } from "express";
+
+// server/db.ts
+import mysql from "mysql2/promise";
+import dotenv from "dotenv";
+dotenv.config();
+var pool = mysql.createPool({
+  host: process.env.DB_HOST || "xiadot.com",
+  port: Number(process.env.DB_PORT) || 3306,
+  user: process.env.DB_USER || "ab_energy_solutions",
+  password: process.env.DB_PASSWORD || "ab_energy_solutions",
+  database: process.env.DB_NAME || "ab_energy_solutions",
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0
+});
+
+// server/controllers/surveys.controller.ts
+import fs2 from "fs";
+import path2 from "path";
+
+// src/utils/quotationEngine.ts
+var QUOTATION_CONFIG = {
+  // Discount threshold requiring manager approval
+  DISCOUNT_APPROVAL_THRESHOLD_INR: 15e3,
+  MAX_DISCOUNT_PERCENT: 15,
+  // max 15% discount allowed
+  // Default Company Location (Karnataka / Tamil Nadu)
+  DEFAULT_SUPPLIER_STATE: "Karnataka",
+  DEFAULT_SUPPLIER_GSTIN: "29AABCS1429B1Z8",
+  // Client-Configured Statutory Defaults:
+  // - Solar Panels & Inverters: 5% GST
+  // - Structure, Cables/BOS, Installation Services: 18% GST
+  DEFAULT_GST_RATES: {
+    PANELS: 5,
+    INVERTER: 5,
+    STRUCTURE: 18,
+    BOS: 18,
+    INSTALLATION: 18
+  },
+  // Standard HSN / SAC Codes
+  DEFAULT_HSN_CODES: {
+    PANELS: "8541",
+    INVERTER: "8504",
+    STRUCTURE: "7308",
+    BOS: "8544",
+    INSTALLATION: "9954"
+  },
+  // Legacy composite rate for backward compatibility
+  COMPOSITE_GST_RATE: 13.8,
+  // 70% goods @ 12% + 30% services @ 18%
+  // Solar irradiance & financial defaults
+  SPECIFIC_YIELD_KWH_PER_KWP: 1450,
+  DEFAULT_TARIFF_INR: 8.2,
+  // PM Surya Ghar Muft Bijli Yojana Central Subsidy Slabs (Residential Only)
+  RESIDENTIAL_SUBSIDY: {
+    SLAB_1KW_MAX: 3e4,
+    SLAB_2KW_MAX: 6e4,
+    SLAB_3KW_AND_ABOVE_MAX: 78e3
+  }
+};
+function convertNumberToWords(amount) {
+  const rounded = Math.round(Number(amount) || 0);
+  if (rounded === 0) return "Rupees Zero Only";
+  const units = [
+    "",
+    "One",
+    "Two",
+    "Three",
+    "Four",
+    "Five",
+    "Six",
+    "Seven",
+    "Eight",
+    "Nine",
+    "Ten",
+    "Eleven",
+    "Twelve",
+    "Thirteen",
+    "Fourteen",
+    "Fifteen",
+    "Sixteen",
+    "Seventeen",
+    "Eighteen",
+    "Nineteen"
+  ];
+  const tens = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
+  function convertHundreds(n) {
+    let str = "";
+    if (n >= 100) {
+      str += units[Math.floor(n / 100)] + " Hundred ";
+      n %= 100;
+    }
+    if (n >= 20) {
+      str += tens[Math.floor(n / 10)] + (n % 10 ? " " + units[n % 10] : "");
+    } else if (n > 0) {
+      str += units[n];
+    }
+    return str.trim();
+  }
+  let words = "";
+  let crore = Math.floor(rounded / 1e7);
+  let remCrore = rounded % 1e7;
+  let lakh = Math.floor(remCrore / 1e5);
+  let remLakh = remCrore % 1e5;
+  let thousand = Math.floor(remLakh / 1e3);
+  let remThousand = remLakh % 1e3;
+  if (crore > 0) words += convertHundreds(crore) + " Crore ";
+  if (lakh > 0) words += convertHundreds(lakh) + " Lakh ";
+  if (thousand > 0) words += convertHundreds(thousand) + " Thousand ";
+  if (remThousand > 0) words += convertHundreds(remThousand);
+  return `Rupees ${words.trim()} Only`;
+}
+function resolveTaxType(input) {
+  if (input.taxType) return input.taxType;
+  const supplier = (input.supplierState || QUOTATION_CONFIG.DEFAULT_SUPPLIER_STATE).toLowerCase().trim();
+  const address = (input.customerAddress || "").toLowerCase();
+  const customerState = (input.customerState || "").toLowerCase().trim();
+  if (customerState && customerState !== supplier) {
+    return "IGST";
+  }
+  if (supplier === "karnataka") {
+    if (address.includes("tamil nadu") || address.includes("kerala") || address.includes("andhra") || address.includes("telangana") || address.includes("delhi")) {
+      return "IGST";
+    }
+  } else if (supplier === "tamil nadu") {
+    if (address.includes("karnataka") || address.includes("bengaluru") || address.includes("bangalore") || address.includes("kerala")) {
+      return "IGST";
+    }
+  }
+  return "CGST_SGST";
+}
+function calculateQuotation(input) {
+  const capacityKw = Math.max(0.5, Number(input.systemCapacityKw) || 5);
+  const tier = input.packageTier || "Premium Bifacial";
+  const category = input.customerCategory || (capacityKw > 20 ? "Commercial" : "Residential");
+  const roof = input.roofType || "RCC Flat";
+  const tariff = input.customTariffPerKwh || QUOTATION_CONFIG.DEFAULT_TARIFF_INR;
+  const isApproved = Boolean(input.isSurveyApproved);
+  const taxMode = input.taxMode || "ITEMIZED";
+  const taxType = resolveTaxType(input);
+  let moduleWattageW = 550;
+  let moduleBrand = "Waaree 550W Mono PERC Half-Cut Bifacial (ALMM Approved)";
+  let modulePrice = 11500;
+  if (tier === "Premium Bifacial") {
+    moduleWattageW = 575;
+    moduleBrand = "Jinko 575W Tiger Neo N-Type TOPCon Bifacial Module";
+    modulePrice = 12800;
+  } else if (tier === "Commercial Heavy Duty") {
+    moduleWattageW = 550;
+    moduleBrand = "Waaree 550W High-Efficiency Bifacial Mono PERC";
+    modulePrice = 11200;
+  }
+  const panelCount = Math.ceil(capacityKw * 1e3 / moduleWattageW);
+  const actualCapacityKwp = Number((panelCount * moduleWattageW / 1e3).toFixed(2));
+  const panelTotal = panelCount * modulePrice;
+  let inverterDesc = "";
+  let inverterPrice = 0;
+  let inverterBrand = "";
+  if (capacityKw <= 3) {
+    inverterDesc = "3 kW Single-Phase Grid-Tied Inverter with Dual MPPT and Cloud WiFi";
+    inverterBrand = "Sungrow / Growatt 3K-1P";
+    inverterPrice = 32e3;
+  } else if (capacityKw <= 5) {
+    inverterDesc = "5 kW Single/Three-Phase Dual-MPPT Inverter with WiFi & IP65";
+    inverterBrand = "Sungrow SG5.0RT / Growatt";
+    inverterPrice = 38500;
+  } else if (capacityKw <= 10) {
+    inverterDesc = "10 kW Three-Phase 415V Grid Inverter with Dual MPPT & DC Switch";
+    inverterBrand = "Sungrow SG10RT 3-Phase";
+    inverterPrice = 68e3;
+  } else if (capacityKw <= 25) {
+    inverterDesc = `${capacityKw} kW Three-Phase Dual-MPPT Commercial Inverter with Cloud Monitoring`;
+    inverterBrand = "Sungrow SG20RT / Growatt 25K";
+    inverterPrice = 115e3;
+  } else {
+    inverterDesc = `${capacityKw} kW Commercial Multi-MPPT High Yield Solar Inverter`;
+    inverterBrand = "Growatt MAX / Sungrow Commercial";
+    inverterPrice = Math.round(capacityKw * 4300);
+  }
+  let structureRatePerKw = 2500;
+  let structureDesc = "Hot Dip Galvanized (HDG) 80-micron elevated structure (15\xB0 Tilt)";
+  if (roof === "Metal Sheet") {
+    structureRatePerKw = 1900;
+    structureDesc = "Anodized Aluminum AL6005-T5 Mini-Rail structure with EPDM rubber gaskets";
+  } else if (tier === "Premium Bifacial") {
+    structureRatePerKw = 2800;
+    structureDesc = "Heavy Duty 80-micron HDG elevated mounting structure with SS304 fasteners";
+  }
+  const structureTotal = Math.round(capacityKw * structureRatePerKw);
+  const bosRatePerKw = tier === "Premium Bifacial" ? 4800 : 4500;
+  const bosTotal = Math.round(capacityKw * bosRatePerKw);
+  const bosDesc = "ACDB & DCDB with Type-II SPDs, Polycab Solar DC/AC Cables, Chemical Earthing Pits & ESE Lightning Arrester";
+  const installRatePerKw = tier === "Premium Bifacial" ? 4200 : 4e3;
+  const installTotal = Math.round(capacityKw * installRatePerKw);
+  const installDesc = "Complete civil mounting, cable routing in conduits, safety labeling, DISCOM net-metering liaison and synchronization";
+  const rawItems = [
+    {
+      id: "QI-1",
+      category: "Panels",
+      description: `${panelCount} \xD7 ${moduleBrand}`,
+      makeModel: moduleBrand,
+      hsnSacCode: QUOTATION_CONFIG.DEFAULT_HSN_CODES.PANELS,
+      quantity: panelCount,
+      unit: "Nos",
+      unitPrice: modulePrice,
+      grossAmount: panelTotal,
+      defaultGstRate: QUOTATION_CONFIG.DEFAULT_GST_RATES.PANELS,
+      // 5%
+      warrantyPeriod: "12-Yr Product / 25-Yr Linear Performance"
+    },
+    {
+      id: "QI-2",
+      category: "Inverter",
+      description: inverterDesc,
+      makeModel: inverterBrand,
+      hsnSacCode: QUOTATION_CONFIG.DEFAULT_HSN_CODES.INVERTER,
+      quantity: 1,
+      unit: "Unit",
+      unitPrice: inverterPrice,
+      grossAmount: inverterPrice,
+      defaultGstRate: QUOTATION_CONFIG.DEFAULT_GST_RATES.INVERTER,
+      // 5%
+      warrantyPeriod: "10-Yr Replacement Warranty"
+    },
+    {
+      id: "QI-3",
+      category: "Structure",
+      description: structureDesc,
+      makeModel: "AB Solar HDG Custom Fabricated",
+      hsnSacCode: QUOTATION_CONFIG.DEFAULT_HSN_CODES.STRUCTURE,
+      quantity: capacityKw,
+      unit: "kW",
+      unitPrice: structureRatePerKw,
+      grossAmount: structureTotal,
+      defaultGstRate: QUOTATION_CONFIG.DEFAULT_GST_RATES.STRUCTURE,
+      // 18%
+      warrantyPeriod: "10-Yr Anti-Corrosion Warranty"
+    },
+    {
+      id: "QI-4",
+      category: "Protection & BOS",
+      description: bosDesc,
+      makeModel: "Schneider / L&T / Polycab",
+      hsnSacCode: QUOTATION_CONFIG.DEFAULT_HSN_CODES.BOS,
+      quantity: 1,
+      unit: "Set",
+      unitPrice: bosTotal,
+      grossAmount: bosTotal,
+      defaultGstRate: QUOTATION_CONFIG.DEFAULT_GST_RATES.BOS,
+      // 18%
+      warrantyPeriod: "5-Yr Comprehensive Warranty"
+    },
+    {
+      id: "QI-5",
+      category: "Installation & Commissioning",
+      description: installDesc,
+      makeModel: "AB Energy Solutions Certified EPC Crew",
+      hsnSacCode: QUOTATION_CONFIG.DEFAULT_HSN_CODES.INSTALLATION,
+      quantity: 1,
+      unit: "Turnkey",
+      unitPrice: installTotal,
+      grossAmount: installTotal,
+      defaultGstRate: QUOTATION_CONFIG.DEFAULT_GST_RATES.INSTALLATION,
+      // 18%
+      warrantyPeriod: "5-Yr Comprehensive Workmanship & O&M"
+    }
+  ];
+  if (input.customItems && input.customItems.length > 0) {
+    input.customItems.forEach((ci) => {
+      const match = rawItems.find((r) => r.id === ci.id || r.category === ci.category);
+      if (match) {
+        if (ci.quantity !== void 0 && ci.quantity > 0) match.quantity = ci.quantity;
+        if (ci.unitPrice !== void 0 && ci.unitPrice >= 0) match.unitPrice = ci.unitPrice;
+        if (ci.hsnSacCode) match.hsnSacCode = ci.hsnSacCode;
+        if (ci.gstRate !== void 0 && ci.gstRate >= 0) match.defaultGstRate = ci.gstRate;
+        if (ci.description) match.description = ci.description;
+        match.grossAmount = Math.round(match.quantity * match.unitPrice);
+      }
+    });
+  }
+  const subtotal = rawItems.reduce((sum, item) => sum + item.grossAmount, 0);
+  let rawDiscount = Math.max(0, Number(input.discountAmount) || 0);
+  const maxAllowedDiscount = Math.round(subtotal * (QUOTATION_CONFIG.MAX_DISCOUNT_PERCENT / 100));
+  if (rawDiscount > maxAllowedDiscount) {
+    rawDiscount = maxAllowedDiscount;
+  }
+  const requiresApproval = rawDiscount > QUOTATION_CONFIG.DISCOUNT_APPROVAL_THRESHOLD_INR;
+  const approvalStatus = requiresApproval ? "Pending_Approval" : "Approved";
+  const taxableAmount = Math.max(0, subtotal - rawDiscount);
+  let allocatedDiscountTotal = 0;
+  const items = rawItems.map((raw, idx) => {
+    let lineDiscount = 0;
+    if (subtotal > 0 && rawDiscount > 0) {
+      if (idx === rawItems.length - 1) {
+        lineDiscount = rawDiscount - allocatedDiscountTotal;
+      } else {
+        lineDiscount = Math.round(raw.grossAmount / subtotal * rawDiscount);
+        allocatedDiscountTotal += lineDiscount;
+      }
+    }
+    const lineTaxable = Math.max(0, raw.grossAmount - lineDiscount);
+    const gstRate = taxMode === "COMPOSITE" ? QUOTATION_CONFIG.COMPOSITE_GST_RATE : raw.defaultGstRate;
+    const lineTax = Math.round(lineTaxable * (gstRate / 100));
+    let cgstRate = 0;
+    let sgstRate = 0;
+    let igstRate = 0;
+    let cgstAmount = 0;
+    let sgstAmount = 0;
+    let igstAmount = 0;
+    if (taxType === "IGST") {
+      igstRate = gstRate;
+      igstAmount = lineTax;
+    } else {
+      cgstRate = Number((gstRate / 2).toFixed(2));
+      sgstRate = Number((gstRate / 2).toFixed(2));
+      cgstAmount = Math.round(lineTax / 2);
+      sgstAmount = lineTax - cgstAmount;
+    }
+    return {
+      id: raw.id,
+      category: raw.category,
+      description: raw.description,
+      makeModel: raw.makeModel,
+      hsnSacCode: raw.hsnSacCode,
+      quantity: raw.quantity,
+      unit: raw.unit,
+      unitPrice: raw.unitPrice,
+      grossAmount: raw.grossAmount,
+      discountAmount: lineDiscount,
+      taxableAmount: lineTaxable,
+      gstRate,
+      taxType,
+      cgstRate,
+      sgstRate,
+      igstRate,
+      cgstAmount,
+      sgstAmount,
+      igstAmount,
+      taxAmount: lineTax,
+      totalPrice: lineTaxable + lineTax,
+      warrantyPeriod: raw.warrantyPeriod
+    };
+  });
+  const totalCgstAmount = items.reduce((sum, item) => sum + item.cgstAmount, 0);
+  const totalSgstAmount = items.reduce((sum, item) => sum + item.sgstAmount, 0);
+  const totalIgstAmount = items.reduce((sum, item) => sum + item.igstAmount, 0);
+  const totalGstAmount = totalCgstAmount + totalSgstAmount + totalIgstAmount;
+  const finalContractAmount = taxableAmount + totalGstAmount;
+  const effectiveGstRate = taxableAmount > 0 ? Number((totalGstAmount / taxableAmount * 100).toFixed(2)) : 0;
+  const amountInWords = convertNumberToWords(finalContractAmount);
+  let subsidyEligible = false;
+  let subsidyAmount = 0;
+  let subsidyNotes = "";
+  if (category === "Residential") {
+    subsidyEligible = true;
+    if (capacityKw <= 1) {
+      subsidyAmount = QUOTATION_CONFIG.RESIDENTIAL_SUBSIDY.SLAB_1KW_MAX;
+      subsidyNotes = "PM Surya Ghar: \u20B930,000 for 1 kW residential rooftop";
+    } else if (capacityKw <= 2) {
+      subsidyAmount = QUOTATION_CONFIG.RESIDENTIAL_SUBSIDY.SLAB_2KW_MAX;
+      subsidyNotes = "PM Surya Ghar: \u20B960,000 for 2 kW residential rooftop";
+    } else {
+      subsidyAmount = QUOTATION_CONFIG.RESIDENTIAL_SUBSIDY.SLAB_3KW_AND_ABOVE_MAX;
+      subsidyNotes = "PM Surya Ghar: \u20B978,000 maximum capped central subsidy for \u2265 3 kW";
+    }
+  } else {
+    subsidyEligible = false;
+    subsidyAmount = 0;
+    subsidyNotes = "Commercial / Industrial / Institutional installations are not eligible for PM Surya Ghar residential central subsidy.";
+  }
+  const indicativeNetCustomerCost = Math.max(0, finalContractAmount - subsidyAmount);
+  const annualGenerationKwh = Math.round(actualCapacityKwp * QUOTATION_CONFIG.SPECIFIC_YIELD_KWH_PER_KWP);
+  const annualSavingsInr = Math.round(annualGenerationKwh * tariff);
+  const lifetimeSavings25Yr = Math.round(annualSavingsInr * 25);
+  const simplePaybackYears = annualSavingsInr > 0 ? Number((indicativeNetCustomerCost / annualSavingsInr).toFixed(1)) : 0;
+  const advanceAmount = Math.round(finalContractAmount * 0.4);
+  const dispatchAmount = Math.round(finalContractAmount * 0.5);
+  const handoverAmount = finalContractAmount - advanceAmount - dispatchAmount;
+  return {
+    proposalType: isApproved ? "Final_Technical" : "Preliminary",
+    packageTier: tier,
+    systemCapacityKw: capacityKw,
+    actualCapacityKwp,
+    panelCount,
+    moduleWattageW,
+    inverterDescription: inverterDesc,
+    items,
+    subtotal,
+    discountAmount: rawDiscount,
+    requiresApproval,
+    approvalStatus,
+    taxableAmount,
+    taxMode,
+    taxType,
+    gstRate: effectiveGstRate,
+    cgstAmount: totalCgstAmount,
+    sgstAmount: totalSgstAmount,
+    igstAmount: totalIgstAmount,
+    gstAmount: totalGstAmount,
+    finalContractAmount,
+    amountInWords,
+    subsidyEligible,
+    subsidyAmount,
+    subsidyNotes,
+    indicativeNetCustomerCost,
+    annualGenerationKwh,
+    annualSavingsInr,
+    lifetimeSavings25Yr,
+    simplePaybackYears,
+    tariffAssumedPerKwh: tariff,
+    milestones: {
+      advanceBooking: {
+        percentage: 40,
+        amount: advanceAmount,
+        description: "40% Advance on project booking and detailed engineering approval"
+      },
+      materialDispatch: {
+        percentage: 50,
+        amount: dispatchAmount,
+        description: "50% on material dispatch and arrival at installation site"
+      },
+      finalHandover: {
+        percentage: 10,
+        amount: handoverAmount,
+        description: "10% upon DISCOM net-metering synchronization and commissioning handover"
+      }
+    },
+    terms: [
+      "40% Advance on project booking and detailed engineering approval.",
+      "50% upon material dispatch against warehouse delivery challan.",
+      "10% upon successful DISCOM net-metering synchronization and commissioning sign-off.",
+      "Quotation valid for 14 calendar days from date of issuance.",
+      "Central subsidy under PM Surya Ghar is credited directly by the Government to the customer bank account post DISCOM inspection via DBT.",
+      "Standard 25-Year linear performance warranty on Tier-1 ALMM solar panels."
+    ],
+    warranties: {
+      panels: "12-Year Product Workmanship / 25-Year 80% Linear Power Output",
+      inverter: "10-Year Comprehensive Replacement Warranty",
+      structure: "10-Year Corrosion-Free Galvanization Warranty",
+      workmanship: "5-Year Comprehensive EPC Workmanship & Operations & Maintenance"
+    }
+  };
+}
+
+// server/services/pdf-generator.ts
+import PDFDocument from "pdfkit";
+import fs from "fs";
+import path from "path";
+function formatInr(amount) {
+  if (amount === void 0 || amount === null || isNaN(Number(amount))) return "\u20B90";
+  return "\u20B9" + Math.round(Number(amount)).toLocaleString("en-IN");
+}
+async function generateProposalPdf(data) {
+  const proposalsDir = path.join(process.cwd(), "uploads", "proposals");
+  if (!fs.existsSync(proposalsDir)) {
+    fs.mkdirSync(proposalsDir, { recursive: true });
+  }
+  const sanitizedQuoteNo = data.quotationNumber.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const fileName = `Quotation_${sanitizedQuoteNo}.pdf`;
+  const filePath = path.join(proposalsDir, fileName);
+  const fileUrl = `/uploads/proposals/${fileName}`;
+  return new Promise((resolve, reject) => {
+    try {
+      const brandNavy = "#0A1224";
+      const brandEmerald = "#059669";
+      const slateDark = "#1E293B";
+      const slateLight = "#64748B";
+      const lightBg = "#F8FAFC";
+      const borderLine = "#CBD5E1";
+      const tableHeaderBg = "#0F172A";
+      const pageMargin = 35;
+      const contentWidth = 525;
+      const pageBottomThreshold = 750;
+      const doc = new PDFDocument({
+        size: "A4",
+        margin: pageMargin,
+        bufferPages: true,
+        // Enables two-pass rendering for corporate page numbering
+        info: {
+          Title: `Solar Proposal ${data.quotationNumber}`,
+          Author: "AB Energy Solutions",
+          Subject: `${data.systemCapacityKw} kW Rooftop Solar Proposal`
+        }
+      });
+      const writeStream = fs.createWriteStream(filePath);
+      doc.pipe(writeStream);
+      const renderPage1Header = () => {
+        doc.rect(0, 0, 595.28, 70).fill(brandNavy);
+        doc.fillColor("#FFFFFF").fontSize(16).font("Helvetica-Bold").text("AB ENERGY SOLUTIONS", 35, 18);
+        doc.fontSize(8).font("Helvetica").fillColor("#94A3B8").text("Certified Tier-1 Solar EPC & Clean Energy Infrastructure \u2022 GSTIN: 29AABCS1429B1Z8", 35, 38).text("Indiranagar, Bengaluru, KA 560038 \u2022 support@abenergy.in \u2022 +91 80 4920 1888", 35, 49);
+        doc.fillColor("#10B981").fontSize(11).font("Helvetica-Bold").text("TECHNO-COMMERCIAL PROPOSAL", 330, 18, { align: "right", width: 230 });
+        doc.fontSize(8).font("Helvetica").fillColor("#CBD5E1").text(`REF: ${data.quotationNumber} (Ver ${data.versionNumber})`, 330, 34, { align: "right", width: 230 }).text(`Date: ${new Date(data.createdAt).toLocaleDateString("en-IN")}`, 330, 46, { align: "right", width: 230 });
+      };
+      const renderContinuedPageHeader = (pageNumber) => {
+        doc.rect(0, 0, 595.28, 42).fill(brandNavy);
+        doc.fillColor("#FFFFFF").fontSize(11).font("Helvetica-Bold").text("AB ENERGY SOLUTIONS", 35, 14);
+        doc.fillColor("#94A3B8").fontSize(8).font("Helvetica").text(`Proposal Ref: ${data.quotationNumber}  \u2022  Client: ${data.leadName}`, 180, 15);
+        doc.fillColor("#10B981").fontSize(8).font("Helvetica-Bold").text(`Page ${pageNumber} (Continued)`, 400, 15, { align: "right", width: 160 });
+      };
+      const renderTableHeader = (y, isContinued = false) => {
+        if (isContinued) {
+          doc.fillColor(brandNavy).fontSize(8.5).font("Helvetica-Bold").text("EQUIPMENT BILL OF MATERIALS (BOM) & STATUTORY GST BREAKDOWN \u2014 CONTINUED", 35, y);
+          y += 14;
+        }
+        const h = 20;
+        doc.rect(35, y, contentWidth, h).fill(tableHeaderBg);
+        doc.fillColor("#FFFFFF").fontSize(7.5).font("Helvetica-Bold");
+        doc.text("#", 35, y + 6, { width: 18, align: "center" });
+        doc.text("MATERIAL / SCOPE OF WORK", 55, y + 6, { width: 170, align: "left" });
+        doc.text("HSN/SAC", 227, y + 6, { width: 42, align: "center" });
+        doc.text("QTY", 271, y + 6, { width: 38, align: "center" });
+        doc.text("RATE (\u20B9)", 311, y + 6, { width: 49, align: "right" });
+        doc.text("TAXABLE (\u20B9)", 362, y + 6, { width: 53, align: "right" });
+        doc.text("GST %", 417, y + 6, { width: 32, align: "center" });
+        doc.text("TAX (\u20B9)", 451, y + 6, { width: 48, align: "right" });
+        doc.text("TOTAL (\u20B9)", 501, y + 6, { width: 59, align: "right" });
+        return y + h;
+      };
+      renderPage1Header();
+      let currentY = 80;
+      doc.rect(35, currentY, contentWidth, 54).fillAndStroke(lightBg, borderLine);
+      doc.fillColor(slateDark).fontSize(8.5).font("Helvetica-Bold").text("CLIENT & PROJECT DETAILS", 45, currentY + 6);
+      doc.font("Helvetica").fontSize(8).fillColor(slateDark).text(`Client Name: ${data.leadName}`, 45, currentY + 19).text(`Contact Phone: ${data.customerPhone}`, 45, currentY + 30).text(`Site Location: ${data.customerAddress || "Bengaluru, Karnataka"}`, 45, currentY + 41, { width: 250, ellipsis: true });
+      doc.font("Helvetica-Bold").fontSize(8.5).text("TECHNICAL SIZING SPECIFICATIONS", 320, currentY + 6);
+      doc.font("Helvetica").fontSize(8).text(`System Capacity: ${data.systemCapacityKw} kW DC (${data.actualCapacityKwp} kWp)`, 320, currentY + 19).text(`Package Tier: ${data.packageTier}`, 320, currentY + 30).text(`Valid Until: ${data.validUntil} (14 Days)  \u2022  Sales: ${data.salespersonName}`, 320, currentY + 41);
+      currentY += 64;
+      doc.fillColor(brandNavy).fontSize(9.5).font("Helvetica-Bold").text("EQUIPMENT BILL OF MATERIALS (BOM) & STATUTORY GST BREAKDOWN", 35, currentY);
+      currentY += 14;
+      currentY = renderTableHeader(currentY, false);
+      let currentPageIndex = 1;
+      data.items.forEach((item, index) => {
+        const taxable = item.taxableAmount !== void 0 ? item.taxableAmount : item.quantity * item.unitPrice;
+        const gstRate = item.gstRate !== void 0 ? item.gstRate : data.gstRate;
+        const tax = item.taxAmount !== void 0 ? item.taxAmount : Math.round(taxable * (gstRate / 100));
+        const lineTotal = item.totalPrice !== void 0 ? item.totalPrice : taxable + tax;
+        const subText = `Make: ${item.makeModel}  \u2022  ${item.warrantyPeriod}`;
+        doc.font("Helvetica-Bold").fontSize(7.5);
+        const descH = doc.heightOfString(item.description, { width: 170 });
+        doc.font("Helvetica").fontSize(6.5);
+        const subH = doc.heightOfString(subText, { width: 170 });
+        const rowHeight = Math.max(26, Math.ceil(descH + subH + 10));
+        if (currentY + rowHeight > pageBottomThreshold) {
+          doc.rect(35, currentY, contentWidth, 14).fillAndStroke("#F1F5F9", borderLine);
+          doc.fillColor(slateLight).fontSize(7).font("Helvetica-Oblique").text("(BOM continued on next page \u2192)", 45, currentY + 3, { align: "right", width: 505 });
+          doc.addPage();
+          currentPageIndex++;
+          renderContinuedPageHeader(currentPageIndex);
+          currentY = 56;
+          currentY = renderTableHeader(currentY, true);
+        }
+        const isEven = index % 2 === 0;
+        doc.rect(35, currentY, contentWidth, rowHeight).fill(isEven ? "#FFFFFF" : "#F8FAFC");
+        doc.strokeColor(borderLine).lineWidth(0.5).rect(35, currentY, contentWidth, rowHeight).stroke();
+        doc.fillColor(slateDark).fontSize(7.5).font("Helvetica");
+        doc.text(`${index + 1}`, 35, currentY + 6, { width: 18, align: "center" });
+        doc.font("Helvetica-Bold").fontSize(7.5).fillColor(slateDark).text(item.description, 55, currentY + 4, { width: 170 });
+        doc.font("Helvetica").fontSize(6.5).fillColor(slateLight).text(subText, 55, currentY + 4 + descH + 1, { width: 170 });
+        const midY = currentY + 6;
+        doc.fontSize(7.5).fillColor(slateDark);
+        doc.text(item.hsnSacCode || "8541", 227, midY, { width: 42, align: "center" });
+        doc.text(`${item.quantity} ${item.unit}`, 271, midY, { width: 38, align: "center" });
+        doc.text(formatInr(item.unitPrice), 311, midY, { width: 49, align: "right" });
+        doc.text(formatInr(taxable), 362, midY, { width: 53, align: "right" });
+        doc.font("Helvetica-Bold").text(`${gstRate}%`, 417, midY, { width: 32, align: "center" });
+        doc.font("Helvetica").text(formatInr(tax), 451, midY, { width: 48, align: "right" });
+        doc.font("Helvetica-Bold").text(formatInr(lineTotal), 501, midY, { width: 59, align: "right" });
+        currentY += rowHeight;
+      });
+      const summaryRequiredHeight = 265;
+      if (currentY + summaryRequiredHeight > pageBottomThreshold) {
+        doc.rect(35, currentY, contentWidth, 14).fillAndStroke("#F1F5F9", borderLine);
+        doc.fillColor(slateLight).fontSize(7).font("Helvetica-Oblique").text("(Financial Summary and Terms continue on next page \u2192)", 45, currentY + 3, { align: "right", width: 505 });
+        doc.addPage();
+        currentPageIndex++;
+        renderContinuedPageHeader(currentPageIndex);
+        currentY = 56;
+      } else {
+        currentY += 6;
+      }
+      const words = data.amountInWords || convertNumberToWords(data.finalContractAmount);
+      doc.rect(35, currentY, contentWidth, 18).fillAndStroke("#F1F5F9", borderLine);
+      doc.fillColor(slateDark).fontSize(7.5).font("Helvetica-Bold").text("Amount in Words: ", 43, currentY + 5, { continued: true });
+      doc.font("Helvetica").fillColor(brandNavy).text(words);
+      currentY += 24;
+      const boxHeight = 118;
+      doc.rect(35, currentY, 245, boxHeight).fillAndStroke(lightBg, borderLine);
+      doc.fillColor(brandEmerald).fontSize(8.5).font("Helvetica-Bold").text("ESTIMATED GENERATION & SOLAR PAYBACK", 43, currentY + 7);
+      doc.fillColor(slateDark).fontSize(7.5).font("Helvetica").text(`Estimated Annual Yield: ~${data.annualGenerationKwh.toLocaleString("en-IN")} kWh / yr`, 43, currentY + 22).text(`Annual Grid Bill Savings: ~\u20B9${data.annualSavingsInr.toLocaleString("en-IN")} / yr`, 43, currentY + 36).text(`25-Year Cumulative Savings: ~\u20B9${data.lifetimeSavings25Yr.toLocaleString("en-IN")}`, 43, currentY + 50).text(`Estimated Simple Payback: ~${data.simplePaybackYears} Years`, 43, currentY + 64);
+      doc.fillColor(slateLight).fontSize(6.5).text("*Calculated at 1,450 kWh/kWp specific yield & \u20B98.20/kWh average grid tariff.", 43, currentY + 82, { width: 230 }).text("*Actual solar generation depends on local irradiance and rooftop tilt angle.", 43, currentY + 93, { width: 230 });
+      doc.rect(290, currentY, 270, boxHeight).fillAndStroke("#FFFFFF", borderLine);
+      const isIgst = data.taxType === "IGST" || data.igstAmount !== void 0 && data.igstAmount > 0;
+      const cgst = data.cgstAmount !== void 0 ? data.cgstAmount : Math.round(data.gstAmount / 2);
+      const sgst = data.sgstAmount !== void 0 ? data.sgstAmount : data.gstAmount - cgst;
+      const igst = data.igstAmount !== void 0 ? data.igstAmount : data.gstAmount;
+      let sumY = currentY + 6;
+      doc.fillColor(slateDark).fontSize(7.5).font("Helvetica");
+      doc.text("Gross Equipment Subtotal:", 298, sumY);
+      doc.text(formatInr(data.subtotal), 455, sumY, { width: 100, align: "right" });
+      if (data.discountAmount > 0) {
+        sumY += 12;
+        doc.text("Commercial Discount:", 298, sumY);
+        doc.fillColor(brandEmerald).text(`- ${formatInr(data.discountAmount)}`, 455, sumY, { width: 100, align: "right" });
+        doc.fillColor(slateDark);
+      }
+      sumY += 12;
+      doc.font("Helvetica-Bold").text("Net Taxable Base Value:", 298, sumY);
+      doc.text(formatInr(data.taxableAmount), 455, sumY, { width: 100, align: "right" });
+      sumY += 12;
+      doc.font("Helvetica");
+      if (isIgst) {
+        doc.text("Integrated GST (IGST):", 298, sumY);
+        doc.text(formatInr(igst), 455, sumY, { width: 100, align: "right" });
+      } else {
+        doc.text("Central GST (CGST):", 298, sumY);
+        doc.text(formatInr(cgst), 455, sumY, { width: 100, align: "right" });
+        sumY += 11;
+        doc.text("State GST (SGST):", 298, sumY);
+        doc.text(formatInr(sgst), 455, sumY, { width: 100, align: "right" });
+      }
+      sumY += 14;
+      doc.rect(290, sumY - 2, 270, 20).fill("#0F172A");
+      doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#FFFFFF");
+      doc.text("FINAL CONTRACT VALUE:", 298, sumY + 3);
+      doc.text(formatInr(data.finalContractAmount), 445, sumY + 3, { width: 110, align: "right" });
+      if (data.subsidyEligible && data.subsidyAmount > 0) {
+        sumY += 24;
+        doc.font("Helvetica").fontSize(7.5).fillColor(brandEmerald);
+        doc.text("PM Surya Ghar Subsidy (Direct Benefit):", 298, sumY);
+        doc.text(`- ${formatInr(data.subsidyAmount)}`, 445, sumY, { width: 110, align: "right" });
+        sumY += 11;
+        doc.font("Helvetica-Bold").fontSize(7.5).fillColor(brandNavy);
+        doc.text("Indicative Net Out-of-Pocket:", 298, sumY);
+        doc.text(formatInr(data.indicativeNetCustomerCost), 445, sumY, { width: 110, align: "right" });
+      }
+      currentY += boxHeight + 10;
+      doc.fillColor(brandNavy).fontSize(8.5).font("Helvetica-Bold").text("MILESTONE PAYMENT SCHEDULE & TERMS", 35, currentY);
+      currentY += 12;
+      const termsToPrint = data.terms && data.terms.length > 0 ? data.terms.slice(0, 4) : [
+        "40% Advance on signing contract and engineering layout signoff.",
+        "40% Upon warehouse material dispatch & physical site delivery.",
+        "20% Upon successful system testing, commissioning & net-metering synchronization.",
+        "Quotation validity is 14 days from date of issue."
+      ];
+      termsToPrint.forEach((term) => {
+        doc.fillColor(slateDark).fontSize(7).font("Helvetica").text(`\u2022  ${term}`, 40, currentY, { width: 515 });
+        currentY += 10;
+      });
+      currentY += 4;
+      const sigHeight = 44;
+      doc.rect(35, currentY, 250, sigHeight).stroke(borderLine);
+      doc.fillColor(slateLight).fontSize(6.5).text("For AB Energy Solutions (Authorized Signatory):", 42, currentY + 5);
+      doc.fillColor(slateDark).fontSize(7.5).font("Helvetica-Bold").text(data.salespersonName || "Authorized Signatory", 42, currentY + 28);
+      doc.rect(310, currentY, 250, sigHeight).stroke(borderLine);
+      doc.fillColor(slateLight).fontSize(6.5).text("Client Acceptance Signature:", 318, currentY + 5);
+      doc.fillColor(slateDark).fontSize(7).text("I accept the above proposal terms & BOM scope.", 318, currentY + 28);
+      const totalPages = doc.bufferedPageRange().count;
+      for (let i = 0; i < totalPages; i++) {
+        doc.switchToPage(i);
+        doc.strokeColor(borderLine).lineWidth(0.5).moveTo(35, 805).lineTo(560, 805).stroke();
+        doc.font("Helvetica").fontSize(6.5).fillColor(slateLight);
+        doc.text(
+          "AB Energy Solutions \u2022 CIN: U40106KA2021PTC148921 \u2022 GSTIN: 29AABCS1429B1Z8 \u2022 Indiranagar, Bengaluru, KA 560038 \u2022 support@abenergy.in",
+          35,
+          812,
+          { width: 420 }
+        );
+        doc.font("Helvetica-Bold").fontSize(6.5).fillColor(slateDark);
+        doc.text(
+          `Page ${i + 1} of ${totalPages}`,
+          460,
+          812,
+          { width: 100, align: "right" }
+        );
+      }
+      doc.end();
+      writeStream.on("finish", () => {
+        resolve({ filePath, fileUrl });
+      });
+      writeStream.on("error", (err) => {
+        reject(err);
+      });
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+// server/controllers/quotations.controller.ts
+function formatQuotation(q) {
+  if (!q) return null;
+  return {
+    ...q,
+    quotationNumber: q.quotation_number,
+    leadId: q.lead_id,
+    leadName: q.lead_name,
+    customerPhone: q.customer_phone,
+    customerAddress: q.customer_address,
+    systemCapacityKw: Number(q.system_capacity_kw) || 0,
+    currentVersion: Number(q.current_version) || 1,
+    versions: typeof q.versions === "string" ? JSON.parse(q.versions) : q.versions || [],
+    status: q.status,
+    sentDate: q.sent_date,
+    validUntil: q.valid_until,
+    salespersonId: q.salesperson_id,
+    salespersonName: q.salesperson_name,
+    totalAmount: Number(q.total_amount) || 0,
+    proposalType: q.proposal_type || "Final_Technical",
+    packageTier: q.package_tier || "Standard",
+    approvalStatus: q.approval_status || "Approved",
+    discountAmount: Number(q.discount_amount) || 0,
+    discountApprovedBy: q.discount_approved_by,
+    subsidyAmount: Number(q.subsidy_amount) || 0,
+    taxableAmount: Number(q.taxable_amount) || 0,
+    gstRate: Number(q.gst_rate) || 0,
+    gstAmount: Number(q.gst_amount) || 0,
+    taxMode: q.tax_mode || "ITEMIZED",
+    totalCgst: Number(q.total_cgst) || 0,
+    totalSgst: Number(q.total_sgst) || 0,
+    totalIgst: Number(q.total_igst) || 0,
+    amountInWords: q.amount_in_words || "",
+    surveyId: q.survey_id,
+    pdfUrl: q.pdf_url,
+    convertedToProjectId: q.converted_to_project_id,
+    createdAt: q.created_at
+  };
+}
+var calculateQuotationPreview = async (req, res) => {
+  try {
+    const input = req.body;
+    const calc = calculateQuotation(input);
+    return res.json({ success: true, calculation: calc });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+var getQuotations = async (req, res) => {
+  try {
+    const user = req.user;
+    let query = "SELECT * FROM quotations ORDER BY created_at DESC";
+    let params = [];
+    if (user?.role === "Customer") {
+      const custId = user.customerId || "";
+      query = `SELECT q.* FROM quotations q 
+               LEFT JOIN customers c ON (c.converted_from_lead_id = q.lead_id OR c.phone = q.customer_phone)
+               WHERE c.id = ? OR q.customer_phone = ?
+               ORDER BY q.created_at DESC`;
+      params = [custId, user?.phone || ""];
+    }
+    const [rows] = await pool.query(query, params);
+    const parsed = rows.map((q) => formatQuotation(q));
+    res.json({ success: true, quotations: parsed });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var getQuotationById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const [rows] = await pool.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [id]);
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ success: false, error: "Quotation not found" });
+    }
+    res.json({ success: true, quotation: formatQuotation(rows[0]) });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+async function createQuotationDraftInternal(connOrPool, options) {
+  const { surveyId, leadId, user, packageTier = "Premium Bifacial", discountAmount = 0, customItems } = options;
+  const [existingBySurvey] = await connOrPool.query(
+    'SELECT * FROM quotations WHERE survey_id = ? AND status != "Declined" ORDER BY created_at DESC LIMIT 1',
+    [surveyId]
+  );
+  if (existingBySurvey && existingBySurvey.length > 0) {
+    return { quotation: formatQuotation(existingBySurvey[0]), created: false };
+  }
+  if (leadId) {
+    const [existingByLead] = await connOrPool.query(
+      'SELECT * FROM quotations WHERE lead_id = ? AND status != "Declined" ORDER BY created_at DESC LIMIT 1',
+      [leadId]
+    );
+    if (existingByLead && existingByLead.length > 0) {
+      if (!existingByLead[0].survey_id) {
+        await connOrPool.query("UPDATE quotations SET survey_id = ? WHERE id = ?", [surveyId, existingByLead[0].id]);
+        existingByLead[0].survey_id = surveyId;
+      }
+      return { quotation: formatQuotation(existingByLead[0]), created: false };
+    }
+  }
+  const [surveys] = await connOrPool.query("SELECT * FROM site_surveys WHERE id = ? LIMIT 1", [surveyId]);
+  if (!surveys || surveys.length === 0) {
+    throw new Error(`Site survey ${surveyId} not found`);
+  }
+  const survey = surveys[0];
+  let lead = null;
+  const effectiveLeadId = leadId || survey.lead_id;
+  if (effectiveLeadId) {
+    const [leads] = await connOrPool.query("SELECT * FROM leads WHERE id = ? LIMIT 1", [effectiveLeadId]);
+    if (leads && leads.length > 0) {
+      lead = leads[0];
+    }
+  }
+  const capacityKw = Number(survey.recommended_kw) || Number(lead?.recommended_kw) || 5;
+  const roofType = survey.roof_type || lead?.roof_type || "RCC Flat";
+  const customerName = survey.customer_name || lead?.name || "Solar Customer";
+  const customerPhone = survey.phone || lead?.phone || "";
+  const customerAddress = survey.address || lead?.address || lead?.city || "Bengaluru, Karnataka";
+  const customerCategory = lead?.monthly_bill && Number(lead.monthly_bill) > 25e3 ? "Commercial" : "Residential";
+  const calc = calculateQuotation({
+    leadId: effectiveLeadId,
+    leadName: customerName,
+    customerPhone,
+    customerAddress,
+    customerCategory,
+    systemCapacityKw: capacityKw,
+    packageTier,
+    discountAmount,
+    surveyId,
+    isSurveyApproved: true,
+    roofType,
+    customItems
+  });
+  const [allIds] = await connOrPool.query("SELECT id FROM quotations WHERE id LIKE 'QT-2026-%'");
+  let maxNum = 20;
+  for (const row of allIds) {
+    const match = row.id.match(/QT-2026-(\d+)/);
+    if (match) {
+      const n = parseInt(match[1], 10);
+      if (n > maxNum) maxNum = n;
+    }
+  }
+  const finalId = `QT-2026-${String(maxNum + 1).padStart(5, "0")}`;
+  const versionNumber = `${finalId}-V1`;
+  const v1 = {
+    version: 1,
+    quotationNumber: versionNumber,
+    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+    items: calc.items,
+    subtotal: calc.subtotal,
+    subsidyDeduction: calc.subsidyAmount,
+    discount: calc.discountAmount,
+    taxableAmount: calc.taxableAmount,
+    gstRate: calc.gstRate,
+    gstAmount: calc.gstAmount,
+    cgstAmount: calc.cgstAmount,
+    sgstAmount: calc.sgstAmount,
+    igstAmount: calc.igstAmount,
+    taxType: calc.taxType,
+    netTotal: calc.finalContractAmount,
+    amountInWords: calc.amountInWords,
+    terms: calc.terms,
+    notes: `Techno-Commercial Proposal based on approved Technical Site Survey ${surveyId}.`
+  };
+  const validUntil = new Date(Date.now() + 864e5 * 14).toISOString().split("T")[0];
+  const salespersonId = user?.employeeId || lead?.assigned_to_id || "EMP-06";
+  const salespersonName = user?.name || lead?.assigned_to_name || "Vikram Mehta (Sales)";
+  await connOrPool.query(
+    `INSERT INTO quotations (
+      id, quotation_number, lead_id, lead_name, customer_phone, customer_address, 
+      system_capacity_kw, current_version, versions, status, sent_date, valid_until, 
+      salesperson_id, salesperson_name, total_amount, proposal_type, package_tier, 
+      subtotal, discount_amount, subsidy_amount, taxable_amount, gst_rate, gst_amount, 
+      net_total, approval_status, survey_id, tax_mode, total_cgst, total_sgst, total_igst, 
+      amount_in_words, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      finalId,
+      versionNumber,
+      effectiveLeadId || null,
+      customerName,
+      customerPhone,
+      customerAddress,
+      calc.systemCapacityKw,
+      1,
+      JSON.stringify([v1]),
+      "Draft",
+      null,
+      validUntil,
+      salespersonId,
+      salespersonName,
+      calc.finalContractAmount,
+      "Final_Technical",
+      calc.packageTier,
+      calc.subtotal,
+      calc.discountAmount,
+      calc.subsidyAmount,
+      calc.taxableAmount,
+      calc.gstRate,
+      calc.gstAmount,
+      calc.finalContractAmount,
+      calc.approvalStatus,
+      surveyId,
+      calc.taxMode,
+      calc.cgstAmount,
+      calc.sgstAmount,
+      calc.igstAmount,
+      calc.amountInWords,
+      (/* @__PURE__ */ new Date()).toISOString()
+    ]
+  );
+  await connOrPool.query("UPDATE site_surveys SET quotation_id = ? WHERE id = ?", [finalId, surveyId]);
+  let pdfUrl = `/uploads/proposals/Quotation_${versionNumber.replace(/[^a-zA-Z0-9_-]/g, "_")}.pdf`;
+  try {
+    const pdfData = {
+      quotationNumber: versionNumber,
+      versionNumber: 1,
+      createdAt: v1.createdAt,
+      validUntil,
+      leadName: customerName,
+      customerPhone,
+      customerAddress,
+      systemCapacityKw: calc.systemCapacityKw,
+      actualCapacityKwp: calc.actualCapacityKwp,
+      packageTier: calc.packageTier,
+      proposalType: "Final_Technical",
+      salespersonName,
+      taxMode: calc.taxMode,
+      taxType: calc.taxType,
+      items: calc.items,
+      subtotal: calc.subtotal,
+      discountAmount: calc.discountAmount,
+      taxableAmount: calc.taxableAmount,
+      gstRate: calc.gstRate,
+      cgstAmount: calc.cgstAmount,
+      sgstAmount: calc.sgstAmount,
+      igstAmount: calc.igstAmount,
+      gstAmount: calc.gstAmount,
+      finalContractAmount: calc.finalContractAmount,
+      amountInWords: calc.amountInWords,
+      subsidyEligible: calc.subsidyEligible,
+      subsidyAmount: calc.subsidyAmount,
+      indicativeNetCustomerCost: calc.indicativeNetCustomerCost,
+      annualGenerationKwh: calc.annualGenerationKwh,
+      annualSavingsInr: calc.annualSavingsInr,
+      lifetimeSavings25Yr: calc.lifetimeSavings25Yr,
+      simplePaybackYears: calc.simplePaybackYears,
+      terms: calc.terms
+    };
+    const resPdf = await generateProposalPdf(pdfData);
+    pdfUrl = resPdf.fileUrl;
+    await connOrPool.query("UPDATE quotations SET pdf_url = ? WHERE id = ?", [pdfUrl, finalId]);
+  } catch (pdfErr) {
+    console.warn("PDF generation in background:", pdfErr);
+  }
+  const [createdRows] = await connOrPool.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [finalId]);
+  return { quotation: formatQuotation(createdRows[0]), created: true };
+}
+var createQuotation = async (req, res) => {
+  try {
+    const body = req.body;
+    const user = req.user;
+    if (body.surveyId) {
+      const result = await createQuotationDraftInternal(pool, {
+        surveyId: body.surveyId,
+        leadId: body.leadId,
+        user,
+        packageTier: body.packageTier,
+        discountAmount: body.discountAmount,
+        customItems: body.customItems
+      });
+      return res.json({ success: true, quotation: result.quotation, alreadyExisted: !result.created });
+    }
+    let isSurveyApproved = false;
+    let surveyRef = body.surveyId;
+    if (body.leadId) {
+      const [surveys] = await pool.query(
+        "SELECT id, status, recommended_kw FROM site_surveys WHERE lead_id = ? ORDER BY created_at DESC LIMIT 1",
+        [body.leadId]
+      );
+      if (surveys && surveys.length > 0) {
+        if (surveys[0].status === "Approved" || surveys[0].status === "Completed") {
+          isSurveyApproved = true;
+          surveyRef = surveys[0].id;
+        }
+      }
+    }
+    const calc = calculateQuotation({
+      leadId: body.leadId,
+      leadName: body.leadName,
+      customerPhone: body.customerPhone,
+      customerAddress: body.customerAddress,
+      customerCategory: body.customerCategory,
+      systemCapacityKw: body.systemCapacityKw || 5,
+      packageTier: body.packageTier || "Premium Bifacial",
+      discountAmount: body.discountAmount || 0,
+      surveyId: surveyRef,
+      isSurveyApproved,
+      roofType: body.roofType,
+      customItems: body.customItems,
+      taxMode: body.taxMode,
+      taxType: body.taxType
+    });
+    const [allIds] = await pool.query("SELECT id FROM quotations WHERE id LIKE 'QT-2026-%'");
+    let maxNum = 20;
+    for (const row of allIds) {
+      const match = row.id.match(/QT-2026-(\d+)/);
+      if (match) {
+        const n = parseInt(match[1], 10);
+        if (n > maxNum) maxNum = n;
+      }
+    }
+    const finalId = `QT-2026-${String(maxNum + 1).padStart(5, "0")}`;
+    const versionNumber = `${finalId}-V1`;
+    const v1 = {
+      version: 1,
+      quotationNumber: versionNumber,
+      createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+      items: calc.items,
+      subtotal: calc.subtotal,
+      subsidyDeduction: calc.subsidyAmount,
+      discount: calc.discountAmount,
+      taxableAmount: calc.taxableAmount,
+      gstRate: calc.gstRate,
+      gstAmount: calc.gstAmount,
+      cgstAmount: calc.cgstAmount,
+      sgstAmount: calc.sgstAmount,
+      igstAmount: calc.igstAmount,
+      taxType: calc.taxType,
+      netTotal: calc.finalContractAmount,
+      amountInWords: calc.amountInWords,
+      terms: calc.terms,
+      notes: isSurveyApproved ? `Techno-Commercial Proposal based on approved Technical Site Survey ${surveyRef}.` : `Preliminary indicative solar estimate. Final capacity subject to on-site roof audit.`
+    };
+    const validUntil = new Date(Date.now() + 864e5 * 14).toISOString().split("T")[0];
+    const salespersonId = body.salespersonId || user?.employeeId || "EMP-06";
+    const salespersonName = body.salespersonName || user?.name || "Vikram Mehta (Sales)";
+    await pool.query(
+      `INSERT INTO quotations (
+        id, quotation_number, lead_id, lead_name, customer_phone, customer_address, 
+        system_capacity_kw, current_version, versions, status, sent_date, valid_until, 
+        salesperson_id, salesperson_name, total_amount, proposal_type, package_tier, 
+        subtotal, discount_amount, subsidy_amount, taxable_amount, gst_rate, gst_amount, 
+        net_total, approval_status, survey_id, tax_mode, total_cgst, total_sgst, total_igst,
+        amount_in_words, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        finalId,
+        versionNumber,
+        body.leadId || null,
+        body.leadName || "Solar Client",
+        body.customerPhone || "",
+        body.customerAddress || "",
+        calc.systemCapacityKw,
+        1,
+        JSON.stringify([v1]),
+        "Draft",
+        null,
+        validUntil,
+        salespersonId,
+        salespersonName,
+        calc.finalContractAmount,
+        calc.proposalType,
+        calc.packageTier,
+        calc.subtotal,
+        calc.discountAmount,
+        calc.subsidyAmount,
+        calc.taxableAmount,
+        calc.gstRate,
+        calc.gstAmount,
+        calc.finalContractAmount,
+        calc.approvalStatus,
+        surveyRef || null,
+        calc.taxMode,
+        calc.cgstAmount,
+        calc.sgstAmount,
+        calc.igstAmount,
+        calc.amountInWords,
+        (/* @__PURE__ */ new Date()).toISOString()
+      ]
+    );
+    if (body.leadId) {
+      await pool.query("UPDATE leads SET quotation_id = ? WHERE id = ?", [finalId, body.leadId]);
+    }
+    if (surveyRef) {
+      await pool.query("UPDATE site_surveys SET quotation_id = ? WHERE id = ?", [finalId, surveyRef]);
+    }
+    let pdfUrl = `/uploads/proposals/Quotation_${versionNumber.replace(/[^a-zA-Z0-9_-]/g, "_")}.pdf`;
+    try {
+      const pdfData = {
+        quotationNumber: versionNumber,
+        versionNumber: 1,
+        createdAt: v1.createdAt,
+        validUntil,
+        leadName: body.leadName || "Solar Client",
+        customerPhone: body.customerPhone || "",
+        customerAddress: body.customerAddress || "Bengaluru, Karnataka",
+        systemCapacityKw: calc.systemCapacityKw,
+        actualCapacityKwp: calc.actualCapacityKwp,
+        packageTier: calc.packageTier,
+        proposalType: calc.proposalType,
+        salespersonName,
+        taxMode: calc.taxMode,
+        taxType: calc.taxType,
+        items: calc.items,
+        subtotal: calc.subtotal,
+        discountAmount: calc.discountAmount,
+        taxableAmount: calc.taxableAmount,
+        gstRate: calc.gstRate,
+        cgstAmount: calc.cgstAmount,
+        sgstAmount: calc.sgstAmount,
+        igstAmount: calc.igstAmount,
+        gstAmount: calc.gstAmount,
+        finalContractAmount: calc.finalContractAmount,
+        amountInWords: calc.amountInWords,
+        subsidyEligible: calc.subsidyEligible,
+        subsidyAmount: calc.subsidyAmount,
+        indicativeNetCustomerCost: calc.indicativeNetCustomerCost,
+        annualGenerationKwh: calc.annualGenerationKwh,
+        annualSavingsInr: calc.annualSavingsInr,
+        lifetimeSavings25Yr: calc.lifetimeSavings25Yr,
+        simplePaybackYears: calc.simplePaybackYears,
+        terms: calc.terms
+      };
+      const resPdf = await generateProposalPdf(pdfData);
+      pdfUrl = resPdf.fileUrl;
+      await pool.query("UPDATE quotations SET pdf_url = ? WHERE id = ?", [pdfUrl, finalId]);
+    } catch (pdfErr) {
+      console.warn("Note: Background PDF generation queued:", pdfErr);
+    }
+    const [createdRows] = await pool.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [finalId]);
+    res.json({ success: true, quotation: formatQuotation(createdRows[0]) });
+  } catch (err) {
+    console.error("Error creating quotation:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var createQuotationRevision = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const body = req.body;
+    const user = req.user;
+    const [rows] = await pool.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [id]);
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ success: false, error: "Quotation not found" });
+    }
+    const existing = rows[0];
+    const versions = typeof existing.versions === "string" ? JSON.parse(existing.versions) : existing.versions || [];
+    const nextVerNum = (existing.current_version || versions.length) + 1;
+    const nextVerCode = `${id}-V${nextVerNum}`;
+    const calc = calculateQuotation({
+      leadId: existing.lead_id,
+      leadName: existing.lead_name,
+      customerPhone: existing.customer_phone,
+      customerAddress: existing.customer_address,
+      systemCapacityKw: body.systemCapacityKw || existing.system_capacity_kw,
+      packageTier: body.packageTier || existing.package_tier || "Premium Bifacial",
+      discountAmount: body.discountAmount !== void 0 ? body.discountAmount : existing.discount_amount,
+      surveyId: existing.survey_id,
+      isSurveyApproved: existing.proposal_type === "Final_Technical",
+      customItems: body.customItems,
+      taxMode: body.taxMode || existing.tax_mode,
+      taxType: body.taxType
+    });
+    const newVersion = {
+      version: nextVerNum,
+      quotationNumber: nextVerCode,
+      createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+      items: calc.items,
+      subtotal: calc.subtotal,
+      subsidyDeduction: calc.subsidyAmount,
+      discount: calc.discountAmount,
+      taxableAmount: calc.taxableAmount,
+      gstRate: calc.gstRate,
+      gstAmount: calc.gstAmount,
+      cgstAmount: calc.cgstAmount,
+      sgstAmount: calc.sgstAmount,
+      igstAmount: calc.igstAmount,
+      taxType: calc.taxType,
+      netTotal: calc.finalContractAmount,
+      amountInWords: calc.amountInWords,
+      terms: calc.terms,
+      notes: body.notes || `Revision V${nextVerNum} created by ${user?.name || "Sales Rep"}.`
+    };
+    versions.push(newVersion);
+    let pdfUrl = existing.pdf_url;
+    try {
+      const pdfData = {
+        quotationNumber: nextVerCode,
+        versionNumber: nextVerNum,
+        createdAt: newVersion.createdAt,
+        validUntil: existing.valid_until,
+        leadName: existing.lead_name,
+        customerPhone: existing.customer_phone,
+        customerAddress: existing.customer_address,
+        systemCapacityKw: calc.systemCapacityKw,
+        actualCapacityKwp: calc.actualCapacityKwp,
+        packageTier: calc.packageTier,
+        proposalType: calc.proposalType,
+        salespersonName: user?.name || existing.salesperson_name,
+        taxMode: calc.taxMode,
+        taxType: calc.taxType,
+        items: calc.items,
+        subtotal: calc.subtotal,
+        discountAmount: calc.discountAmount,
+        taxableAmount: calc.taxableAmount,
+        gstRate: calc.gstRate,
+        cgstAmount: calc.cgstAmount,
+        sgstAmount: calc.sgstAmount,
+        igstAmount: calc.igstAmount,
+        gstAmount: calc.gstAmount,
+        finalContractAmount: calc.finalContractAmount,
+        amountInWords: calc.amountInWords,
+        subsidyEligible: calc.subsidyEligible,
+        subsidyAmount: calc.subsidyAmount,
+        indicativeNetCustomerCost: calc.indicativeNetCustomerCost,
+        annualGenerationKwh: calc.annualGenerationKwh,
+        annualSavingsInr: calc.annualSavingsInr,
+        lifetimeSavings25Yr: calc.lifetimeSavings25Yr,
+        simplePaybackYears: calc.simplePaybackYears,
+        terms: calc.terms
+      };
+      const resPdf = await generateProposalPdf(pdfData);
+      pdfUrl = resPdf.fileUrl;
+    } catch (e) {
+      console.warn("PDF revision generation error:", e);
+    }
+    await pool.query(
+      `UPDATE quotations SET 
+        quotation_number = ?, current_version = ?, versions = ?, total_amount = ?,
+        system_capacity_kw = ?, package_tier = ?, subtotal = ?, discount_amount = ?,
+        subsidy_amount = ?, taxable_amount = ?, gst_rate = ?, gst_amount = ?, net_total = ?,
+        approval_status = ?, tax_mode = ?, total_cgst = ?, total_sgst = ?, total_igst = ?,
+        amount_in_words = ?, pdf_url = ?
+       WHERE id = ?`,
+      [
+        nextVerCode,
+        nextVerNum,
+        JSON.stringify(versions),
+        calc.finalContractAmount,
+        calc.systemCapacityKw,
+        calc.packageTier,
+        calc.subtotal,
+        calc.discountAmount,
+        calc.subsidyAmount,
+        calc.taxableAmount,
+        calc.gstRate,
+        calc.gstAmount,
+        calc.finalContractAmount,
+        calc.approvalStatus,
+        calc.taxMode,
+        calc.cgstAmount,
+        calc.sgstAmount,
+        calc.igstAmount,
+        calc.amountInWords,
+        pdfUrl,
+        id
+      ]
+    );
+    res.json({ success: true, quotationNumber: nextVerCode, version: newVersion, pdfUrl });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var approveQuotationDiscount = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const user = req.user;
+    if (user?.role !== "Sales Manager" && user?.role !== "Super Admin") {
+      return res.status(403).json({
+        success: false,
+        error: "Only Sales Manager or Super Admin can approve commercial discounts."
+      });
+    }
+    await pool.query(
+      'UPDATE quotations SET approval_status = "Approved", discount_approved_by = ? WHERE id = ?',
+      [user.name, id]
+    );
+    res.json({ success: true, message: `Quotation ${id} approved by ${user.name}` });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var updateQuotation = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+    const allowed = ["status", "notes", "validUntil", "sentDate", "packageTier", "versions", "totalAmount", "approvalStatus"];
+    const fields = [];
+    const values = [];
+    if (updates.status !== void 0) {
+      fields.push("status = ?");
+      values.push(updates.status);
+    }
+    if (updates.sentDate !== void 0) {
+      fields.push("sent_date = ?");
+      values.push(updates.sentDate);
+    }
+    if (updates.validUntil !== void 0) {
+      fields.push("valid_until = ?");
+      values.push(updates.validUntil);
+    }
+    if (updates.packageTier !== void 0) {
+      fields.push("package_tier = ?");
+      values.push(updates.packageTier);
+    }
+    if (updates.notes !== void 0) {
+      const [curr] = await pool.query("SELECT versions FROM quotations WHERE id = ? LIMIT 1", [id]);
+      if (curr && curr.length > 0) {
+        const v = typeof curr[0].versions === "string" ? JSON.parse(curr[0].versions) : curr[0].versions;
+        if (v && v.length > 0) {
+          v[v.length - 1].notes = updates.notes;
+          fields.push("versions = ?");
+          values.push(JSON.stringify(v));
+        }
+      }
+    }
+    if (updates.versions !== void 0) {
+      fields.push("versions = ?");
+      values.push(JSON.stringify(updates.versions));
+    }
+    if (updates.totalAmount !== void 0) {
+      fields.push("total_amount = ?");
+      values.push(updates.totalAmount);
+    }
+    if (updates.approvalStatus !== void 0) {
+      fields.push("approval_status = ?");
+      values.push(updates.approvalStatus);
+    }
+    if (fields.length > 0) {
+      values.push(id);
+      await pool.query(`UPDATE quotations SET ${fields.join(", ")} WHERE id = ?`, values);
+    }
+    res.json({ success: true, id, updates });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var editQuotation = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const body = req.body;
+    const user = req.user;
+    const [rows] = await pool.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [id]);
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ success: false, error: "Quotation not found" });
+    }
+    const existing = rows[0];
+    const systemCapacityKw = body.systemCapacityKw || existing.system_capacity_kw;
+    const packageTier = body.packageTier || existing.package_tier || "Premium Bifacial";
+    const discountAmount = body.discountAmount !== void 0 ? Number(body.discountAmount) : Number(existing.discount_amount);
+    const customItems = body.customItems;
+    const calc = calculateQuotation({
+      leadId: existing.lead_id,
+      leadName: existing.lead_name,
+      customerPhone: existing.customer_phone,
+      customerAddress: existing.customer_address,
+      customerCategory: existing.customer_category,
+      systemCapacityKw,
+      packageTier,
+      discountAmount,
+      surveyId: existing.survey_id,
+      isSurveyApproved: existing.proposal_type === "Final_Technical",
+      customItems,
+      taxMode: body.taxMode || existing.tax_mode,
+      taxType: body.taxType
+    });
+    let versions = typeof existing.versions === "string" ? JSON.parse(existing.versions) : existing.versions || [];
+    if (!versions || versions.length === 0) {
+      versions = [{
+        version: 1,
+        quotationNumber: existing.quotation_number,
+        createdAt: existing.created_at || (/* @__PURE__ */ new Date()).toISOString(),
+        items: calc.items,
+        subtotal: calc.subtotal,
+        subsidyDeduction: calc.subsidyAmount,
+        discount: calc.discountAmount,
+        taxableAmount: calc.taxableAmount,
+        gstRate: calc.gstRate,
+        gstAmount: calc.gstAmount,
+        cgstAmount: calc.cgstAmount,
+        sgstAmount: calc.sgstAmount,
+        igstAmount: calc.igstAmount,
+        taxType: calc.taxType,
+        netTotal: calc.finalContractAmount,
+        amountInWords: calc.amountInWords,
+        terms: calc.terms,
+        notes: body.notes || "Updated quotation draft with custom BOM."
+      }];
+    } else {
+      const lastIdx = versions.length - 1;
+      versions[lastIdx] = {
+        ...versions[lastIdx],
+        items: calc.items,
+        subtotal: calc.subtotal,
+        subsidyDeduction: calc.subsidyAmount,
+        discount: calc.discountAmount,
+        taxableAmount: calc.taxableAmount,
+        gstRate: calc.gstRate,
+        gstAmount: calc.gstAmount,
+        cgstAmount: calc.cgstAmount,
+        sgstAmount: calc.sgstAmount,
+        igstAmount: calc.igstAmount,
+        taxType: calc.taxType,
+        netTotal: calc.finalContractAmount,
+        amountInWords: calc.amountInWords,
+        terms: calc.terms,
+        notes: body.notes || versions[lastIdx].notes
+      };
+    }
+    let pdfUrl = existing.pdf_url;
+    try {
+      const pdfData = {
+        quotationNumber: existing.quotation_number,
+        versionNumber: existing.current_version || 1,
+        createdAt: existing.created_at,
+        validUntil: existing.valid_until,
+        leadName: existing.lead_name,
+        customerPhone: existing.customer_phone,
+        customerAddress: existing.customer_address,
+        systemCapacityKw: calc.systemCapacityKw,
+        actualCapacityKwp: calc.actualCapacityKwp,
+        packageTier: calc.packageTier,
+        proposalType: calc.proposalType,
+        salespersonName: existing.salesperson_name || user?.name || "Vikram Mehta (Sales)",
+        taxMode: calc.taxMode,
+        taxType: calc.taxType,
+        items: calc.items,
+        subtotal: calc.subtotal,
+        discountAmount: calc.discountAmount,
+        taxableAmount: calc.taxableAmount,
+        gstRate: calc.gstRate,
+        cgstAmount: calc.cgstAmount,
+        sgstAmount: calc.sgstAmount,
+        igstAmount: calc.igstAmount,
+        gstAmount: calc.gstAmount,
+        finalContractAmount: calc.finalContractAmount,
+        amountInWords: calc.amountInWords,
+        subsidyEligible: calc.subsidyEligible,
+        subsidyAmount: calc.subsidyAmount,
+        indicativeNetCustomerCost: calc.indicativeNetCustomerCost,
+        annualGenerationKwh: calc.annualGenerationKwh,
+        annualSavingsInr: calc.annualSavingsInr,
+        lifetimeSavings25Yr: calc.lifetimeSavings25Yr,
+        simplePaybackYears: calc.simplePaybackYears,
+        terms: calc.terms
+      };
+      const resPdf = await generateProposalPdf(pdfData);
+      pdfUrl = resPdf.fileUrl;
+    } catch (e) {
+      console.warn("PDF regeneration error:", e);
+    }
+    await pool.query(
+      `UPDATE quotations SET
+        system_capacity_kw = ?, package_tier = ?, discount_amount = ?,
+        subtotal = ?, taxable_amount = ?, gst_rate = ?, gst_amount = ?,
+        total_amount = ?, net_total = ?, total_cgst = ?, total_sgst = ?,
+        total_igst = ?, amount_in_words = ?, approval_status = ?,
+        versions = ?, pdf_url = ?
+       WHERE id = ?`,
+      [
+        calc.systemCapacityKw,
+        calc.packageTier,
+        calc.discountAmount,
+        calc.subtotal,
+        calc.taxableAmount,
+        calc.gstRate,
+        calc.gstAmount,
+        calc.finalContractAmount,
+        calc.finalContractAmount,
+        calc.cgstAmount,
+        calc.sgstAmount,
+        calc.igstAmount,
+        calc.amountInWords,
+        calc.approvalStatus,
+        JSON.stringify(versions),
+        pdfUrl,
+        id
+      ]
+    );
+    const [updated] = await pool.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [id]);
+    res.json({ success: true, quotation: formatQuotation(updated[0]) });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var recordCustomerAcceptance = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { acceptanceNotes, clientPoNumber } = req.body;
+    const user = req.user;
+    const [rows] = await pool.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [id]);
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ success: false, error: "Quotation not found" });
+    }
+    const quote = rows[0];
+    if (quote.approval_status === "Pending_Approval") {
+      return res.status(400).json({
+        success: false,
+        error: "Cannot record customer acceptance: Quotation discount is pending Sales Manager approval."
+      });
+    }
+    await pool.query(
+      `UPDATE quotations SET 
+        status = 'Customer_Accepted',
+        notes = CONCAT(COALESCE(notes, ''), ?),
+        sent_date = COALESCE(sent_date, NOW())
+       WHERE id = ?`,
+      [`
+[Customer Accepted: ${(/* @__PURE__ */ new Date()).toLocaleDateString("en-IN")}] Recorded by ${user?.name || "Sales"}. PO: ${clientPoNumber || "N/A"}. ${acceptanceNotes || ""}`, id]
+    );
+    const [updated] = await pool.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [id]);
+    res.json({ success: true, quotation: formatQuotation(updated[0]) });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var acceptQuotation = async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    const { id } = req.params;
+    const user = req.user;
+    if (user && user.role !== "Project Manager" && user.role !== "Super Admin") {
+      conn.release();
+      return res.status(403).json({
+        success: false,
+        error: "Access denied: Only Project Managers and Super Admins are authorized to convert accepted quotations into live EPC projects."
+      });
+    }
+    const [rows] = await conn.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [id]);
+    if (!rows || rows.length === 0) {
+      conn.release();
+      return res.status(404).json({ success: false, error: "Quotation not found" });
+    }
+    const quote = rows[0];
+    if (quote.approval_status === "Pending_Approval") {
+      conn.release();
+      return res.status(400).json({
+        success: false,
+        error: "Cannot accept quotation: Discount exceeds authorized threshold and is pending manager approval."
+      });
+    }
+    if (quote.converted_to_project_id) {
+      const [existingProject] = await conn.query(
+        "SELECT * FROM projects WHERE id = ? LIMIT 1",
+        [quote.converted_to_project_id]
+      );
+      conn.release();
+      if (existingProject && existingProject.length > 0) {
+        return res.json({
+          success: true,
+          message: "Quotation was already accepted and converted to project.",
+          alreadyConverted: true,
+          projectId: quote.converted_to_project_id,
+          project: existingProject[0]
+        });
+      }
+    }
+    await conn.beginTransaction();
+    const quoteTotal = Number(quote.total_amount) || 0;
+    const capacityKw = Number(quote.system_capacity_kw) || 5;
+    const advanceAmount = Math.round(quoteTotal * 0.4);
+    let customerId = "";
+    let customerName = quote.lead_name;
+    let customerPhone = quote.customer_phone;
+    let customerAddress = quote.customer_address;
+    const [existingCust] = await conn.query(
+      "SELECT id, name, phone, address FROM customers WHERE converted_from_lead_id = ? OR phone = ? LIMIT 1",
+      [quote.lead_id, quote.customer_phone]
+    );
+    if (existingCust && existingCust.length > 0) {
+      customerId = existingCust[0].id;
+      customerName = existingCust[0].name;
+    } else {
+      const [allCusts] = await conn.query("SELECT id FROM customers WHERE id LIKE 'CUST-2026-%'");
+      let maxCustNum = 20;
+      for (const c of allCusts) {
+        const match = c.id.match(/CUST-2026-(\d+)/);
+        if (match) {
+          const n = parseInt(match[1], 10);
+          if (n > maxCustNum) maxCustNum = n;
+        }
+      }
+      customerId = `CUST-2026-${String(maxCustNum + 1).padStart(3, "0")}`;
+      await conn.query(
+        `INSERT INTO customers (
+          id, name, email, phone, address, city, state, pincode, 
+          consumer_number_discom, discom_name, converted_from_lead_id, 
+          total_system_kw, total_order_value, paid_amount, balance_amount, 
+          status, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          customerId,
+          customerName,
+          `${customerName.toLowerCase().replace(/\s+/g, ".")}@example.com`,
+          customerPhone,
+          customerAddress || "Site Address",
+          "Bengaluru",
+          "Karnataka",
+          "560001",
+          `DISCOM-${Math.floor(1e6 + Math.random() * 9e6)}`,
+          "BESCOM",
+          quote.lead_id,
+          capacityKw,
+          quoteTotal,
+          0,
+          quoteTotal,
+          "Under Installation",
+          (/* @__PURE__ */ new Date()).toISOString()
+        ]
+      );
+    }
+    const [allProjs] = await conn.query("SELECT id FROM projects WHERE id LIKE 'PROJECT-2026-%' OR id LIKE 'PRJ-2026-%'");
+    let maxProjNum = 20;
+    for (const p of allProjs) {
+      const match = p.id.match(/(?:PROJECT|PRJ)-2026-(\d+)/);
+      if (match) {
+        const n = parseInt(match[1], 10);
+        if (n > maxProjNum) maxProjNum = n;
+      }
+    }
+    const projectId = `PROJECT-2026-${String(maxProjNum + 1).padStart(3, "0")}`;
+    const targetDate = new Date(Date.now() + 864e5 * 25).toISOString().split("T")[0];
+    const initialTasks = [
+      { id: `PT-${Date.now()}-1`, title: "DISCOM Net-metering application & sanction", stage: "Documentation", isCompleted: false, assignedRole: "Project Manager", assignedToName: "Karthik Raja", dueDate: new Date(Date.now() + 864e5 * 3).toISOString().split("T")[0] },
+      { id: `PT-${Date.now()}-2`, title: "Warehouse material packing and dispatch check", stage: "Material Ready", isCompleted: false, assignedRole: "Project Manager", assignedToName: "Karthik Raja", dueDate: new Date(Date.now() + 864e5 * 5).toISOString().split("T")[0] },
+      { id: `PT-${Date.now()}-3`, title: "HDG structure foundation & anchor bolting", stage: "Installation Scheduled", isCompleted: false, assignedRole: "Installation Team", assignedToName: "Muthu Vel", dueDate: new Date(Date.now() + 864e5 * 8).toISOString().split("T")[0] },
+      { id: `PT-${Date.now()}-4`, title: "Module mounting & DC string conduit wiring", stage: "Installation In Progress", isCompleted: false, assignedRole: "Installation Team", assignedToName: "Muthu Vel", dueDate: new Date(Date.now() + 864e5 * 12).toISOString().split("T")[0] }
+    ];
+    const initialChecklist = {
+      structureFastening: false,
+      moduleClampingTorque: false,
+      inverterWallMounting: false,
+      dcWiringConduit: false,
+      acWiringArmoured: false,
+      chemicalEarthingPits: false,
+      lightningArrester: false,
+      dcdbProtectionFuses: false,
+      acdbMccbIsolator: false,
+      remoteMonitoringConfigured: false,
+      vocAndIscTesting: false,
+      safetySignagesAffixed: false,
+      photosUploaded: []
+    };
+    await conn.query(
+      `INSERT INTO projects (
+        id, customer_id, customer_name, customer_phone, customer_address, 
+        quotation_id, capacity_kw, total_amount, stage, start_date, 
+        target_completion_date, project_manager_id, project_manager_name, 
+        installation_lead_id, installation_lead_name, checklist, tasks, 
+        inventory_reserved, discom_sanction_number, notes, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        projectId,
+        customerId,
+        customerName,
+        customerPhone,
+        customerAddress,
+        quote.id,
+        capacityKw,
+        quoteTotal,
+        "Booking",
+        (/* @__PURE__ */ new Date()).toISOString().split("T")[0],
+        targetDate,
+        "EMP-04",
+        "Karthik Raja",
+        "EMP-05",
+        "Muthu Vel",
+        JSON.stringify(initialChecklist),
+        JSON.stringify(initialTasks),
+        1,
+        `BESCOM/SANCTION/${Date.now().toString().slice(-4)}`,
+        `Converted deal from Quotation ${quote.quotation_number}. 40% Advance invoice issued (Unpaid).`,
+        (/* @__PURE__ */ new Date()).toISOString()
+      ]
+    );
+    const [allInvs] = await conn.query("SELECT id FROM invoices WHERE id LIKE 'INV-2026-%'");
+    let maxInvNum = 20;
+    for (const inv of allInvs) {
+      const match = inv.id.match(/INV-2026-(\d+)/);
+      if (match) {
+        const n = parseInt(match[1], 10);
+        if (n > maxInvNum) maxInvNum = n;
+      }
+    }
+    const invoiceId = `INV-2026-${String(maxInvNum + 1).padStart(3, "0")}`;
+    const invoiceNumber = `INV-2026-00${String(maxInvNum + 1).padStart(3, "0")}`;
+    const subtotalInv = Math.round(advanceAmount / 1.138);
+    const gstInv = advanceAmount - subtotalInv;
+    const invoiceItems = [
+      {
+        description: `40% Milestone Advance for ${capacityKw} kW Solar EPC Plant (Booking & Engineering Approval)`,
+        hsnCode: "995465",
+        quantity: 1,
+        rate: subtotalInv,
+        amount: subtotalInv
+      }
+    ];
+    await conn.query(
+      `INSERT INTO invoices (
+        id, invoice_number, project_id, customer_id, customer_name, customer_phone, 
+        issue_date, due_date, items, subtotal, cgst, sgst, igst, total_amount, 
+        paid_amount, balance_due, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        invoiceId,
+        invoiceNumber,
+        projectId,
+        customerId,
+        customerName,
+        customerPhone,
+        (/* @__PURE__ */ new Date()).toISOString().split("T")[0],
+        new Date(Date.now() + 864e5 * 7).toISOString().split("T")[0],
+        JSON.stringify(invoiceItems),
+        subtotalInv,
+        Math.round(gstInv / 2),
+        Math.round(gstInv / 2),
+        0,
+        advanceAmount,
+        0,
+        advanceAmount,
+        "Unpaid"
+      ]
+    );
+    await conn.query(
+      'UPDATE quotations SET status = "Converted_To_Project", converted_to_project_id = ? WHERE id = ?',
+      [projectId, id]
+    );
+    if (quote.lead_id) {
+      await conn.query('UPDATE leads SET status = "Won" WHERE id = ?', [quote.lead_id]);
+    }
+    await conn.commit();
+    conn.release();
+    const [projRows] = await pool.query("SELECT * FROM projects WHERE id = ? LIMIT 1", [projectId]);
+    res.json({
+      success: true,
+      message: `Quotation accepted! Converted to Project ${projectId} and Advance Invoice ${invoiceNumber} created.`,
+      projectId,
+      project: projRows[0],
+      invoiceId
+    });
+  } catch (err) {
+    await conn.rollback();
+    conn.release();
+    console.error("Accept quotation transaction error:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var downloadProposalPdf = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const user = req.user;
+    const [rows] = await pool.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [id]);
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ success: false, error: "Quotation not found" });
+    }
+    const q = rows[0];
+    if (user?.role === "Customer" && user?.phone !== q.customer_phone) {
+      return res.status(403).json({ success: false, error: "Unauthorized to download this quotation." });
+    }
+    const versions = typeof q.versions === "string" ? JSON.parse(q.versions) : q.versions || [];
+    const activeVer = versions.find((v) => v.version === q.current_version) || versions[versions.length - 1] || {};
+    const calc = calculateQuotation({
+      systemCapacityKw: Number(q.system_capacity_kw) || 5,
+      packageTier: q.package_tier || "Premium Bifacial",
+      discountAmount: Number(q.discount_amount) || 0,
+      isSurveyApproved: q.proposal_type === "Final_Technical",
+      taxMode: q.tax_mode,
+      customerAddress: q.customer_address
+    });
+    const pdfData = {
+      quotationNumber: q.quotation_number || `${q.id}-V1`,
+      versionNumber: q.current_version || 1,
+      createdAt: q.created_at,
+      validUntil: q.valid_until || new Date(Date.now() + 864e5 * 14).toISOString().split("T")[0],
+      leadName: q.lead_name,
+      customerPhone: q.customer_phone,
+      customerAddress: q.customer_address || "Bengaluru, Karnataka",
+      systemCapacityKw: Number(q.system_capacity_kw) || 5,
+      actualCapacityKwp: calc.actualCapacityKwp,
+      packageTier: q.package_tier || "Premium Bifacial",
+      proposalType: q.proposal_type || "Final_Technical",
+      salespersonName: q.salesperson_name || "Vikram Mehta (Sales)",
+      taxMode: q.tax_mode || calc.taxMode,
+      taxType: activeVer.taxType || calc.taxType,
+      items: activeVer.items || calc.items,
+      subtotal: Number(q.subtotal) || calc.subtotal,
+      discountAmount: Number(q.discount_amount) || 0,
+      taxableAmount: Number(q.taxable_amount) || calc.taxableAmount,
+      gstRate: Number(q.gst_rate) || calc.gstRate,
+      cgstAmount: Number(q.total_cgst) || calc.cgstAmount,
+      sgstAmount: Number(q.total_sgst) || calc.sgstAmount,
+      igstAmount: Number(q.total_igst) || calc.igstAmount,
+      gstAmount: Number(q.gst_amount) || calc.gstAmount,
+      finalContractAmount: Number(q.total_amount) || calc.finalContractAmount,
+      amountInWords: q.amount_in_words || calc.amountInWords,
+      subsidyEligible: calc.subsidyEligible,
+      subsidyAmount: Number(q.subsidy_amount) || calc.subsidyAmount,
+      indicativeNetCustomerCost: calc.indicativeNetCustomerCost,
+      annualGenerationKwh: calc.annualGenerationKwh,
+      annualSavingsInr: calc.annualSavingsInr,
+      lifetimeSavings25Yr: calc.lifetimeSavings25Yr,
+      simplePaybackYears: calc.simplePaybackYears,
+      terms: activeVer.terms || calc.terms
+    };
+    const { filePath, fileUrl } = await generateProposalPdf(pdfData);
+    await pool.query("UPDATE quotations SET pdf_url = ? WHERE id = ?", [fileUrl, id]);
+    res.download(filePath);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// server/controllers/surveys.controller.ts
+function formatPhoto(p) {
+  return {
+    id: p.id,
+    surveyId: p.survey_id,
+    category: p.category,
+    fileName: p.file_name,
+    filePath: p.file_path,
+    fileSize: p.file_size ? Number(p.file_size) : 0,
+    mimeType: p.mime_type || "image/jpeg",
+    caption: p.caption || "",
+    uploaderId: p.uploader_id || "",
+    uploaderName: p.uploader_name || "",
+    capturedAt: p.captured_at || null,
+    uploadedAt: p.uploaded_at,
+    latitude: p.latitude !== null && p.latitude !== void 0 ? Number(p.latitude) : null,
+    longitude: p.longitude !== null && p.longitude !== void 0 ? Number(p.longitude) : null,
+    gpsAccuracyMeters: p.gps_accuracy_meters !== null && p.gps_accuracy_meters !== void 0 ? Number(p.gps_accuracy_meters) : null,
+    geoVerified: Boolean(p.geo_verified),
+    verificationStatus: p.verification_status || "Uploaded",
+    verificationNotes: p.verification_notes || ""
+  };
+}
+function formatSurvey(s, photos = [], history = []) {
+  return {
+    id: s.id,
+    leadId: s.lead_id,
+    leadName: s.lead_name,
+    customerName: s.customer_name,
+    phone: s.phone,
+    address: s.address,
+    scheduledDate: s.scheduled_date,
+    engineerId: s.engineer_id,
+    engineerName: s.engineer_name,
+    status: s.status,
+    roofAreaSqFt: Number(s.roof_area_sqft) || 0,
+    shadowFreeAreaSqFt: Number(s.shadow_free_area_sqft) || 0,
+    roofType: s.roof_type || "RCC Flat",
+    azimuthAngle: Number(s.azimuth_angle) || 180,
+    tiltAngle: Number(s.tilt_angle) || 15,
+    existingSanctionLoadKw: Number(s.existing_sanction_load_kw) || 0,
+    gridPhase: s.grid_phase || "Three Phase",
+    distanceToLtPanelMeters: Number(s.distance_to_lt_panel_meters) || 0,
+    recommendedKw: Number(s.recommended_kw) || 0,
+    panelQuantity: Number(s.panel_quantity) || 0,
+    estimatedGenerationUnitsPerYear: Number(s.estimated_generation_units_per_year) || 0,
+    estimatedAnnualSavings: Number(s.estimated_annual_savings) || 0,
+    estimatedCost: Number(s.estimated_cost) || 0,
+    paybackYears: Number(s.payback_years) || 4.5,
+    co2ReductionTonsPerYear: Number(s.co2_reduction_tons_per_year) || 0,
+    photosUploaded: typeof s.photos_uploaded === "string" ? JSON.parse(s.photos_uploaded) : s.photos_uploaded || [],
+    billPhotoUploaded: Boolean(s.bill_photo_uploaded),
+    notes: s.notes || "",
+    completedAt: s.completed_at,
+    // Rooftop Engineering & Measurement status
+    roofDimensionsShape: s.roof_dimensions_shape || "Rectangular",
+    surfaceCondition: s.surface_condition || "Good",
+    measurementStatus: s.measurement_status || "Initial Estimate",
+    obstaclesWaterTank: Boolean(s.obstacles_water_tank),
+    obstaclesMumty: Boolean(s.obstacles_mumty),
+    obstaclesParapet: Boolean(s.obstacles_parapet),
+    obstaclesTreesNeighbors: Boolean(s.obstacles_trees_neighbors),
+    obstaclesOther: s.obstacles_other || "",
+    accessPathwaysClearance: s.access_pathways_clearance || "1m walkway required along perimeter",
+    // Electrical Inspection
+    mainMeterStatus: s.main_meter_status || "Not Assessed",
+    mainMeterNotes: s.main_meter_notes || "",
+    dbCondition: s.db_condition || "Not Assessed",
+    earthingStatus: s.earthing_status || "Not Assessed",
+    earthingResistanceOhms: s.earthing_resistance_ohms !== null && s.earthing_resistance_ohms !== void 0 ? Number(s.earthing_resistance_ohms) : null,
+    proposedInverterLocation: s.proposed_inverter_location || "",
+    electricalConstraints: s.electrical_constraints || "",
+    electricalUpgradesNeeded: s.electrical_upgrades_needed || "",
+    // Structural & Shading Assessment
+    structuralConcerns: s.structural_concerns || "",
+    visibleCracksDamage: Boolean(s.visible_cracks_damage),
+    waterproofingStatus: s.waterproofing_status || "Good",
+    mountingStructureType: s.mounting_structure_type || "Standard Elevated",
+    shadingSources: s.shading_sources || "",
+    shadingAffectedAreaSqFt: Number(s.shading_affected_area_sqft) || 0,
+    structuralEngineerApprovalRequired: Boolean(s.structural_engineer_approval_required),
+    // Engineering Findings & Feasibility
+    feasibilityVerdict: s.feasibility_verdict || "Feasible",
+    proposedPanelWattage: Number(s.proposed_panel_wattage) || 550,
+    inverterRecommendation: s.inverter_recommendation || "",
+    cableSpecification: s.cable_specification || "1 x 4 sq.mm Solar DC Cu, 4C x 16 sq.mm AC Al XLPE",
+    unresolvedTechnicalIssues: s.unresolved_technical_issues || "",
+    engineerRecommendations: s.engineer_recommendations || "",
+    // Review & Workflow
+    submittedAt: s.submitted_at || null,
+    submittedById: s.submitted_by_id || null,
+    reviewedAt: s.reviewed_at || null,
+    reviewedById: s.reviewed_by_id || null,
+    reviewerName: s.reviewer_name || null,
+    reviewDecision: s.review_decision || null,
+    reviewComments: s.review_comments || null,
+    quotationId: s.quotation_id || null,
+    isDraft: Boolean(s.is_draft),
+    // Attached photos and audit review history
+    photos: photos.map(formatPhoto),
+    reviewHistory: history.map((h) => ({
+      id: h.id,
+      surveyId: h.survey_id,
+      reviewerId: h.reviewer_id,
+      reviewerName: h.reviewer_name,
+      action: h.action,
+      comments: h.comments,
+      createdAt: h.created_at
+    }))
+  };
+}
+async function generateUniqueSurveyId() {
+  const year = (/* @__PURE__ */ new Date()).getFullYear();
+  const prefix = `SRV-${year}-`;
+  const [rows] = await pool.query(
+    "SELECT id FROM site_surveys WHERE id LIKE ? ORDER BY id DESC LIMIT 1",
+    [`${prefix}%`]
+  );
+  let nextNum = 1;
+  if (rows && rows.length > 0 && rows[0].id) {
+    const parts = rows[0].id.split("-");
+    if (parts.length >= 3) {
+      const lastSeq = parseInt(parts[2], 10);
+      if (!isNaN(lastSeq)) {
+        nextNum = lastSeq + 1;
+      }
+    }
+  }
+  return `${prefix}${String(nextNum).padStart(3, "0")}`;
+}
+var getSurveys = async (req, res) => {
+  try {
+    const user = req.user;
+    let query = "SELECT * FROM site_surveys";
+    const params = [];
+    if (user && user.role === "Customer") {
+      query += " WHERE lead_id IN (SELECT id FROM leads WHERE email = ? OR phone = ?) OR customer_name = ?";
+      params.push(user.email || "", user.phone || "", user.name || "");
+    }
+    query += " ORDER BY scheduled_date DESC";
+    const [surveys] = await pool.query(query, params);
+    const [allPhotos] = await pool.query("SELECT * FROM survey_photos ORDER BY uploaded_at ASC");
+    const photosBySurvey = {};
+    for (const p of allPhotos) {
+      if (!photosBySurvey[p.survey_id]) photosBySurvey[p.survey_id] = [];
+      photosBySurvey[p.survey_id].push(p);
+    }
+    const formatted = surveys.map((s) => formatSurvey(s, photosBySurvey[s.id] || []));
+    res.json({ success: true, surveys: formatted });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var getSurveyById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const [rows] = await pool.query("SELECT * FROM site_surveys WHERE id = ?", [id]);
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ success: false, error: "Survey not found" });
+    }
+    const [photos] = await pool.query("SELECT * FROM survey_photos WHERE survey_id = ? ORDER BY uploaded_at ASC", [id]);
+    const [history] = await pool.query("SELECT * FROM survey_review_history WHERE survey_id = ? ORDER BY created_at ASC", [id]);
+    const formatted = formatSurvey(rows[0], photos, history);
+    res.json({ success: true, survey: formatted });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var createSurvey = async (req, res) => {
+  try {
+    const s = req.body;
+    const leadId = s.leadId;
+    if (leadId) {
+      const [existing] = await pool.query(
+        "SELECT * FROM site_surveys WHERE lead_id = ? LIMIT 1",
+        [leadId]
+      );
+      if (existing && existing.length > 0) {
+        const [photos] = await pool.query("SELECT * FROM survey_photos WHERE survey_id = ?", [existing[0].id]);
+        return res.json({
+          success: true,
+          reopened: true,
+          message: "Existing survey reopened",
+          survey: formatSurvey(existing[0], photos)
+        });
+      }
+    }
+    let surveyId = s.id;
+    if (!surveyId || surveyId.startsWith("TEMP-") || surveyId.length < 5) {
+      surveyId = await generateUniqueSurveyId();
+    } else {
+      const [idCheck] = await pool.query("SELECT id FROM site_surveys WHERE id = ?", [surveyId]);
+      if (idCheck && idCheck.length > 0) {
+        surveyId = await generateUniqueSurveyId();
+      }
+    }
+    const scheduledDate = s.scheduledDate || (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+    await pool.query(
+      `INSERT INTO site_surveys (
+        id, lead_id, lead_name, customer_name, phone, address, scheduled_date, 
+        engineer_id, engineer_name, status, roof_area_sqft, shadow_free_area_sqft, 
+        roof_type, azimuth_angle, tilt_angle, existing_sanction_load_kw, grid_phase, 
+        distance_to_lt_panel_meters, recommended_kw, panel_quantity, 
+        estimated_generation_units_per_year, estimated_annual_savings, estimated_cost, 
+        payback_years, co2_reduction_tons_per_year, photos_uploaded, bill_photo_uploaded, 
+        notes, completed_at,
+        roof_dimensions_shape, surface_condition, measurement_status, obstacles_water_tank,
+        obstacles_mumty, obstacles_parapet, obstacles_trees_neighbors, obstacles_other,
+        access_pathways_clearance, main_meter_status, main_meter_notes, db_condition,
+        earthing_status, earthing_resistance_ohms, proposed_inverter_location,
+        electrical_constraints, electrical_upgrades_needed, structural_concerns,
+        visible_cracks_damage, waterproofing_status, mounting_structure_type,
+        shading_sources, shading_affected_area_sqft, structural_engineer_approval_required,
+        feasibility_verdict, proposed_panel_wattage, inverter_recommendation,
+        cable_specification, unresolved_technical_issues, engineer_recommendations,
+        is_draft
+      ) VALUES (
+        ?, ?, ?, ?, ?, ?, ?, 
+        ?, ?, ?, ?, ?, 
+        ?, ?, ?, ?, ?, 
+        ?, ?, ?, 
+        ?, ?, ?, 
+        ?, ?, ?, ?, 
+        ?, ?,
+        ?, ?, ?, ?,
+        ?, ?, ?, ?,
+        ?, ?, ?, ?,
+        ?, ?, ?,
+        ?, ?, ?,
+        ?, ?, ?,
+        ?, ?, ?,
+        ?, ?, ?,
+        ?, ?, ?,
+        ?
+      )`,
+      [
+        surveyId,
+        s.leadId || null,
+        s.leadName || s.customerName,
+        s.customerName,
+        s.phone,
+        s.address,
+        scheduledDate,
+        s.engineerId || null,
+        s.engineerName || "Vikram Mehta",
+        s.status || "Scheduled",
+        s.roofAreaSqFt || 0,
+        s.shadowFreeAreaSqFt || 0,
+        s.roofType || "RCC Flat",
+        s.azimuthAngle || 180,
+        s.tiltAngle || 15,
+        s.existingSanctionLoadKw || 0,
+        s.gridPhase || "Three Phase",
+        s.distanceToLtPanelMeters || 20,
+        s.recommendedKw || 0,
+        s.panelQuantity || 0,
+        s.estimatedGenerationUnitsPerYear || 0,
+        s.estimatedAnnualSavings || 0,
+        s.estimatedCost || 0,
+        s.paybackYears || 4.5,
+        s.co2ReductionTonsPerYear || 0,
+        JSON.stringify(s.photosUploaded || []),
+        s.billPhotoUploaded ? 1 : 0,
+        s.notes || "",
+        s.completedAt || null,
+        s.roofDimensionsShape || "Rectangular",
+        s.surfaceCondition || "Good",
+        s.measurementStatus || "Initial Estimate",
+        s.obstaclesWaterTank ? 1 : 0,
+        s.obstaclesMumty ? 1 : 0,
+        s.obstaclesParapet ? 1 : 0,
+        s.obstaclesTreesNeighbors ? 1 : 0,
+        s.obstaclesOther || null,
+        s.accessPathwaysClearance || "1m walkway required along perimeter",
+        s.mainMeterStatus || "Not Assessed",
+        s.mainMeterNotes || null,
+        s.dbCondition || "Not Assessed",
+        s.earthingStatus || "Not Assessed",
+        s.earthingResistanceOhms !== void 0 ? s.earthingResistanceOhms : null,
+        s.proposedInverterLocation || null,
+        s.electricalConstraints || null,
+        s.electricalUpgradesNeeded || null,
+        s.structuralConcerns || null,
+        s.visibleCracksDamage ? 1 : 0,
+        s.waterproofingStatus || "Good",
+        s.mountingStructureType || "Standard Elevated",
+        s.shadingSources || null,
+        s.shadingAffectedAreaSqFt || 0,
+        s.structuralEngineerApprovalRequired ? 1 : 0,
+        s.feasibilityVerdict || "Feasible",
+        s.proposedPanelWattage || 550,
+        s.inverterRecommendation || null,
+        s.cableSpecification || "1 x 4 sq.mm Solar DC Cu, 4C x 16 sq.mm AC Al XLPE",
+        s.unresolvedTechnicalIssues || null,
+        s.engineerRecommendations || null,
+        s.isDraft ? 1 : 0
+      ]
+    );
+    if (leadId) {
+      await pool.query(
+        "UPDATE leads SET survey_id = ?, status = 'Site Survey Scheduled' WHERE id = ?",
+        [surveyId, leadId]
+      );
+    }
+    const [created] = await pool.query("SELECT * FROM site_surveys WHERE id = ?", [surveyId]);
+    res.json({ success: true, survey: formatSurvey(created[0]) });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var updateSurvey = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const s = req.body;
+    const [existing] = await pool.query("SELECT * FROM site_surveys WHERE id = ?", [id]);
+    if (!existing || existing.length === 0) {
+      return res.status(404).json({ success: false, error: "Survey not found" });
+    }
+    const current = existing[0];
+    const updateMap = {
+      roof_area_sqft: s.roofAreaSqFt !== void 0 ? s.roofAreaSqFt : current.roof_area_sqft,
+      shadow_free_area_sqft: s.shadowFreeAreaSqFt !== void 0 ? s.shadowFreeAreaSqFt : current.shadow_free_area_sqft,
+      roof_type: s.roofType !== void 0 ? s.roofType : current.roof_type,
+      azimuth_angle: s.azimuthAngle !== void 0 ? s.azimuthAngle : current.azimuth_angle,
+      tilt_angle: s.tiltAngle !== void 0 ? s.tiltAngle : current.tilt_angle,
+      existing_sanction_load_kw: s.existingSanctionLoadKw !== void 0 ? s.existingSanctionLoadKw : current.existing_sanction_load_kw,
+      grid_phase: s.gridPhase !== void 0 ? s.gridPhase : current.grid_phase,
+      distance_to_lt_panel_meters: s.distanceToLtPanelMeters !== void 0 ? s.distanceToLtPanelMeters : current.distance_to_lt_panel_meters,
+      recommended_kw: s.recommendedKw !== void 0 ? s.recommendedKw : current.recommended_kw,
+      panel_quantity: s.panelQuantity !== void 0 ? s.panelQuantity : current.panel_quantity,
+      estimated_generation_units_per_year: s.estimatedGenerationUnitsPerYear !== void 0 ? s.estimatedGenerationUnitsPerYear : current.estimated_generation_units_per_year,
+      estimated_annual_savings: s.estimatedAnnualSavings !== void 0 ? s.estimatedAnnualSavings : current.estimated_annual_savings,
+      estimated_cost: s.estimatedCost !== void 0 ? s.estimatedCost : current.estimated_cost,
+      payback_years: s.paybackYears !== void 0 ? s.paybackYears : current.payback_years,
+      co2_reduction_tons_per_year: s.co2ReductionTonsPerYear !== void 0 ? s.co2ReductionTonsPerYear : current.co2_reduction_tons_per_year,
+      notes: s.notes !== void 0 ? s.notes : current.notes,
+      roof_dimensions_shape: s.roofDimensionsShape !== void 0 ? s.roofDimensionsShape : current.roof_dimensions_shape,
+      surface_condition: s.surfaceCondition !== void 0 ? s.surfaceCondition : current.surface_condition,
+      measurement_status: s.measurementStatus !== void 0 ? s.measurementStatus : current.measurementStatus || "Engineer Entered",
+      obstacles_water_tank: s.obstaclesWaterTank !== void 0 ? s.obstaclesWaterTank ? 1 : 0 : current.obstacles_water_tank,
+      obstacles_mumty: s.obstaclesMumty !== void 0 ? s.obstaclesMumty ? 1 : 0 : current.obstacles_mumty,
+      obstacles_parapet: s.obstaclesParapet !== void 0 ? s.obstaclesParapet ? 1 : 0 : current.obstacles_parapet,
+      obstacles_trees_neighbors: s.obstaclesTreesNeighbors !== void 0 ? s.obstaclesTreesNeighbors ? 1 : 0 : current.obstacles_trees_neighbors,
+      obstacles_other: s.obstaclesOther !== void 0 ? s.obstaclesOther : current.obstacles_other,
+      access_pathways_clearance: s.accessPathwaysClearance !== void 0 ? s.accessPathwaysClearance : current.access_pathways_clearance,
+      main_meter_status: s.mainMeterStatus !== void 0 ? s.mainMeterStatus : current.main_meter_status,
+      main_meter_notes: s.mainMeterNotes !== void 0 ? s.mainMeterNotes : current.main_meter_notes,
+      db_condition: s.dbCondition !== void 0 ? s.dbCondition : current.db_condition,
+      earthing_status: s.earthingStatus !== void 0 ? s.earthingStatus : current.earthing_status,
+      earthing_resistance_ohms: s.earthingResistanceOhms !== void 0 ? s.earthingResistanceOhms : current.earthing_resistance_ohms,
+      proposed_inverter_location: s.proposedInverterLocation !== void 0 ? s.proposedInverterLocation : current.proposed_inverter_location,
+      electrical_constraints: s.electricalConstraints !== void 0 ? s.electricalConstraints : current.electrical_constraints,
+      electrical_upgrades_needed: s.electricalUpgradesNeeded !== void 0 ? s.electricalUpgradesNeeded : current.electrical_upgrades_needed,
+      structural_concerns: s.structuralConcerns !== void 0 ? s.structuralConcerns : current.structural_concerns,
+      visible_cracks_damage: s.visibleCracksDamage !== void 0 ? s.visibleCracksDamage ? 1 : 0 : current.visible_cracks_damage,
+      waterproofing_status: s.waterproofingStatus !== void 0 ? s.waterproofingStatus : current.waterproofing_status,
+      mounting_structure_type: s.mountingStructureType !== void 0 ? s.mountingStructureType : current.mounting_structure_type,
+      shading_sources: s.shadingSources !== void 0 ? s.shadingSources : current.shading_sources,
+      shading_affected_area_sqft: s.shadingAffectedAreaSqFt !== void 0 ? s.shadingAffectedAreaSqFt : current.shading_affected_area_sqft,
+      structural_engineer_approval_required: s.structuralEngineerApprovalRequired !== void 0 ? s.structuralEngineerApprovalRequired ? 1 : 0 : current.structural_engineer_approval_required,
+      feasibility_verdict: s.feasibilityVerdict !== void 0 ? s.feasibilityVerdict : current.feasibility_verdict,
+      proposed_panel_wattage: s.proposedPanelWattage !== void 0 ? s.proposedPanelWattage : current.proposed_panel_wattage,
+      inverter_recommendation: s.inverterRecommendation !== void 0 ? s.inverterRecommendation : current.inverter_recommendation,
+      cable_specification: s.cableSpecification !== void 0 ? s.cableSpecification : current.cable_specification,
+      unresolved_technical_issues: s.unresolvedTechnicalIssues !== void 0 ? s.unresolvedTechnicalIssues : current.unresolved_technical_issues,
+      engineer_recommendations: s.engineerRecommendations !== void 0 ? s.engineerRecommendations : current.engineer_recommendations,
+      is_draft: s.isDraft !== void 0 ? s.isDraft ? 1 : 0 : 1
+    };
+    if (s.status !== void 0) {
+      updateMap.status = s.status;
+    } else if (current.status === "Scheduled") {
+      updateMap.status = "In Progress";
+    }
+    if (s.completedAt !== void 0) {
+      updateMap.completed_at = s.completedAt;
+    }
+    const setClauses = [];
+    const values = [];
+    for (const [key, val] of Object.entries(updateMap)) {
+      setClauses.push(`${key} = ?`);
+      values.push(val);
+    }
+    values.push(id);
+    await pool.query(`UPDATE site_surveys SET ${setClauses.join(", ")} WHERE id = ?`, values);
+    const [updated] = await pool.query("SELECT * FROM site_surveys WHERE id = ?", [id]);
+    const [photos] = await pool.query("SELECT * FROM survey_photos WHERE survey_id = ? ORDER BY uploaded_at ASC", [id]);
+    const [history] = await pool.query("SELECT * FROM survey_review_history WHERE survey_id = ? ORDER BY created_at ASC", [id]);
+    res.json({ success: true, survey: formatSurvey(updated[0], photos, history) });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var uploadSurveyPhoto = async (req, res) => {
+  try {
+    const { id: surveyId } = req.params;
+    const user = req.user;
+    const [surveys] = await pool.query("SELECT * FROM site_surveys WHERE id = ?", [surveyId]);
+    if (!surveys || surveys.length === 0) {
+      return res.status(404).json({ success: false, error: "Survey not found" });
+    }
+    const {
+      category,
+      fileName,
+      mimeType = "image/jpeg",
+      base64Data,
+      caption = "",
+      latitude = null,
+      longitude = null,
+      gpsAccuracyMeters = null,
+      capturedAt = null
+    } = req.body;
+    if (!category) {
+      return res.status(400).json({ success: false, error: "Photo category is required" });
+    }
+    const photoId = `PH-${Date.now()}-${Math.floor(Math.random() * 1e4)}`;
+    const uploadDir = path2.join(process.cwd(), "uploads", "surveys", surveyId);
+    if (!fs2.existsSync(uploadDir)) {
+      fs2.mkdirSync(uploadDir, { recursive: true });
+    }
+    let filePath = "";
+    let fileSize = 0;
+    if (base64Data) {
+      const matches = base64Data.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+      let buffer;
+      let ext = "jpg";
+      if (matches && matches.length === 3) {
+        buffer = Buffer.from(matches[2], "base64");
+        if (matches[1].includes("png")) ext = "png";
+        if (matches[1].includes("webp")) ext = "webp";
+      } else {
+        buffer = Buffer.from(base64Data, "base64");
+      }
+      const safeFileName = `${photoId}.${ext}`;
+      const fullDiskPath = path2.join(uploadDir, safeFileName);
+      fs2.writeFileSync(fullDiskPath, buffer);
+      filePath = `/uploads/surveys/${surveyId}/${safeFileName}`;
+      fileSize = buffer.length;
+    } else if (req.file) {
+      filePath = `/uploads/surveys/${surveyId}/${req.file.filename}`;
+      fileSize = req.file.size;
+    } else {
+      return res.status(400).json({ success: false, error: "No image file or base64 data provided" });
+    }
+    const hasValidGps = latitude !== null && longitude !== null && !isNaN(Number(latitude)) && !isNaN(Number(longitude));
+    const geoVerified = hasValidGps ? 1 : 0;
+    const verificationStatus = "Uploaded";
+    const uploadedAt = (/* @__PURE__ */ new Date()).toISOString();
+    await pool.query(
+      `INSERT INTO survey_photos (
+        id, survey_id, category, file_name, file_path, file_size, mime_type, 
+        caption, uploader_id, uploader_name, captured_at, uploaded_at, 
+        latitude, longitude, gps_accuracy_meters, geo_verified, verification_status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        photoId,
+        surveyId,
+        category,
+        fileName || `${category}.jpg`,
+        filePath,
+        fileSize,
+        mimeType,
+        caption,
+        user?.id || "EMP-03",
+        user?.name || "Rahul Sharma",
+        capturedAt,
+        uploadedAt,
+        hasValidGps ? Number(latitude) : null,
+        hasValidGps ? Number(longitude) : null,
+        gpsAccuracyMeters ? Number(gpsAccuracyMeters) : null,
+        geoVerified,
+        verificationStatus
+      ]
+    );
+    const [newPhoto] = await pool.query("SELECT * FROM survey_photos WHERE id = ?", [photoId]);
+    res.json({ success: true, photo: formatPhoto(newPhoto[0]) });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var deleteSurveyPhoto = async (req, res) => {
+  try {
+    const { id: surveyId, photoId } = req.params;
+    const [photos] = await pool.query(
+      "SELECT * FROM survey_photos WHERE id = ? AND survey_id = ?",
+      [photoId, surveyId]
+    );
+    if (!photos || photos.length === 0) {
+      return res.json({ success: true, message: "Photo already removed", photoId });
+    }
+    const photo = photos[0];
+    const fullPath = path2.join(process.cwd(), photo.file_path);
+    if (fs2.existsSync(fullPath)) {
+      try {
+        fs2.unlinkSync(fullPath);
+      } catch (e) {
+        console.warn("Failed to delete file from disk:", e.message);
+      }
+    }
+    await pool.query("DELETE FROM survey_photos WHERE id = ?", [photoId]);
+    res.json({ success: true, message: "Photo deleted successfully", photoId });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var submitSurveyForReview = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const user = req.user;
+    const [rows] = await pool.query("SELECT * FROM site_surveys WHERE id = ?", [id]);
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ success: false, error: "Survey not found" });
+    }
+    const survey = rows[0];
+    const errors = [];
+    if (!survey.roof_area_sqft || Number(survey.roof_area_sqft) <= 0) {
+      errors.push("Total roof area must be greater than 0 sq.ft");
+    }
+    if (!survey.shadow_free_area_sqft || Number(survey.shadow_free_area_sqft) <= 0) {
+      errors.push("Usable shadow-free area must be greater than 0 sq.ft");
+    }
+    if (!survey.recommended_kw || Number(survey.recommended_kw) <= 0) {
+      errors.push("Recommended system capacity must be calculated and greater than 0 kW");
+    }
+    const [photos] = await pool.query("SELECT category FROM survey_photos WHERE survey_id = ?", [id]);
+    const categories = new Set(photos.map((p) => p.category));
+    if (!categories.has("full_rooftop_view") && !categories.has("mounting_area")) {
+      errors.push("Mandatory photograph missing: Full Rooftop View or Mounting Area");
+    }
+    if (errors.length > 0 && !req.body.bypassWithExceptions) {
+      return res.status(400).json({
+        success: false,
+        error: "Survey completion checklist failed",
+        checklistErrors: errors
+      });
+    }
+    const submittedAt = (/* @__PURE__ */ new Date()).toISOString();
+    await pool.query(
+      `UPDATE site_surveys 
+       SET status = 'Submitted for Review', 
+           submitted_at = ?, 
+           submitted_by_id = ?, 
+           is_draft = 0 
+       WHERE id = ?`,
+      [submittedAt, user?.id || "EMP-03", id]
+    );
+    const historyId = `HIST-${Date.now()}`;
+    await pool.query(
+      `INSERT INTO survey_review_history (id, survey_id, reviewer_id, reviewer_name, action, comments, created_at)
+       VALUES (?, ?, ?, ?, 'Submitted', ?, ?)`,
+      [historyId, id, user?.id || null, user?.name || "Engineer", req.body.comments || "Survey technical audit submitted for review", submittedAt]
+    );
+    const [updated] = await pool.query("SELECT * FROM site_surveys WHERE id = ?", [id]);
+    const [surveyPhotos] = await pool.query("SELECT * FROM survey_photos WHERE survey_id = ?", [id]);
+    const [history] = await pool.query("SELECT * FROM survey_review_history WHERE survey_id = ? ORDER BY created_at ASC", [id]);
+    res.json({ success: true, message: "Survey successfully submitted for review", survey: formatSurvey(updated[0], surveyPhotos, history) });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var reviewSurvey = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const user = req.user;
+    const { decision, comments } = req.body;
+    if (!decision || decision !== "Approved" && decision !== "Changes Required") {
+      return res.status(400).json({ success: false, error: 'Valid decision ("Approved" or "Changes Required") is required' });
+    }
+    const [rows] = await pool.query("SELECT * FROM site_surveys WHERE id = ?", [id]);
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ success: false, error: "Survey not found" });
+    }
+    const survey = rows[0];
+    const reviewedAt = (/* @__PURE__ */ new Date()).toISOString();
+    const newStatus = decision === "Approved" ? "Approved" : "Changes Required";
+    await pool.query(
+      `UPDATE site_surveys 
+       SET status = ?, 
+           reviewed_at = ?, 
+           reviewed_by_id = ?, 
+           reviewer_name = ?, 
+           review_decision = ?, 
+           review_comments = ?
+       WHERE id = ?`,
+      [newStatus, reviewedAt, user?.id || "EMP-01", user?.name || "Reviewer", decision, comments || "", id]
+    );
+    const historyId = `HIST-${Date.now()}`;
+    await pool.query(
+      `INSERT INTO survey_review_history (id, survey_id, reviewer_id, reviewer_name, action, comments, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [historyId, id, user?.id || null, user?.name || "Reviewer", decision, comments || "", reviewedAt]
+    );
+    let createdQuotation = null;
+    let quotationError = null;
+    let quotationCreated = false;
+    if (decision === "Approved") {
+      if (survey.lead_id) {
+        await pool.query(
+          "UPDATE leads SET status = 'Survey Completed' WHERE id = ?",
+          [survey.lead_id]
+        );
+      }
+      try {
+        const result = await createQuotationDraftInternal(pool, {
+          surveyId: id,
+          leadId: survey.lead_id,
+          user: user || { id: "EMP-01", name: "Project Manager" }
+        });
+        createdQuotation = result.quotation;
+        quotationCreated = result.created;
+      } catch (qErr) {
+        console.error("Failed to create linked quotation draft on survey approval:", qErr);
+        quotationError = `Survey approved successfully, but quotation draft creation encountered an issue: ${qErr.message}. You can generate the quotation draft from Sales Pipeline.`;
+      }
+    }
+    const [updated] = await pool.query("SELECT * FROM site_surveys WHERE id = ?", [id]);
+    const [surveyPhotos] = await pool.query("SELECT * FROM survey_photos WHERE survey_id = ?", [id]);
+    const [history] = await pool.query("SELECT * FROM survey_review_history WHERE survey_id = ? ORDER BY created_at ASC", [id]);
+    res.json({
+      success: true,
+      message: `Survey ${decision}`,
+      survey: formatSurvey(updated[0], surveyPhotos, history),
+      quotation: createdQuotation,
+      quotationCreated,
+      quotationError
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var rescheduleSurvey = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { scheduledDate, engineerId, engineerName, notes } = req.body;
+    if (!scheduledDate) {
+      return res.status(400).json({ success: false, error: "New scheduled date is required" });
+    }
+    const [rows] = await pool.query("SELECT * FROM site_surveys WHERE id = ?", [id]);
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ success: false, error: "Survey not found" });
+    }
+    const fields = ["scheduled_date = ?"];
+    const values = [scheduledDate];
+    if (engineerId) {
+      fields.push("engineer_id = ?");
+      values.push(engineerId);
+    }
+    if (engineerName) {
+      fields.push("engineer_name = ?");
+      values.push(engineerName);
+    }
+    if (notes) {
+      fields.push("notes = ?");
+      values.push(notes);
+    }
+    values.push(id);
+    await pool.query(`UPDATE site_surveys SET ${fields.join(", ")} WHERE id = ?`, values);
+    const [updated] = await pool.query("SELECT * FROM site_surveys WHERE id = ?", [id]);
+    res.json({ success: true, message: "Survey rescheduled", survey: formatSurvey(updated[0]) });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// server/controllers/bootstrap.controller.ts
+var getBootstrapData = async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        error: "Authentication required to access CRM bootstrap data.",
+        code: "AUTH_REQUIRED"
+      });
+    }
+    const { role, customerId } = req.user;
+    if (role === "Customer") {
+      const activeCustId = customerId || "CUST-2026-001";
+      const [customers2] = await pool.query(
+        "SELECT id, name, email, phone, alternate_phone, address, city, state, pincode, consumer_number_discom, discom_name, gstin, total_system_kw, total_order_value, paid_amount, balance_amount, status, created_at FROM customers WHERE id = ?",
+        [activeCustId]
+      );
+      const [projects2] = await pool.query(
+        "SELECT * FROM projects WHERE customer_id = ? ORDER BY created_at DESC",
+        [activeCustId]
+      );
+      const [invoices2] = await pool.query(
+        "SELECT * FROM invoices WHERE customer_id = ? ORDER BY issue_date DESC",
+        [activeCustId]
+      );
+      const [payments2] = await pool.query(
+        "SELECT * FROM payments WHERE customer_id = ? ORDER BY payment_date DESC",
+        [activeCustId]
+      );
+      const [warranties2] = await pool.query(
+        "SELECT * FROM warranties WHERE customer_id = ?",
+        [activeCustId]
+      );
+      const [amcs2] = await pool.query(
+        "SELECT * FROM amc_contracts WHERE customer_id = ?",
+        [activeCustId]
+      );
+      const [tickets2] = await pool.query(
+        "SELECT * FROM service_tickets WHERE customer_id = ? ORDER BY created_at DESC",
+        [activeCustId]
+      );
+      const [products2] = await pool.query(
+        'SELECT id, sku, name, category, brand, specifications, unit, 0 as current_stock, 0 as reserved_stock, 0 as available_stock, 0 as min_threshold, 0 as unit_cost, "" as supplier_name FROM inventory_products ORDER BY category, name'
+      );
+      return res.json({
+        success: true,
+        data: {
+          employees: [],
+          leads: [],
+          customers: customers2.map((c) => formatCustomer(c)),
+          surveys: [],
+          quotations: [],
+          projects: projects2.map((p) => formatProject(p)),
+          products: products2.map((pr) => formatProduct(pr)),
+          invoices: invoices2.map((i) => formatInvoice(i)),
+          payments: payments2.map((py) => formatPayment(py)),
+          warranties: warranties2.map((w) => formatWarranty(w)),
+          amcs: amcs2.map((a) => formatAmc(a)),
+          tickets: tickets2.map((t) => formatTicket(t)),
+          followUps: [],
+          suppliers: [],
+          expenses: [],
+          automationRules: []
+        }
+      });
+    }
+    const [employees] = await pool.query(
+      "SELECT id, name, email, phone, role, department, avatar, active_leads_count, completed_projects_count, location FROM employees"
+    );
+    const [leads] = await pool.query("SELECT * FROM leads ORDER BY created_at DESC");
+    const [customers] = await pool.query(
+      "SELECT id, name, email, phone, alternate_phone, address, city, state, pincode, consumer_number_discom, discom_name, gstin, converted_from_lead_id, total_system_kw, total_order_value, paid_amount, balance_amount, status, created_at FROM customers ORDER BY created_at DESC"
+    );
+    const [surveys] = await pool.query("SELECT * FROM site_surveys ORDER BY scheduled_date DESC");
+    const [surveyPhotos] = await pool.query("SELECT * FROM survey_photos ORDER BY uploaded_at ASC");
+    const [surveyHistory] = await pool.query("SELECT * FROM survey_review_history ORDER BY created_at ASC");
+    const photosBySurvey = {};
+    for (const p of surveyPhotos) {
+      if (!photosBySurvey[p.survey_id]) photosBySurvey[p.survey_id] = [];
+      photosBySurvey[p.survey_id].push(p);
+    }
+    const historyBySurvey = {};
+    for (const h of surveyHistory) {
+      if (!historyBySurvey[h.survey_id]) historyBySurvey[h.survey_id] = [];
+      historyBySurvey[h.survey_id].push(h);
+    }
+    const [quotations] = await pool.query("SELECT * FROM quotations ORDER BY created_at DESC");
+    const [projects] = await pool.query("SELECT * FROM projects ORDER BY created_at DESC");
+    const [products] = await pool.query("SELECT * FROM inventory_products ORDER BY category, name");
+    const [invoices] = await pool.query("SELECT * FROM invoices ORDER BY issue_date DESC");
+    const [payments] = await pool.query("SELECT * FROM payments ORDER BY payment_date DESC");
+    const [warranties] = await pool.query("SELECT * FROM warranties");
+    const [amcs] = await pool.query("SELECT * FROM amc_contracts");
+    const [tickets] = await pool.query("SELECT * FROM service_tickets ORDER BY created_at DESC");
+    const [followUps] = await pool.query("SELECT * FROM follow_ups ORDER BY due_date ASC");
+    const [suppliers] = await pool.query("SELECT * FROM suppliers");
+    const [expenses] = await pool.query("SELECT * FROM expenses ORDER BY date DESC");
+    const [automationRules] = await pool.query("SELECT * FROM automation_rules");
+    res.json({
+      success: true,
+      data: {
+        employees: employees.map((e) => ({
+          id: e.id,
+          name: e.name,
+          email: e.email,
+          phone: e.phone,
+          role: e.role,
+          department: e.department,
+          avatar: e.avatar,
+          activeLeadsCount: e.active_leads_count,
+          completedProjectsCount: e.completed_projects_count,
+          location: e.location
+        })),
+        leads: leads.map((l) => ({
+          id: l.id,
+          name: l.name,
+          email: l.email,
+          phone: l.phone,
+          city: l.city,
+          state: l.state,
+          address: l.address,
+          pincode: l.pincode,
+          source: l.source,
+          status: l.status,
+          priority: l.priority,
+          assignedToId: l.assigned_to_id,
+          assignedToName: l.assigned_to_name,
+          monthlyBill: Number(l.monthly_bill) || 0,
+          sanctionLoad: Number(l.sanction_load) || 0,
+          roofAreaSqFt: Number(l.roof_area_sqft) || 0,
+          roofType: l.roof_type,
+          recommendedKw: Number(l.recommended_kw) || 0,
+          estimatedBudget: Number(l.estimated_budget) || 0,
+          notes: l.notes || "",
+          createdAt: l.created_at,
+          updatedAt: l.updated_at,
+          lastContactedAt: l.last_contacted_at
+        })),
+        customers: customers.map((c) => formatCustomer(c, role)),
+        surveys: surveys.map((s) => formatSurvey(s, photosBySurvey[s.id] || [], historyBySurvey[s.id] || [])),
+        quotations: quotations.map((q) => ({
+          id: q.id,
+          quotationNumber: q.quotation_number,
+          leadId: q.lead_id,
+          leadName: q.lead_name,
+          customerPhone: q.customer_phone,
+          customerAddress: q.customer_address,
+          systemCapacityKw: Number(q.system_capacity_kw) || 0,
+          currentVersion: Number(q.current_version) || 1,
+          versions: typeof q.versions === "string" ? JSON.parse(q.versions) : q.versions || [],
+          status: q.status,
+          sentDate: q.sent_date,
+          validUntil: q.valid_until,
+          salespersonId: q.salesperson_id,
+          salespersonName: q.salesperson_name,
+          totalAmount: role === "Installation Team" ? 0 : Number(q.total_amount) || 0,
+          proposalType: q.proposal_type || "Final_Technical",
+          packageTier: q.package_tier || "Standard",
+          approvalStatus: q.approval_status || "Approved",
+          discountAmount: Number(q.discount_amount) || 0,
+          discountApprovedBy: q.discount_approved_by,
+          subsidyAmount: Number(q.subsidy_amount) || 0,
+          taxableAmount: Number(q.taxable_amount) || 0,
+          gstRate: Number(q.gst_rate) || 13.8,
+          gstAmount: Number(q.gst_amount) || 0,
+          pdfUrl: q.pdf_url,
+          convertedToProjectId: q.converted_to_project_id,
+          surveyId: q.survey_id,
+          createdAt: q.created_at
+        })),
+        projects: projects.map((p) => formatProject(p, role)),
+        products: products.map((pr) => formatProduct(pr, role)),
+        invoices: role === "Installation Team" ? [] : invoices.map((i) => formatInvoice(i)),
+        payments: role === "Installation Team" ? [] : payments.map((py) => formatPayment(py)),
+        warranties: warranties.map((w) => formatWarranty(w)),
+        amcs: amcs.map((a) => formatAmc(a)),
+        tickets: tickets.map((t) => formatTicket(t)),
+        followUps: followUps.map((f) => ({
+          id: f.id,
+          leadId: f.lead_id,
+          leadName: f.lead_name,
+          customerId: f.customer_id,
+          customerName: f.customer_name,
+          quotationId: f.quotation_id,
+          title: f.title,
+          dueDate: f.due_date,
+          dueTime: f.due_time,
+          type: f.type,
+          status: f.status,
+          priority: f.priority,
+          assignedToId: f.assigned_to_id,
+          assignedToName: f.assigned_to_name,
+          notes: f.notes || "",
+          completedAt: f.completed_at
+        })),
+        suppliers: suppliers.map((su) => ({
+          id: su.id,
+          name: su.name,
+          contactPerson: su.contact_person,
+          email: su.email,
+          phone: su.phone,
+          category: su.category,
+          city: su.city,
+          address: su.address,
+          gstin: su.gstin,
+          paymentTerms: su.payment_terms,
+          rating: Number(su.rating) || 4.5
+        })),
+        expenses: role === "Installation Team" ? [] : expenses.map((ex) => ({
+          id: ex.id,
+          projectId: ex.project_id,
+          category: ex.category,
+          title: ex.title,
+          totalAmount: Number(ex.total_amount) || 0,
+          paymentMode: ex.payment_mode,
+          receiptUrl: ex.receipt_url,
+          recordedBy: ex.recorded_by,
+          date: ex.date,
+          notes: ex.notes || ""
+        })),
+        automationRules: automationRules.map((ar) => ({
+          id: ar.id,
+          name: ar.name,
+          description: ar.description,
+          triggerEvent: ar.trigger_event,
+          conditionExpression: ar.condition_expression,
+          actionType: ar.action_type,
+          actionPayload: typeof ar.action_payload === "string" ? JSON.parse(ar.action_payload) : ar.action_payload || {},
+          isActive: Boolean(ar.is_active),
+          executionCount: Number(ar.execution_count) || 0,
+          lastExecutedAt: ar.last_executed_at
+        }))
+      }
+    });
+  } catch (error) {
+    console.error("Bootstrap error:", error);
+    res.status(500).json({ success: false, error: "Failed to load bootstrap data." });
+  }
+};
+function formatCustomer(c, role) {
+  const isInstallation = role === "Installation Team";
+  return {
+    id: c.id,
+    name: c.name,
+    email: c.email,
+    phone: c.phone,
+    alternatePhone: c.alternate_phone,
+    address: c.address,
+    city: c.city,
+    state: c.state,
+    pincode: c.pincode,
+    consumerNumberDiscom: c.consumer_number_discom,
+    discomName: c.discom_name,
+    gstin: c.gstin,
+    convertedFromLeadId: c.converted_from_lead_id,
+    totalSystemKw: Number(c.total_system_kw) || 0,
+    totalOrderValue: isInstallation ? 0 : Number(c.total_order_value) || 0,
+    paidAmount: isInstallation ? 0 : Number(c.paid_amount) || 0,
+    balanceAmount: isInstallation ? 0 : Number(c.balance_amount) || 0,
+    status: c.status,
+    createdAt: c.created_at
+  };
+}
+function formatProject(p, role) {
+  const isInstallation = role === "Installation Team";
+  return {
+    id: p.id,
+    customerId: p.customer_id,
+    customerName: p.customer_name,
+    customerPhone: p.customer_phone,
+    customerAddress: p.customer_address,
+    quotationId: p.quotation_id,
+    capacityKw: Number(p.capacity_kw) || 0,
+    totalAmount: isInstallation ? 0 : Number(p.total_amount) || 0,
+    stage: p.stage,
+    startDate: p.start_date,
+    targetCompletionDate: p.target_completion_date,
+    projectManagerId: p.project_manager_id,
+    projectManagerName: p.project_manager_name,
+    installationLeadId: p.installation_lead_id,
+    installationLeadName: p.installation_lead_name,
+    checklist: typeof p.checklist === "string" ? JSON.parse(p.checklist) : p.checklist || {},
+    tasks: typeof p.tasks === "string" ? JSON.parse(p.tasks) : p.tasks || [],
+    inventoryReserved: Boolean(p.inventory_reserved),
+    materialShortageFlag: Boolean(p.material_shortage_flag),
+    shortageDetails: p.shortage_details,
+    commissioningDate: p.commissioning_date,
+    netMeterInstalledDate: p.net_meter_installed_date,
+    warrantyActivated: Boolean(p.warranty_activated),
+    amcInitiated: Boolean(p.amc_initiated),
+    discomSanctionNumber: p.discom_sanction_number,
+    notes: p.notes || ""
+  };
+}
+function formatProduct(pr, role) {
+  const isInstallation = role === "Installation Team";
+  return {
+    id: pr.id,
+    sku: pr.sku,
+    name: pr.name,
+    category: pr.category,
+    brand: pr.brand,
+    specifications: pr.specifications,
+    unit: pr.unit,
+    currentStock: Number(pr.current_stock) || 0,
+    reservedStock: Number(pr.reserved_stock) || 0,
+    availableStock: Number(pr.available_stock) || 0,
+    minThreshold: Number(pr.min_threshold) || 0,
+    unitCost: isInstallation ? 0 : Number(pr.unit_cost) || 0,
+    supplierName: pr.supplier_name
+  };
+}
+function formatInvoice(i) {
+  return {
+    id: i.id,
+    invoiceNumber: i.invoice_number,
+    projectId: i.project_id,
+    customerId: i.customer_id,
+    customerName: i.customer_name,
+    customerPhone: i.customer_phone,
+    customerGstin: i.customer_gstin,
+    issueDate: i.issue_date,
+    dueDate: i.due_date,
+    items: typeof i.items === "string" ? JSON.parse(i.items) : i.items || [],
+    subtotal: Number(i.subtotal) || 0,
+    cgst: Number(i.cgst) || 0,
+    sgst: Number(i.sgst) || 0,
+    igst: Number(i.igst) || 0,
+    totalAmount: Number(i.total_amount) || 0,
+    paidAmount: Number(i.paid_amount) || 0,
+    balanceDue: Number(i.balance_due) || 0,
+    status: i.status
+  };
+}
+function formatPayment(py) {
+  return {
+    id: py.id,
+    paymentNumber: py.payment_number,
+    invoiceId: py.invoice_id,
+    projectId: py.project_id,
+    customerId: py.customer_id,
+    customerName: py.customer_name,
+    amount: Number(py.amount) || 0,
+    paymentDate: py.payment_date,
+    paymentMode: py.payment_mode,
+    transactionReference: py.transaction_reference,
+    bankName: py.bank_name,
+    status: py.status,
+    recordedBy: py.recorded_by
+  };
+}
+function formatWarranty(w) {
+  return {
+    id: w.id,
+    projectId: w.project_id,
+    customerId: w.customer_id,
+    customerName: w.customer_name,
+    equipmentType: w.equipment_type,
+    makeModel: w.make_model,
+    serialNumber: w.serial_number,
+    warrantyPeriodYears: Number(w.warranty_period_years) || 10,
+    startDate: w.start_date,
+    endDate: w.end_date,
+    daysRemaining: Number(w.days_remaining) || 0,
+    status: w.status
+  };
+}
+function formatAmc(a) {
+  return {
+    id: a.id,
+    customerId: a.customer_id,
+    customerName: a.customer_name,
+    customerPhone: a.customer_phone,
+    customerAddress: a.customer_address,
+    projectId: a.project_id,
+    capacityKw: Number(a.capacity_kw) || 0,
+    planName: a.plan_name,
+    annualPrice: Number(a.annual_price) || 0,
+    visitsPerYear: Number(a.visits_per_year) || 4,
+    completedVisits: Number(a.completed_visits) || 0,
+    startDate: a.start_date,
+    endDate: a.end_date,
+    status: a.status,
+    nextScheduledVisit: a.next_scheduled_visit
+  };
+}
+function formatTicket(t) {
+  return {
+    id: t.id,
+    ticketNumber: t.ticket_number,
+    customerId: t.customer_id,
+    customerName: t.customer_name,
+    customerPhone: t.phone,
+    customerAddress: t.customer_address,
+    projectId: t.project_id,
+    issueCategory: t.issue_category,
+    severity: t.severity,
+    status: t.status,
+    technicianId: t.technician_id,
+    technicianName: t.technician_name,
+    description: t.description,
+    createdAt: t.created_at,
+    scheduledDate: t.scheduled_date,
+    resolvedAt: t.resolved_at,
+    resolutionNotes: t.resolution_notes,
+    customerFeedbackScore: Number(t.customer_feedback_score) || 5
+  };
+}
+
+// server/routes/auth.routes.ts
+import { Router } from "express";
+
+// server/utils/security.ts
+import crypto from "crypto";
+import dotenv2 from "dotenv";
+dotenv2.config();
+var JWT_SECRET = process.env.JWT_SECRET || "ab_energy_solutions_default_dev_secret_2026_solar_crm";
+function hashPassword(password, providedSalt) {
+  const salt = providedSalt || crypto.randomBytes(16).toString("hex");
+  const derivedKey = crypto.scryptSync(password, salt, 64);
+  return {
+    hash: derivedKey.toString("hex"),
+    salt
+  };
+}
+function verifyPassword(password, storedHash, storedSalt) {
+  try {
+    const derivedKey = crypto.scryptSync(password, storedSalt, 64);
+    const hashBuffer = Buffer.from(storedHash, "hex");
+    const derivedBuffer = derivedKey;
+    if (hashBuffer.length !== derivedBuffer.length) {
+      return false;
+    }
+    return crypto.timingSafeEqual(hashBuffer, derivedBuffer);
+  } catch (err) {
+    return false;
+  }
+}
+function base64UrlEncode(str) {
+  return Buffer.from(str).toString("base64").replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+}
+function base64UrlDecode(str) {
+  let base64 = str.replace(/-/g, "+").replace(/_/g, "/");
+  while (base64.length % 4) {
+    base64 += "=";
+  }
+  return Buffer.from(base64, "base64").toString("utf8");
+}
+function signJwt(payload, expiresInSeconds = 86400) {
+  const header = {
+    alg: "HS256",
+    typ: "JWT"
+  };
+  const now = Math.floor(Date.now() / 1e3);
+  const fullPayload = {
+    ...payload,
+    iat: now,
+    exp: now + expiresInSeconds
+  };
+  const encodedHeader = base64UrlEncode(JSON.stringify(header));
+  const encodedPayload = base64UrlEncode(JSON.stringify(fullPayload));
+  const signatureInput = `${encodedHeader}.${encodedPayload}`;
+  const hmac = crypto.createHmac("sha256", JWT_SECRET);
+  hmac.update(signatureInput);
+  const encodedSignature = base64UrlEncode(hmac.digest("binary"));
+  return `${signatureInput}.${encodedSignature}`;
+}
+function verifyJwt(token) {
+  try {
+    if (!token || typeof token !== "string") return null;
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    const [encodedHeader, encodedPayload, encodedSignature] = parts;
+    const signatureInput = `${encodedHeader}.${encodedPayload}`;
+    const hmac = crypto.createHmac("sha256", JWT_SECRET);
+    hmac.update(signatureInput);
+    const expectedSignature = base64UrlEncode(hmac.digest("binary"));
+    const signatureBuffer = Buffer.from(encodedSignature);
+    const expectedBuffer = Buffer.from(expectedSignature);
+    if (signatureBuffer.length !== expectedBuffer.length) {
+      return null;
+    }
+    if (!crypto.timingSafeEqual(signatureBuffer, expectedBuffer)) {
+      return null;
+    }
+    const payloadJson = base64UrlDecode(encodedPayload);
+    const payload = JSON.parse(payloadJson);
+    const now = Math.floor(Date.now() / 1e3);
+    if (payload.exp && payload.exp < now) {
+      return null;
+    }
+    return payload;
+  } catch (err) {
+    return null;
+  }
+}
+
+// server/controllers/auth.controller.ts
+var loginRateLimitMap = /* @__PURE__ */ new Map();
+var MAX_ATTEMPTS = 10;
+var WINDOW_MS = 5 * 60 * 1e3;
+var login = async (req, res) => {
+  try {
+    const ip = req.ip || req.socket.remoteAddress || "unknown";
+    const identifier = (req.body.username || req.body.email || req.body.identifier || "").trim();
+    const password = req.body.password || "";
+    const now = Date.now();
+    const limitRecord = loginRateLimitMap.get(ip);
+    if (limitRecord) {
+      if (now - limitRecord.lastAttemptTime < WINDOW_MS) {
+        if (limitRecord.attempts >= MAX_ATTEMPTS) {
+          return res.status(429).json({
+            success: false,
+            error: "Too many failed login attempts. Please wait 5 minutes before trying again.",
+            code: "RATE_LIMIT_EXCEEDED"
+          });
+        }
+      } else {
+        loginRateLimitMap.delete(ip);
+      }
+    }
+    if (!identifier || !password) {
+      return res.status(400).json({
+        success: false,
+        error: "Please provide both username/email and password."
+      });
+    }
+    const [rows] = await pool.query(
+      `SELECT id, username, email, password_hash, password_salt, role, employee_id, customer_id, name, is_active 
+       FROM user_accounts 
+       WHERE (username = ? OR email = ?) AND is_active = TRUE
+       LIMIT 1`,
+      [identifier, identifier]
+    );
+    let user = rows && rows.length > 0 ? rows[0] : null;
+    if (!user) {
+      const [empRows] = await pool.query(
+        `SELECT id, username, email, password_hash, password_salt, role, name 
+         FROM employees 
+         WHERE (username = ? OR email = ?) AND password_hash IS NOT NULL
+         LIMIT 1`,
+        [identifier, identifier]
+      );
+      if (empRows && empRows.length > 0) {
+        user = {
+          ...empRows[0],
+          employee_id: empRows[0].id,
+          customer_id: null,
+          is_active: true
+        };
+      }
+    }
+    if (!user) {
+      const [custRows] = await pool.query(
+        `SELECT id, username, email, password_hash, password_salt, name 
+         FROM customers 
+         WHERE (username = ? OR email = ?) AND password_hash IS NOT NULL
+         LIMIT 1`,
+        [identifier, identifier]
+      );
+      if (custRows && custRows.length > 0) {
+        user = {
+          ...custRows[0],
+          role: "Customer",
+          employee_id: null,
+          customer_id: custRows[0].id,
+          is_active: true
+        };
+      }
+    }
+    if (!user || !user.password_hash || !user.password_salt) {
+      const currentAttempts = limitRecord ? limitRecord.attempts + 1 : 1;
+      loginRateLimitMap.set(ip, { attempts: currentAttempts, lastAttemptTime: now });
+      return res.status(401).json({
+        success: false,
+        error: "Invalid credentials. Please verify your username and password."
+      });
+    }
+    const isValid = verifyPassword(password, user.password_hash, user.password_salt);
+    if (!isValid) {
+      const currentAttempts = limitRecord ? limitRecord.attempts + 1 : 1;
+      loginRateLimitMap.set(ip, { attempts: currentAttempts, lastAttemptTime: now });
+      return res.status(401).json({
+        success: false,
+        error: "Invalid credentials. Please verify your username and password."
+      });
+    }
+    loginRateLimitMap.delete(ip);
+    const tokenPayload = {
+      userId: user.id,
+      username: user.username,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      employeeId: user.employee_id,
+      customerId: user.customer_id
+    };
+    const token = signJwt(tokenPayload, 86400);
+    res.json({
+      success: true,
+      token,
+      user: tokenPayload,
+      message: "Login successful."
+    });
+  } catch (error) {
+    console.error("Login error:", error);
+    res.status(500).json({ success: false, error: "Internal server error during authentication." });
+  }
+};
+var getMe = async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ success: false, error: "Unauthenticated." });
+    }
+    res.json({
+      success: true,
+      user: req.user
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+var logout = async (_req, res) => {
+  res.json({
+    success: true,
+    message: "Logged out successfully."
+  });
+};
+
+// server/middleware/auth.ts
+function authenticateToken(req, res, next) {
+  const authHeader = req.headers["authorization"];
+  const token = authHeader && authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  if (!token) {
+    return res.status(401).json({
+      success: false,
+      error: "Authentication required. Please provide a valid session token.",
+      code: "AUTH_REQUIRED"
+    });
+  }
+  const payload = verifyJwt(token);
+  if (!payload) {
+    return res.status(401).json({
+      success: false,
+      error: "Invalid or expired session token. Please log in again.",
+      code: "TOKEN_INVALID_OR_EXPIRED"
+    });
+  }
+  req.user = payload;
+  next();
+}
+function requireRole(allowedRoles) {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        error: "Authentication required before permission evaluation.",
+        code: "UNAUTHENTICATED"
+      });
+    }
+    const userRole = req.user.role;
+    const isSuperAdmin = userRole === "Super Admin";
+    const isPermitted = isSuperAdmin || allowedRoles.includes(userRole);
+    if (!isPermitted) {
+      return res.status(403).json({
+        success: false,
+        error: `Access Denied: Role '${userRole}' does not possess permissions for this operation. Permitted roles: ${allowedRoles.join(", ")}.`,
+        code: "FORBIDDEN_ROLE"
+      });
+    }
+    next();
+  };
+}
+function requireCustomerOwnership(entityCustomerIdExtractor) {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ success: false, error: "Authentication required." });
+    }
+    if (req.user.role !== "Customer") {
+      return next();
+    }
+    const requestedCustomerId = entityCustomerIdExtractor ? entityCustomerIdExtractor(req) : req.params.customerId || req.params.id || req.query.customerId || req.body.customerId;
+    if (requestedCustomerId && requestedCustomerId !== req.user.customerId) {
+      return res.status(403).json({
+        success: false,
+        error: "Access Denied: You are not authorized to access another customer's solar plant records.",
+        code: "CUSTOMER_ISOLATION_VIOLATION"
+      });
+    }
+    next();
+  };
+}
+
+// server/routes/auth.routes.ts
+var authRouter = Router();
+authRouter.post("/login", login);
+authRouter.get("/me", authenticateToken, getMe);
+authRouter.post("/logout", logout);
+
+// server/routes/leads.routes.ts
+import { Router as Router2 } from "express";
+
+// server/controllers/leads.controller.ts
+var recommendLeadPriority = async (req, res) => {
+  try {
+    const { monthlyBill, sanctionLoad, roofAreaSqFt, buyingIntent, source, notes } = req.body;
+    const bill = Number(monthlyBill) || 0;
+    const load = Number(sanctionLoad) || 0;
+    const roof = Number(roofAreaSqFt) || 0;
+    const notesLower = (notes || "").toLowerCase();
+    const intentLower = (buyingIntent || "").toLowerCase();
+    const estKwFromBill = bill > 0 ? Math.round(bill / (8 * 120)) : 0;
+    const estKw = Math.max(estKwFromBill, load);
+    let recommendedPriority = "Medium";
+    let explanation = "";
+    let followUpTarget = "";
+    let score = 60;
+    if (bill >= 25e3 || load >= 20 || estKw >= 20 || notesLower.includes("urgent") || notesLower.includes("immediate quote") || notesLower.includes("factory") || notesLower.includes("hospital") || notesLower.includes("asap")) {
+      recommendedPriority = "Urgent";
+      explanation = `High-capacity installation (${estKw >= 20 ? estKw + " kW Commercial/Industrial scale" : "high energy bill \u20B9" + bill.toLocaleString("en-IN")}) requiring immediate executive attention.`;
+      followUpTarget = "Urgent callback within 2 hours";
+      score = 95;
+    } else if (bill >= 1e4 && bill < 25e3 || load >= 10 && load < 20 || estKw >= 10 && estKw < 20 || intentLower.includes("immediate") && bill >= 8e3 || source === "Referral" || notesLower.includes("ready")) {
+      recommendedPriority = "High";
+      explanation = `Substantial energy consumption (\u20B9${bill.toLocaleString("en-IN")}/mo, ~${estKw} kW) with strong conversion probability.`;
+      followUpTarget = "Same-day contact within 4 hours";
+      score = 80;
+    } else if (bill > 0 && bill < 3e3 && load < 3 || intentLower.includes("future") || intentLower.includes("budgetary") || notesLower.includes("under construction") || notesLower.includes("budget only") || notesLower.includes("next year")) {
+      recommendedPriority = "Low";
+      explanation = "Early-stage informational inquiry, lower consumption tier, or site under construction (timeline > 3 months).";
+      followUpTarget = "Educational nurture & follow-up within 5 days";
+      score = 30;
+    } else {
+      recommendedPriority = "Medium";
+      const displayKw = Math.max(3, estKw || 3);
+      explanation = `Standard residential rooftop system (~${displayKw} kW) eligible for PM Surya Ghar central government subsidy.`;
+      followUpTarget = "Standard discovery call within 24\u201348 hours";
+      score = 60;
+    }
+    return res.json({
+      success: true,
+      data: {
+        recommendedPriority,
+        explanation,
+        followUpTarget,
+        estimatedKw: estKw,
+        score
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var createLead = async (req, res) => {
+  try {
+    const l = req.body;
+    const cleanPhone = (l.phone || "").replace(/\D/g, "");
+    if (cleanPhone.length >= 10) {
+      const [existing] = await pool.query(
+        'SELECT id, name, phone FROM leads WHERE REPLACE(REPLACE(REPLACE(phone, "-", ""), " ", ""), "+91", "") LIKE ? LIMIT 1',
+        [`%${cleanPhone.slice(-10)}`]
+      );
+      if (existing && existing.length > 0) {
+        return res.status(409).json({
+          success: false,
+          error: `Duplicate lead: A lead with phone ${l.phone} already exists (${existing[0].name} - ${existing[0].id})`,
+          existingLead: existing[0]
+        });
+      }
+    }
+    let finalId = l.id || `LD-2026-${Date.now().toString().slice(-4)}`;
+    const [existingId] = await pool.query("SELECT id FROM leads WHERE id = ? LIMIT 1", [finalId]);
+    if (existingId && existingId.length > 0) {
+      const [allIds] = await pool.query("SELECT id FROM leads WHERE id LIKE 'LD-2026-%'");
+      let maxNum = 28;
+      for (const row of allIds) {
+        const match = row.id.match(/LD-2026-(\d+)/);
+        if (match) {
+          const n = parseInt(match[1], 10);
+          if (n > maxNum) maxNum = n;
+        }
+      }
+      finalId = `LD-2026-${String(maxNum + 1).padStart(3, "0")}`;
+      l.id = finalId;
+    }
+    await pool.query(
+      `INSERT INTO leads (id, name, email, phone, city, state, address, pincode, source, status, priority, recommended_priority, priority_override_reason, buying_intent, assigned_to_id, assigned_to_name, monthly_bill, sanction_load, roof_area_sqft, roof_type, recommended_kw, estimated_budget, notes, created_at, updated_at, last_contacted_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        l.id,
+        l.name,
+        l.email || null,
+        l.phone,
+        l.city || "",
+        l.state || "",
+        l.address || "",
+        l.pincode || "",
+        l.source || "Website",
+        l.status || "New",
+        l.priority || "Medium",
+        l.recommendedPriority || null,
+        l.priorityOverrideReason || null,
+        l.buyingIntent || null,
+        l.assignedToId || "EMP-02",
+        l.assignedToName || "Ananya Deshmukh",
+        l.monthlyBill || 0,
+        l.sanctionLoad || 0,
+        l.roofAreaSqFt || 0,
+        l.roofType || null,
+        l.recommendedKw || 0,
+        l.estimatedBudget || 0,
+        l.notes || "",
+        l.createdAt || (/* @__PURE__ */ new Date()).toISOString(),
+        l.updatedAt || (/* @__PURE__ */ new Date()).toISOString(),
+        l.lastContactedAt || null
+      ]
+    );
+    res.json({ success: true, lead: l });
+  } catch (err) {
+    console.error("Error creating lead:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var updateLead = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+    const fields = [];
+    const values = [];
+    if (updates.status !== void 0) {
+      fields.push("status = ?");
+      values.push(updates.status);
+    }
+    if (updates.priority !== void 0) {
+      fields.push("priority = ?");
+      values.push(updates.priority);
+    }
+    if (updates.recommendedPriority !== void 0) {
+      fields.push("recommended_priority = ?");
+      values.push(updates.recommendedPriority);
+    }
+    if (updates.priorityOverrideReason !== void 0) {
+      fields.push("priority_override_reason = ?");
+      values.push(updates.priorityOverrideReason);
+    }
+    if (updates.notes !== void 0) {
+      fields.push("notes = ?");
+      values.push(updates.notes);
+    }
+    if (updates.updatedAt !== void 0) {
+      fields.push("updated_at = ?");
+      values.push(updates.updatedAt);
+    }
+    if (updates.assignedToId !== void 0) {
+      fields.push("assigned_to_id = ?");
+      values.push(updates.assignedToId);
+    }
+    if (updates.assignedToName !== void 0) {
+      fields.push("assigned_to_name = ?");
+      values.push(updates.assignedToName);
+    }
+    if (fields.length > 0) {
+      values.push(id);
+      await pool.query(`UPDATE leads SET ${fields.join(", ")} WHERE id = ?`, values);
+    }
+    res.json({ success: true, id, updates });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var deleteLead = async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query("DELETE FROM leads WHERE id = ?", [id]);
+    res.json({ success: true, id });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// server/routes/leads.routes.ts
+var leadsRouter = Router2();
+leadsRouter.get("/", authenticateToken, requireRole(["Sales Executive", "Sales Manager"]), async (_req, res) => {
+  try {
+    const [rows] = await pool.query("SELECT * FROM leads ORDER BY created_at DESC");
+    res.json({ success: true, leads: rows });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+leadsRouter.post("/recommend-priority", authenticateToken, requireRole(["Sales Executive", "Sales Manager"]), recommendLeadPriority);
+leadsRouter.post("/", authenticateToken, requireRole(["Sales Executive", "Sales Manager"]), createLead);
+leadsRouter.put("/:id", authenticateToken, requireRole(["Sales Executive", "Sales Manager", "Survey Engineer", "Project Manager"]), updateLead);
+leadsRouter.delete("/:id", authenticateToken, requireRole(["Sales Manager"]), deleteLead);
+
+// server/routes/surveys.routes.ts
+import { Router as Router3 } from "express";
+var surveysRouter = Router3();
+surveysRouter.get("/", authenticateToken, getSurveys);
+surveysRouter.get("/:id", authenticateToken, getSurveyById);
+surveysRouter.post("/", authenticateToken, requireRole(["Survey Engineer", "Sales Executive", "Sales Manager", "Project Manager", "Super Admin"]), createSurvey);
+surveysRouter.put("/:id", authenticateToken, requireRole(["Survey Engineer", "Project Manager", "Super Admin"]), updateSurvey);
+surveysRouter.put("/:id/draft", authenticateToken, requireRole(["Survey Engineer", "Project Manager", "Super Admin"]), updateSurvey);
+surveysRouter.post("/:id/photos", authenticateToken, requireRole(["Survey Engineer", "Project Manager", "Super Admin"]), uploadSurveyPhoto);
+surveysRouter.delete("/:id/photos/:photoId", authenticateToken, requireRole(["Survey Engineer", "Project Manager", "Super Admin"]), deleteSurveyPhoto);
+surveysRouter.post("/:id/submit", authenticateToken, requireRole(["Survey Engineer", "Super Admin"]), submitSurveyForReview);
+surveysRouter.post("/:id/review", authenticateToken, requireRole(["Project Manager", "Sales Manager", "Super Admin"]), reviewSurvey);
+surveysRouter.post("/:id/reschedule", authenticateToken, requireRole(["Survey Engineer", "Project Manager", "Sales Manager", "Super Admin"]), rescheduleSurvey);
+
+// server/routes/quotations.routes.ts
+import { Router as Router4 } from "express";
+var quotationsRouter = Router4();
+quotationsRouter.post(
+  "/calculate",
+  authenticateToken,
+  requireRole(["Sales Executive", "Sales Manager", "Survey Engineer", "Project Manager", "Super Admin"]),
+  calculateQuotationPreview
+);
+quotationsRouter.get("/", authenticateToken, getQuotations);
+quotationsRouter.get("/:id", authenticateToken, getQuotationById);
+quotationsRouter.post(
+  "/",
+  authenticateToken,
+  requireRole(["Sales Executive", "Sales Manager", "Project Manager", "Super Admin"]),
+  createQuotation
+);
+quotationsRouter.post(
+  "/:id/revisions",
+  authenticateToken,
+  requireRole(["Sales Executive", "Sales Manager", "Super Admin"]),
+  createQuotationRevision
+);
+quotationsRouter.put(
+  "/:id/approve",
+  authenticateToken,
+  requireRole(["Sales Manager", "Super Admin"]),
+  approveQuotationDiscount
+);
+quotationsRouter.put(
+  "/:id/edit",
+  authenticateToken,
+  requireRole(["Sales Executive", "Sales Manager", "Super Admin"]),
+  editQuotation
+);
+quotationsRouter.put(
+  "/:id/customer-accept",
+  authenticateToken,
+  requireRole(["Sales Executive", "Sales Manager", "Super Admin", "Customer"]),
+  recordCustomerAcceptance
+);
+quotationsRouter.put(
+  "/:id",
+  authenticateToken,
+  requireRole(["Sales Executive", "Sales Manager", "Survey Engineer", "Project Manager", "Super Admin"]),
+  updateQuotation
+);
+quotationsRouter.post(
+  "/:id/accept",
+  authenticateToken,
+  requireRole(["Project Manager", "Super Admin"]),
+  acceptQuotation
+);
+quotationsRouter.get("/:id/pdf", authenticateToken, downloadProposalPdf);
+
+// server/routes/customers.routes.ts
+import { Router as Router5 } from "express";
+
+// server/controllers/customers.controller.ts
+var createCustomer = async (req, res) => {
+  try {
+    const c = req.body;
+    await pool.query(
+      `INSERT INTO customers (id, name, email, phone, alternate_phone, address, city, state, pincode, consumer_number_discom, discom_name, gstin, converted_from_lead_id, total_system_kw, total_order_value, paid_amount, balance_amount, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        c.id,
+        c.name,
+        c.email || "",
+        c.phone,
+        c.alternatePhone || null,
+        c.address,
+        c.city || "Bengaluru",
+        c.state || "Karnataka",
+        c.pincode || "560001",
+        c.consumerNumberDiscom || null,
+        c.discomName || "BESCOM",
+        c.gstin || null,
+        c.convertedFromLeadId || null,
+        c.totalSystemKw || 0,
+        c.totalOrderValue || 0,
+        c.paidAmount || 0,
+        c.balanceAmount || 0,
+        c.status || "Active",
+        c.createdAt || (/* @__PURE__ */ new Date()).toISOString()
+      ]
+    );
+    res.json({ success: true, customer: c });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var updateCustomer = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+    const fields = [];
+    const values = [];
+    if (updates.paidAmount !== void 0) {
+      fields.push("paid_amount = ?");
+      values.push(updates.paidAmount);
+    }
+    if (updates.balanceAmount !== void 0) {
+      fields.push("balance_amount = ?");
+      values.push(updates.balanceAmount);
+    }
+    if (updates.status !== void 0) {
+      fields.push("status = ?");
+      values.push(updates.status);
+    }
+    if (updates.address !== void 0) {
+      fields.push("address = ?");
+      values.push(updates.address);
+    }
+    if (updates.phone !== void 0) {
+      fields.push("phone = ?");
+      values.push(updates.phone);
+    }
+    if (updates.email !== void 0) {
+      fields.push("email = ?");
+      values.push(updates.email);
+    }
+    if (fields.length > 0) {
+      values.push(id);
+      await pool.query(`UPDATE customers SET ${fields.join(", ")} WHERE id = ?`, values);
+    }
+    res.json({ success: true, id, updates });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// server/routes/customers.routes.ts
+var customersRouter = Router5();
+customersRouter.post("/", authenticateToken, requireRole(["Sales Manager", "Sales Executive", "Project Manager", "Accounts"]), createCustomer);
+customersRouter.put("/:id", authenticateToken, requireCustomerOwnership(), updateCustomer);
+
+// server/routes/projects.routes.ts
+import { Router as Router6 } from "express";
+
+// server/controllers/projects.controller.ts
+var createProject = async (req, res) => {
+  try {
+    const p = req.body;
+    await pool.query(
+      `INSERT INTO projects (id, customer_id, customer_name, customer_phone, customer_address, quotation_id, capacity_kw, total_amount, stage, start_date, target_completion_date, project_manager_id, project_manager_name, installation_lead_id, installation_lead_name, checklist, tasks, inventory_reserved, material_shortage_flag, shortage_details, commissioning_date, net_meter_installed_date, warranty_activated, amc_initiated, discom_sanction_number, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        p.id,
+        p.customerId,
+        p.customerName,
+        p.customerPhone || "",
+        p.customerAddress || "",
+        p.quotationId,
+        p.capacityKw || 0,
+        p.totalAmount || 0,
+        p.stage,
+        p.startDate,
+        p.targetCompletionDate,
+        p.projectManagerId,
+        p.projectManagerName,
+        p.installationLeadId,
+        p.installationLeadName,
+        JSON.stringify(p.checklist || {}),
+        JSON.stringify(p.tasks || []),
+        p.inventoryReserved ? 1 : 0,
+        p.materialShortageFlag ? 1 : 0,
+        p.shortageDetails || null,
+        p.commissioningDate || null,
+        p.netMeterInstalledDate || null,
+        p.warrantyActivated ? 1 : 0,
+        p.amcInitiated ? 1 : 0,
+        p.discomSanctionNumber || null,
+        p.notes || ""
+      ]
+    );
+    res.json({ success: true, project: p });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var updateProject = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+    const fields = [];
+    const values = [];
+    if (updates.stage !== void 0) {
+      fields.push("stage = ?");
+      values.push(updates.stage);
+    }
+    if (updates.checklist !== void 0) {
+      fields.push("checklist = ?");
+      values.push(JSON.stringify(updates.checklist));
+    }
+    if (updates.tasks !== void 0) {
+      fields.push("tasks = ?");
+      values.push(JSON.stringify(updates.tasks));
+    }
+    if (updates.commissioningDate !== void 0) {
+      fields.push("commissioning_date = ?");
+      values.push(updates.commissioningDate);
+    }
+    if (updates.netMeterInstalledDate !== void 0) {
+      fields.push("net_meter_installed_date = ?");
+      values.push(updates.netMeterInstalledDate);
+    }
+    if (fields.length > 0) {
+      values.push(id);
+      await pool.query(`UPDATE projects SET ${fields.join(", ")} WHERE id = ?`, values);
+    }
+    res.json({ success: true, id, updates });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// server/routes/projects.routes.ts
+var projectsRouter = Router6();
+projectsRouter.post("/", authenticateToken, requireRole(["Project Manager"]), createProject);
+projectsRouter.put("/:id", authenticateToken, requireRole(["Project Manager", "Installation Team"]), updateProject);
+
+// server/routes/finance.routes.ts
+import { Router as Router7 } from "express";
+
+// server/controllers/finance.controller.ts
+var createInvoice = async (req, res) => {
+  try {
+    const inv = req.body;
+    const invId = inv.id || `INV-${Date.now()}`;
+    const issueDate = inv.issueDate || (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+    const dueDate = inv.dueDate || issueDate;
+    const items = JSON.stringify(inv.items || []);
+    await pool.query(
+      `INSERT INTO invoices (id, invoice_number, project_id, customer_id, customer_name, customer_phone, customer_gstin, issue_date, due_date, items, subtotal, cgst, sgst, igst, total_amount, paid_amount, balance_due, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        invId,
+        inv.invoiceNumber || `INV-${Date.now().toString().slice(-6)}`,
+        inv.projectId || null,
+        inv.customerId || null,
+        inv.customerName || "Customer",
+        inv.customerPhone || "",
+        inv.customerGstin || null,
+        issueDate,
+        dueDate,
+        items,
+        inv.subtotal || 0,
+        inv.cgst || 0,
+        inv.sgst || 0,
+        inv.igst || 0,
+        inv.totalAmount || inv.amount || 0,
+        inv.paidAmount || 0,
+        inv.balanceDue || inv.totalAmount || 0,
+        inv.status || "Draft"
+      ]
+    );
+    res.status(201).json({ success: true, invoice: { ...inv, id: invId } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var updateInvoice = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+    const fields = [];
+    const values = [];
+    if (updates.paidAmount !== void 0) {
+      fields.push("paid_amount = ?");
+      values.push(updates.paidAmount);
+    }
+    if (updates.balanceDue !== void 0) {
+      fields.push("balance_due = ?");
+      values.push(updates.balanceDue);
+    }
+    if (updates.status !== void 0) {
+      fields.push("status = ?");
+      values.push(updates.status);
+    }
+    if (fields.length > 0) {
+      values.push(id);
+      await pool.query(`UPDATE invoices SET ${fields.join(", ")} WHERE id = ?`, values);
+    }
+    res.json({ success: true, id, updates });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var createPayment = async (req, res) => {
+  try {
+    const pay = req.body;
+    const payId = pay.id || `PAY-${Date.now()}`;
+    const paymentDate = pay.paymentDate || (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+    const transRef = pay.transactionReference || pay.transactionRef || `TXN-${Date.now().toString().slice(-6)}`;
+    const recordedBy = pay.recordedBy || req.user?.name || "Accounts Team";
+    await pool.query(
+      `INSERT INTO payments (id, payment_number, invoice_id, project_id, customer_id, customer_name, amount, payment_date, payment_mode, transaction_reference, bank_name, status, recorded_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        payId,
+        pay.paymentNumber || `PAY-${Date.now().toString().slice(-6)}`,
+        pay.invoiceId || null,
+        pay.projectId || null,
+        pay.customerId || null,
+        pay.customerName || "Customer",
+        pay.amount || 0,
+        paymentDate,
+        pay.paymentMode || "NEFT",
+        transRef,
+        pay.bankName || null,
+        pay.status || "Success",
+        recordedBy
+      ]
+    );
+    res.status(201).json({ success: true, payment: { ...pay, id: payId } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// server/routes/finance.routes.ts
+var financeRouter = Router7();
+financeRouter.get("/invoices", authenticateToken, requireRole(["Accounts"]), async (_req, res) => {
+  try {
+    const [rows] = await pool.query("SELECT * FROM invoices ORDER BY issue_date DESC");
+    res.json({ success: true, invoices: rows });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+financeRouter.post("/invoices", authenticateToken, requireRole(["Accounts"]), createInvoice);
+financeRouter.put("/invoices/:id", authenticateToken, requireRole(["Accounts"]), updateInvoice);
+financeRouter.get("/payments", authenticateToken, requireRole(["Accounts"]), async (_req, res) => {
+  try {
+    const [rows] = await pool.query("SELECT * FROM payments ORDER BY payment_date DESC");
+    res.json({ success: true, payments: rows });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+financeRouter.post("/payments", authenticateToken, requireRole(["Accounts"]), createPayment);
+
+// server/routes/service.routes.ts
+import { Router as Router8 } from "express";
+
+// server/controllers/service.controller.ts
+var createWarranty = async (req, res) => {
+  try {
+    const w = req.body;
+    await pool.query(
+      `INSERT INTO warranties (id, project_id, customer_id, customer_name, equipment_type, make_model, serial_number, warranty_period_years, start_date, end_date, days_remaining, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        w.id,
+        w.projectId,
+        w.customerId,
+        w.customerName,
+        w.equipmentType,
+        w.makeModel,
+        w.serialNumber,
+        w.warrantyPeriodYears || 10,
+        w.startDate,
+        w.endDate,
+        w.daysRemaining || 9125,
+        w.status || "Active"
+      ]
+    );
+    res.json({ success: true, warranty: w });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var updateWarranty = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+    const fields = [];
+    const values = [];
+    if (updates.status !== void 0) {
+      fields.push("status = ?");
+      values.push(updates.status);
+    }
+    if (updates.daysRemaining !== void 0) {
+      fields.push("days_remaining = ?");
+      values.push(updates.daysRemaining);
+    }
+    if (fields.length > 0) {
+      values.push(id);
+      await pool.query(`UPDATE warranties SET ${fields.join(", ")} WHERE id = ?`, values);
+    }
+    res.json({ success: true, id, updates });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var createServiceTicket = async (req, res) => {
+  try {
+    const t = req.body;
+    await pool.query(
+      `INSERT INTO service_tickets (id, ticket_number, customer_id, customer_name, phone, customer_address, project_id, issue_category, severity, status, technician_id, technician_name, description, created_at, scheduled_date, resolved_at, resolution_notes, customer_feedback_score)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [t.id, t.ticketNumber, t.customerId, t.customerName, t.customerPhone, t.customerAddress, t.projectId || null, t.issueCategory, t.severity, t.status, t.technicianId || null, t.technicianName || null, t.description, t.createdAt, t.scheduledDate || null, t.resolvedAt || null, t.resolutionNotes || null, t.customerFeedbackScore || 5]
+    );
+    res.json({ success: true, ticket: t });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var updateServiceTicket = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+    const fields = [];
+    const values = [];
+    if (updates.status !== void 0) {
+      fields.push("status = ?");
+      values.push(updates.status);
+    }
+    if (updates.resolvedAt !== void 0) {
+      fields.push("resolved_at = ?");
+      values.push(updates.resolvedAt);
+    }
+    if (updates.resolutionNotes !== void 0) {
+      fields.push("resolution_notes = ?");
+      values.push(updates.resolutionNotes);
+    }
+    if (fields.length > 0) {
+      values.push(id);
+      await pool.query(`UPDATE service_tickets SET ${fields.join(", ")} WHERE id = ?`, values);
+    }
+    res.json({ success: true, id, updates });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// server/routes/service.routes.ts
+var serviceRouter = Router8();
+serviceRouter.post("/warranties", authenticateToken, requireRole(["Service Team", "Project Manager"]), createWarranty);
+serviceRouter.put("/warranties/:id", authenticateToken, requireRole(["Service Team"]), updateWarranty);
+serviceRouter.post("/service-tickets", authenticateToken, requireCustomerOwnership((req) => req.body.customerId), createServiceTicket);
+serviceRouter.put("/service-tickets/:id", authenticateToken, requireRole(["Service Team"]), updateServiceTicket);
+
+// server/routes/inventory.routes.ts
+import { Router as Router9 } from "express";
+
+// server/controllers/inventory.controller.ts
+var reserveInventory = async (req, res) => {
+  try {
+    const { category, quantity, sku, productId } = req.body;
+    const qty = Number(quantity) || 0;
+    if (qty > 0) {
+      if (productId || sku) {
+        await pool.query(
+          `UPDATE inventory_products 
+           SET reserved_stock = reserved_stock + ?, available_stock = GREATEST(0, available_stock - ?)
+           WHERE id = ? OR sku = ? LIMIT 1`,
+          [qty, qty, productId || "", sku || ""]
+        );
+      } else if (category) {
+        await pool.query(
+          `UPDATE inventory_products 
+           SET reserved_stock = reserved_stock + ?, available_stock = GREATEST(0, available_stock - ?)
+           WHERE category = ? LIMIT 1`,
+          [qty, qty, category]
+        );
+      }
+    }
+    res.json({ success: true, category, sku, productId, quantity: qty });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// server/routes/inventory.routes.ts
+var inventoryRouter = Router9();
+inventoryRouter.post("/reserve", authenticateToken, requireRole(["Project Manager", "Installation Team"]), reserveInventory);
+
+// server/routes/users.routes.ts
+import { Router as Router10 } from "express";
+
+// server/controllers/users.controller.ts
+var getUsers = async (req, res) => {
+  try {
+    const currentUser = req.user;
+    if (!currentUser) {
+      return res.status(401).json({ success: false, error: "Authentication required" });
+    }
+    let query = `
+      SELECT u.id, u.username, u.email, u.role, u.name, u.is_active, u.created_at,
+             e.department, e.phone, e.location, e.active_leads_count, e.completed_projects_count
+      FROM user_accounts u
+      LEFT JOIN employees e ON (u.employee_id = e.id OR u.username = e.username)
+    `;
+    const params = [];
+    if (currentUser.role === "Sales Manager") {
+      query += ` WHERE u.role = 'Sales Executive'`;
+    } else if (currentUser.role === "Project Manager") {
+      query += ` WHERE u.role = 'Installation Team'`;
+    } else if (currentUser.role !== "Super Admin") {
+      query += ` WHERE 1 = 0`;
+    }
+    query += ` ORDER BY u.created_at DESC`;
+    const [rows] = await pool.query(query, params);
+    const formattedUsers = rows.map((r) => ({
+      id: r.id,
+      username: r.username,
+      email: r.email,
+      phone: r.phone || "",
+      name: r.name,
+      role: r.role,
+      department: r.department || "",
+      location: r.location || "",
+      isActive: Boolean(r.is_active),
+      createdAt: r.created_at,
+      activeLeadsCount: r.active_leads_count || 0,
+      completedProjectsCount: r.completed_projects_count || 0
+    }));
+    res.json({
+      success: true,
+      data: formattedUsers,
+      users: formattedUsers
+    });
+  } catch (error) {
+    console.error("getUsers error:", error);
+    res.status(500).json({ success: false, error: "Failed to retrieve users" });
+  }
+};
+var createUser = async (req, res) => {
+  try {
+    const currentUser = req.user;
+    if (!currentUser) {
+      return res.status(401).json({ success: false, error: "Authentication required" });
+    }
+    const { username, password, name, email, phone, role, department, location } = req.body;
+    if (!username || !password || !name || !role) {
+      return res.status(400).json({ success: false, error: "Username, password, full name, and role are required" });
+    }
+    if (currentUser.role === "Sales Manager" && role !== "Sales Executive") {
+      return res.status(403).json({ success: false, error: "Sales Managers may only create Sales Executive accounts" });
+    }
+    if (currentUser.role === "Project Manager" && role !== "Installation Team") {
+      return res.status(403).json({ success: false, error: "Project Managers may only create Installation Team accounts" });
+    }
+    if (currentUser.role !== "Super Admin" && currentUser.role !== "Sales Manager" && currentUser.role !== "Project Manager") {
+      return res.status(403).json({ success: false, error: "Unauthorized to create user accounts" });
+    }
+    const [existing] = await pool.query(
+      'SELECT id FROM user_accounts WHERE username = ? OR (email = ? AND email != "") LIMIT 1',
+      [username.trim(), (email || "").trim()]
+    );
+    if (existing && existing.length > 0) {
+      return res.status(409).json({ success: false, error: "Username or email already in use" });
+    }
+    const { hash, salt } = hashPassword(password);
+    const userId = `USR-${Date.now().toString().slice(-6)}`;
+    const empId = `EMP-${Date.now().toString().slice(-4)}`;
+    await pool.query(
+      `INSERT INTO user_accounts (id, username, email, password_hash, password_salt, role, employee_id, customer_id, name, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, TRUE)`,
+      [userId, username.trim(), (email || "").trim(), hash, salt, role, empId, name.trim()]
+    );
+    if (role !== "Customer") {
+      await pool.query(
+        `INSERT INTO employees (id, name, email, phone, role, department, location, active_leads_count, completed_projects_count, username)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
+         ON DUPLICATE KEY UPDATE name = VALUES(name), role = VALUES(role), department = VALUES(department), location = VALUES(location)`,
+        [empId, name.trim(), (email || `${username.trim()}@abenergy.in`).trim(), phone || "+91 98000-00000", role, department || "Solar Operations", location || "Bengaluru", username.trim()]
+      );
+    }
+    res.status(201).json({
+      success: true,
+      message: `User ${username} created successfully with role ${role}`,
+      user: {
+        id: userId,
+        username,
+        name,
+        role,
+        department: department || "Solar Operations",
+        isActive: true
+      }
+    });
+  } catch (error) {
+    console.error("createUser error:", error);
+    res.status(500).json({ success: false, error: error.message || "Failed to create user" });
+  }
+};
+var updateUser = async (req, res) => {
+  try {
+    const currentUser = req.user;
+    if (!currentUser) {
+      return res.status(401).json({ success: false, error: "Authentication required" });
+    }
+    const { id } = req.params;
+    const { name, email, phone, role, department, location, password } = req.body;
+    const [existing] = await pool.query("SELECT * FROM user_accounts WHERE id = ? LIMIT 1", [id]);
+    if (!existing || existing.length === 0) {
+      return res.status(404).json({ success: false, error: "User account not found" });
+    }
+    const target = existing[0];
+    if (currentUser.role === "Sales Manager" && target.role !== "Sales Executive") {
+      return res.status(403).json({ success: false, error: "Sales Manager can only update Sales Executive accounts" });
+    }
+    if (currentUser.role === "Project Manager" && target.role !== "Installation Team") {
+      return res.status(403).json({ success: false, error: "Project Manager can only update Installation Team accounts" });
+    }
+    if (currentUser.role !== "Super Admin" && currentUser.role !== "Sales Manager" && currentUser.role !== "Project Manager") {
+      return res.status(403).json({ success: false, error: "Unauthorized to modify user accounts" });
+    }
+    let updatedRole = target.role;
+    if (role && role !== target.role) {
+      if (currentUser.role !== "Super Admin") {
+        return res.status(403).json({ success: false, error: "Only Super Admin can change account roles" });
+      }
+      updatedRole = role;
+    }
+    if (password && password.trim().length >= 6) {
+      const { hash, salt } = hashPassword(password);
+      await pool.query(
+        `UPDATE user_accounts 
+         SET name = COALESCE(?, name), email = COALESCE(?, email), role = ?, password_hash = ?, password_salt = ?
+         WHERE id = ?`,
+        [name, email, updatedRole, hash, salt, id]
+      );
+    } else {
+      await pool.query(
+        `UPDATE user_accounts 
+         SET name = COALESCE(?, name), email = COALESCE(?, email), role = ?
+         WHERE id = ?`,
+        [name, email, updatedRole, id]
+      );
+    }
+    if (target.employee_id || target.username) {
+      await pool.query(
+        `UPDATE employees 
+         SET name = COALESCE(?, name), email = COALESCE(?, email), phone = COALESCE(?, phone), role = ?, department = COALESCE(?, department), location = COALESCE(?, location)
+         WHERE id = ? OR username = ?`,
+        [name, email, phone, updatedRole, department, location, target.employee_id, target.username]
+      );
+    }
+    res.json({
+      success: true,
+      message: "User account updated successfully"
+    });
+  } catch (error) {
+    console.error("updateUser error:", error);
+    res.status(500).json({ success: false, error: "Failed to update user" });
+  }
+};
+var toggleUserStatus = async (req, res) => {
+  try {
+    const currentUser = req.user;
+    if (!currentUser) {
+      return res.status(401).json({ success: false, error: "Authentication required" });
+    }
+    const { id } = req.params;
+    const [existing] = await pool.query("SELECT * FROM user_accounts WHERE id = ? LIMIT 1", [id]);
+    if (!existing || existing.length === 0) {
+      return res.status(404).json({ success: false, error: "User account not found" });
+    }
+    const target = existing[0];
+    if (currentUser.role === "Sales Manager" && target.role !== "Sales Executive") {
+      return res.status(403).json({ success: false, error: "Permission denied" });
+    }
+    if (currentUser.role === "Project Manager" && target.role !== "Installation Team") {
+      return res.status(403).json({ success: false, error: "Permission denied" });
+    }
+    if (currentUser.role !== "Super Admin" && currentUser.role !== "Sales Manager" && currentUser.role !== "Project Manager") {
+      return res.status(403).json({ success: false, error: "Permission denied" });
+    }
+    if (target.id === currentUser.userId || target.username === currentUser.username) {
+      return res.status(400).json({ success: false, error: "Cannot deactivate your own active session account" });
+    }
+    const newStatus = !target.is_active;
+    await pool.query("UPDATE user_accounts SET is_active = ? WHERE id = ?", [newStatus, id]);
+    res.json({
+      success: true,
+      message: `User account ${newStatus ? "activated" : "deactivated"} successfully`,
+      isActive: newStatus
+    });
+  } catch (error) {
+    console.error("toggleUserStatus error:", error);
+    res.status(500).json({ success: false, error: "Failed to toggle account status" });
+  }
+};
+
+// server/routes/users.routes.ts
+var usersRouter = Router10();
+usersRouter.use(authenticateToken);
+usersRouter.get("/", getUsers);
+usersRouter.post("/", createUser);
+usersRouter.put("/:id", updateUser);
+usersRouter.post("/:id/toggle-status", toggleUserStatus);
+
+// server/routes/audit.routes.ts
+import { Router as Router11 } from "express";
+
+// server/controllers/audit.controller.ts
+var getAuditLogs = async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.max(1, Math.min(100, parseInt(req.query.limit, 10) || 10));
+    const offset = (page - 1) * limit;
+    const search = (req.query.search || "").trim();
+    const category = (req.query.category || "all").trim();
+    const status = (req.query.status || "all").trim();
+    const startDate = req.query.startDate || "";
+    const endDate = req.query.endDate || "";
+    let whereClauses = [];
+    let params = [];
+    if (search) {
+      whereClauses.push("(action LIKE ? OR user_name LIKE ? OR details LIKE ? OR target_entity_id LIKE ? OR ip_address LIKE ?)");
+      const s = `%${search}%`;
+      params.push(s, s, s, s, s);
+    }
+    if (category && category !== "all") {
+      whereClauses.push("category = ?");
+      params.push(category);
+    }
+    if (status && status !== "all") {
+      whereClauses.push("status = ?");
+      params.push(status);
+    }
+    if (startDate) {
+      whereClauses.push("created_at >= ?");
+      params.push(`${startDate} 00:00:00`);
+    }
+    if (endDate) {
+      whereClauses.push("created_at <= ?");
+      params.push(`${endDate} 23:59:59`);
+    }
+    const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+    const [countRows] = await pool.query(
+      `SELECT COUNT(*) as total FROM audit_logs ${whereSql}`,
+      params
+    );
+    const total = countRows[0]?.total || 0;
+    const totalPages = Math.ceil(total / limit) || 1;
+    const [rows] = await pool.query(
+      `SELECT id, user_id, user_name, user_role, action, category, details, target_entity_id, target_entity_type, ip_address, status, metadata, created_at 
+       FROM audit_logs 
+       ${whereSql} 
+       ORDER BY created_at DESC 
+       LIMIT ? OFFSET ?`,
+      [...params, limit, offset]
+    );
+    const logs = rows.map((r) => ({
+      id: r.id,
+      userId: r.user_id,
+      userName: r.user_name,
+      userRole: r.user_role,
+      action: r.action,
+      category: r.category,
+      details: r.details,
+      targetEntityId: r.target_entity_id,
+      targetEntityType: r.target_entity_type,
+      ipAddress: r.ip_address,
+      status: r.status,
+      metadata: r.metadata ? typeof r.metadata === "string" ? JSON.parse(r.metadata) : r.metadata : null,
+      createdAt: r.created_at
+    }));
+    res.json({
+      success: true,
+      data: logs,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages
+      }
+    });
+  } catch (err) {
+    console.error("Error fetching audit logs:", err);
+    res.status(500).json({
+      success: false,
+      error: "Failed to retrieve audit logs from database",
+      details: err?.message
+    });
+  }
+};
+var createAuditLog = async (req, res) => {
+  try {
+    const { action, category, details, targetEntityId, targetEntityType, status, metadata } = req.body;
+    const user = req.user;
+    const id = `AUD-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+    const ipAddress = req.ip || req.socket.remoteAddress || "127.0.0.1";
+    await pool.query(
+      `INSERT INTO audit_logs (id, user_id, user_name, user_role, action, category, details, target_entity_id, target_entity_type, ip_address, status, metadata)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        user?.userId || user?.id || "SYSTEM",
+        user?.name || "System User",
+        user?.role || "Super Admin",
+        action || "SYSTEM_ACTION",
+        category || "Security",
+        details || "",
+        targetEntityId || null,
+        targetEntityType || null,
+        ipAddress,
+        status || "Success",
+        metadata ? typeof metadata === "string" ? metadata : JSON.stringify(metadata) : null
+      ]
+    );
+    res.status(201).json({
+      success: true,
+      data: { id }
+    });
+  } catch (err) {
+    console.error("Error creating audit log:", err);
+    res.status(500).json({
+      success: false,
+      error: "Failed to record audit log"
+    });
+  }
+};
+
+// server/routes/audit.routes.ts
+var auditRouter = Router11();
+auditRouter.get("/", authenticateToken, getAuditLogs);
+auditRouter.post("/", authenticateToken, createAuditLog);
+
+// server/routes/index.ts
+var apiRouter = Router12();
+apiRouter.use("/auth", authRouter);
+apiRouter.get("/bootstrap", authenticateToken, getBootstrapData);
+apiRouter.use("/leads", leadsRouter);
+apiRouter.use("/surveys", surveysRouter);
+apiRouter.use("/site-surveys", surveysRouter);
+apiRouter.use("/quotations", quotationsRouter);
+apiRouter.use("/customers", customersRouter);
+apiRouter.use("/projects", projectsRouter);
+apiRouter.use("/", financeRouter);
+apiRouter.use("/", serviceRouter);
+apiRouter.use("/inventory", inventoryRouter);
+apiRouter.use("/users", usersRouter);
+apiRouter.use("/audit-logs", auditRouter);
+
+// server.ts
+dotenv3.config();
+var __filename = fileURLToPath(import.meta.url);
+var __dirname = path3.dirname(__filename);
+var uploadsDir = path3.join(process.cwd(), "uploads", "surveys");
+if (!fs3.existsSync(uploadsDir)) {
+  fs3.mkdirSync(uploadsDir, { recursive: true });
+}
+var app = express();
+var PORT = 3e3;
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
+app.use("/uploads", express.static(path3.join(process.cwd(), "uploads")));
+app.use("/api", apiRouter);
+async function startServer() {
+  const isProd = process.env.NODE_ENV === "production";
+  if (!isProd) {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa"
+    });
+    app.use(vite.middlewares);
+  } else {
+    app.use(express.static(path3.resolve(__dirname, "dist")));
+    app.get("*", (_req, res) => {
+      res.sendFile(path3.resolve(__dirname, "dist", "index.html"));
+    });
+  }
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`AB Energy Solutions CRM server running at http://0.0.0.0:${PORT}`);
+  });
+}
+startServer();

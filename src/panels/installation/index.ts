@@ -1,0 +1,1 @@
+export { InstallationPanel } from './InstallationPanel';
