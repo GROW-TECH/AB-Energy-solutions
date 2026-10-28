@@ -218,6 +218,7 @@ export interface SiteSurvey {
   phone: string;
   address: string;
   scheduledDate: string;
+  scheduledTime?: string;
   engineerId: string;
   engineerName: string;
   status: SurveyStatus;
@@ -227,7 +228,7 @@ export interface SiteSurvey {
   azimuthAngle: number; // e.g. 180° South
   tiltAngle: number; // e.g. 15°
   existingSanctionLoadKw: number;
-  gridPhase: 'Single Phase' | 'Three Phase';
+  gridPhase: 'Single Phase' | 'Three Phase' | string;
   distanceToLtPanelMeters: number;
   recommendedKw: number;
   panelQuantity: number;
@@ -244,7 +245,7 @@ export interface SiteSurvey {
   // Rooftop Engineering & Measurement status
   roofDimensionsShape?: string;
   surfaceCondition?: string;
-  measurementStatus?: 'Initial Estimate' | 'Engineer Entered' | 'Verified' | 'Requires Correction';
+  measurementStatus?: 'Initial Estimate' | 'Engineer Entered' | 'Verified' | 'Requires Correction' | string;
   obstaclesWaterTank?: boolean;
   obstaclesMumty?: boolean;
   obstaclesParapet?: boolean;
@@ -253,10 +254,10 @@ export interface SiteSurvey {
   accessPathwaysClearance?: string;
 
   // Electrical Inspection
-  mainMeterStatus?: 'Pass' | 'Needs Attention' | 'Not Assessed';
+  mainMeterStatus?: 'Pass' | 'Needs Attention' | 'Not Assessed' | string;
   mainMeterNotes?: string;
-  dbCondition?: 'Pass' | 'Needs Attention' | 'Not Assessed';
-  earthingStatus?: 'Pass' | 'Needs Attention' | 'Not Assessed';
+  dbCondition?: 'Pass' | 'Needs Attention' | 'Not Assessed' | string;
+  earthingStatus?: 'Pass' | 'Needs Attention' | 'Not Assessed' | string;
   earthingResistanceOhms?: number | null;
   proposedInverterLocation?: string;
   electricalConstraints?: string;
@@ -265,14 +266,14 @@ export interface SiteSurvey {
   // Structural & Shading Assessment
   structuralConcerns?: string;
   visibleCracksDamage?: boolean;
-  waterproofingStatus?: 'Good' | 'Needs Repair' | 'Critical';
+  waterproofingStatus?: 'Good' | 'Needs Repair' | 'Critical' | string;
   mountingStructureType?: string;
   shadingSources?: string;
   shadingAffectedAreaSqFt?: number;
   structuralEngineerApprovalRequired?: boolean;
 
   // Engineering Findings & Feasibility
-  feasibilityVerdict?: 'Feasible' | 'Feasible with Conditions' | 'Not Feasible';
+  feasibilityVerdict?: 'Feasible' | 'Feasible with Conditions' | 'Not Feasible' | string;
   proposedPanelWattage?: number;
   inverterRecommendation?: string;
   cableSpecification?: string;
@@ -289,6 +290,9 @@ export interface SiteSurvey {
   reviewComments?: string | null;
   isDraft?: boolean;
   quotationId?: string | null;
+
+  // Survey Engineer Custom Fields
+  customFields?: { id: string; label: string; value: string }[];
 
   // Attached individual photos & history
   photos?: SurveyPhoto[];

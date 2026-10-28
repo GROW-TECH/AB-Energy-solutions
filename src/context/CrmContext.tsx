@@ -72,6 +72,10 @@ interface CrmContextType {
   createLead: (leadData: Partial<Lead>) => Lead;
   updateLead: (id: string, updates: Partial<Lead>) => void;
   deleteLead: (leadId: string) => void;
+  autoAssignAllLeads: () => { assignedCount: number; repsCount: number };
+  updateProject: (id: string, updates: Partial<Project>) => void;
+  assignProject: (projectId: string, installationLeadId: string, installationLeadName: string) => void;
+  autoAssignAllProjects: () => { assignedCount: number; crewCount: number };
   qualifyLead: (leadId: string, surveyOptions?: { engineerId?: string; engineerName?: string; scheduledDate?: string; scheduledTime?: string; notes?: string }) => void;
   createSiteSurvey: (surveyData: Partial<SiteSurvey>) => SiteSurvey;
   completeSiteSurvey: (surveyId: string, updates: Partial<SiteSurvey>) => void;
@@ -87,9 +91,10 @@ interface CrmContextType {
     capturedAt?: string | null;
   }) => Promise<SurveyPhoto | null>;
   deleteSurveyPhoto: (surveyId: string, photoId: string) => Promise<boolean>;
-  submitSurveyForReview: (surveyId: string, comments?: string, bypassWithExceptions?: boolean) => Promise<{ success: boolean; error?: string; checklistErrors?: string[] }>;
+  submitSurveyForReview: (surveyId: string, comments?: string, bypassWithExceptions?: boolean, updates?: Partial<SiteSurvey>) => Promise<{ success: boolean; error?: string; checklistErrors?: string[] }>;
   reviewSurveyAction: (surveyId: string, decision: 'Approved' | 'Changes Required', comments: string) => Promise<{ success: boolean; error?: string; quotation?: any; quotationError?: string | null }>;
   rescheduleSurveyAction: (surveyId: string, newDate: string, newTime?: string, engineerId?: string, engineerName?: string) => Promise<void>;
+  deleteSiteSurvey: (surveyId: string) => Promise<{ success: boolean; error?: string }>;
   reloadSurvey: (surveyId: string) => Promise<SiteSurvey | null>;
   createQuotation: (quoteData: Partial<Quotation>) => Quotation;
   createQuotationRevision: (quotationId: string, revisionData: Partial<Quotation>) => Promise<void>;
@@ -579,8 +584,36 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const maxNum = Math.max(28, ...existingNums, leads.length);
     const leadId = `LD-2026-${String(maxNum + 1).padStart(3, '0')}`;
     
-    // Auto-assignment logic (Rule-01)
-    const assignedEmp = employees.find(e => e.role === 'Sales Executive') || employees[1];
+    // Lead Assignment Resolution:
+    let assignedEmp: { id: string; name: string };
+    if (leadData.assignedToId && leadData.assignedToId !== 'auto') {
+      const found = employees.find(e => e.id === leadData.assignedToId || e.name === leadData.assignedToName);
+      if (found) {
+        assignedEmp = { id: found.id, name: found.name };
+      } else {
+        assignedEmp = { id: leadData.assignedToId, name: leadData.assignedToName || 'Sales Representative' };
+      }
+    } else if (currentUser && currentUser.role === 'Sales Executive') {
+      // Direct lead created by sales executive belongs to themselves
+      assignedEmp = { id: currentUser.employeeId || currentUser.id, name: currentUser.name };
+    } else {
+      // Intelligent auto-assignment: pick active Sales Executive with fewest leads
+      const activeExecs = employees.filter(e => e.role === 'Sales Executive' && e.status !== 'Inactive');
+      if (activeExecs.length > 0) {
+        const execCounts = activeExecs.map(exec => {
+          const count = leads.filter(l => 
+            (l.assignedToId === exec.id || l.assignedToId === exec.employeeId || l.assignedToName?.toLowerCase() === exec.name.toLowerCase()) && 
+            l.status !== 'Lost'
+          ).length;
+          return { exec, count };
+        });
+        execCounts.sort((a, b) => a.count - b.count);
+        assignedEmp = { id: execCounts[0].exec.id, name: execCounts[0].exec.name };
+      } else {
+        const fallback = employees.find(e => e.role === 'Sales Executive') || employees[1];
+        assignedEmp = { id: fallback.id, name: fallback.name };
+      }
+    }
     
     // Estimate KW based on monthly bill (Tariff approx ₹8/kWh, 1kW generates 120 units/mo)
     const bill = leadData.monthlyBill || 0;
@@ -598,7 +631,8 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       address: leadData.address || '',
       pincode: leadData.pincode || '',
       source: leadData.source || 'Website',
-      status: 'New',
+      status: leadData.status || 'New',
+      surveyId: leadData.surveyId,
       priority: leadData.priority || 'Medium',
       recommendedPriority: leadData.recommendedPriority,
       priorityOverrideReason: leadData.priorityOverrideReason,
@@ -681,6 +715,107 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }).catch(err => console.error('Failed to delete lead from MySQL:', err));
   };
 
+  const autoAssignAllLeads = () => {
+    const activeExecs = employees.filter(e => e.role === 'Sales Executive' && e.status !== 'Inactive');
+    if (activeExecs.length === 0) return { assignedCount: 0, repsCount: 0 };
+
+    let execIndex = 0;
+    const leadUpdates: { id: string; assignedToId: string; assignedToName: string }[] = [];
+
+    const newLeads = leads.map((lead) => {
+      const rep = activeExecs[execIndex % activeExecs.length];
+      execIndex++;
+      leadUpdates.push({ id: lead.id, assignedToId: rep.id, assignedToName: rep.name });
+      return {
+        ...lead,
+        assignedToId: rep.id,
+        assignedToName: rep.name,
+        updatedAt: new Date().toISOString()
+      };
+    });
+
+    setLeads(newLeads);
+
+    Promise.all(leadUpdates.map(u => 
+      authFetch(`/api/leads/${u.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assignedToId: u.assignedToId, assignedToName: u.assignedToName })
+      })
+    )).catch(err => console.error('Failed to persist auto-assigned leads:', err));
+
+    addNotification(
+      'Leads Auto-Distributed',
+      `Evenly distributed ${leads.length} leads across ${activeExecs.length} active Sales Executives.`,
+      'Lead',
+      'all',
+      'Lead'
+    );
+
+    return { assignedCount: leads.length, repsCount: activeExecs.length };
+  };
+
+  const updateProject = (id: string, updates: Partial<Project>) => {
+    setProjects(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
+    authFetch(`/api/projects/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates)
+    }).catch(err => console.error('Failed to update project in MySQL:', err));
+  };
+
+  const assignProject = (projectId: string, installationLeadId: string, installationLeadName: string) => {
+    const proj = projects.find(p => p.id === projectId);
+    if (proj && proj.stage === 'Completed') {
+      console.warn(`Cannot assign crew to project ${projectId}: project is already Completed.`);
+      return;
+    }
+    updateProject(projectId, { installationLeadId, installationLeadName });
+  };
+
+  const autoAssignAllProjects = () => {
+    const activeCrew = employees.filter(e => e.role === 'Installation Team' && e.status !== 'Inactive');
+    if (activeCrew.length === 0) return { assignedCount: 0, crewCount: 0 };
+
+    let crewIndex = 0;
+    const projectUpdates: { id: string; installationLeadId: string; installationLeadName: string }[] = [];
+
+    const newProjects = projects.map(proj => {
+      // Do not reassign crew to completed projects
+      if (proj.stage === 'Completed') {
+        return proj;
+      }
+      const member = activeCrew[crewIndex % activeCrew.length];
+      crewIndex++;
+      projectUpdates.push({ id: proj.id, installationLeadId: member.id, installationLeadName: member.name });
+      return {
+        ...proj,
+        installationLeadId: member.id,
+        installationLeadName: member.name,
+      };
+    });
+
+    setProjects(newProjects);
+
+    Promise.all(projectUpdates.map(u => 
+      authFetch(`/api/projects/${u.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ installationLeadId: u.installationLeadId, installationLeadName: u.installationLeadName })
+      })
+    )).catch(err => console.error('Failed to persist auto-assigned projects:', err));
+
+    addNotification(
+      'Projects Auto-Distributed',
+      `Evenly balanced ${projectUpdates.length} active installation projects across ${activeCrew.length} crew technicians.`,
+      'Installation',
+      'all',
+      'Project'
+    );
+
+    return { assignedCount: projectUpdates.length, crewCount: activeCrew.length };
+  };
+
   // 2. AUTOMATION: Qualify Lead -> Auto-schedule Site Survey (RULE-02)
   const qualifyLead = (
     leadId: string, 
@@ -689,15 +824,16 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       engineerName?: string; 
       scheduledDate?: string; 
       scheduledTime?: string; 
-      notes?: string 
+      notes?: string;
+      leadData?: Partial<Lead>;
     }
   ) => {
-    const lead = leads.find(l => l.id === leadId);
+    let lead = leads.find(l => l.id === leadId) || (surveyOptions?.leadData ? (surveyOptions.leadData as Lead) : undefined);
     if (!lead) return;
 
     // Protection against duplicate survey creation
     if (lead.surveyId) {
-      const existing = surveys.find(s => s.id === lead.surveyId);
+      const existing = surveys.find(s => s.id === lead.surveyId || s.leadId === lead.id);
       if (existing) {
         console.warn('Site survey already exists for this lead:', lead.surveyId);
         return;
@@ -709,8 +845,9 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       surveyEng = employees.find(e => e.role === 'Survey Engineer') || employees[2];
     }
 
-    const surveyId = `SRV-2026-${String(surveys.length + 1).padStart(3, '0')}`;
+    const surveyId = lead.surveyId || `SRV-2026-${String(surveys.length + 1).padStart(3, '0')}`;
     const scheduledDate = surveyOptions?.scheduledDate || new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0];
+    const scheduledTime = surveyOptions?.scheduledTime || '10:00 AM - 12:00 PM';
 
     const newSurvey: SiteSurvey = {
       id: surveyId,
@@ -720,6 +857,7 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       phone: lead.phone,
       address: `${lead.address || ''}${lead.city ? (lead.address ? ', ' : '') + lead.city : ''}`,
       scheduledDate,
+      scheduledTime,
       engineerId: surveyEng.id,
       engineerName: surveyEng.name,
       status: 'Scheduled',
@@ -744,7 +882,7 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     setSurveys(prev => [newSurvey, ...prev]);
-    updateLead(leadId, { status: 'Qualified', surveyId });
+    updateLead(lead.id, { status: 'Site Survey Scheduled', surveyId });
 
     // Persist Site Survey to MySQL
     authFetch('/api/surveys', {
@@ -758,11 +896,11 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       'LEAD_QUALIFIED',
       lead.id,
       lead.name,
-      `Created Site Survey ${surveyId} assigned to ${surveyEng.name} for ${scheduledDate}.`
+      `Created Site Survey ${surveyId} assigned to ${surveyEng.name} for ${scheduledDate} (${scheduledTime}).`
     );
 
-    addTimelineItem('Lead', lead.id, 'Lead Qualified → Site Survey Scheduled', `Assigned to ${surveyEng.name}. Date: ${scheduledDate}.`, 'Automation Engine', 'survey');
-    addNotification('Site Survey Scheduled', `Survey for ${lead.name} assigned to ${surveyEng.name}.`, 'Task', surveyId, 'Survey');
+    addTimelineItem('Lead', lead.id, 'Lead Qualified → Site Survey Scheduled', `Assigned to ${surveyEng.name}. Date: ${scheduledDate} (${scheduledTime}).`, 'Automation Engine', 'survey');
+    addNotification('Site Survey Scheduled', `Survey for ${lead.name} assigned to ${surveyEng.name} on ${scheduledDate} (${scheduledTime}).`, 'Task', surveyId, 'Survey');
   };
 
   const createSiteSurvey = (surveyData: Partial<SiteSurvey>): SiteSurvey => {
@@ -778,6 +916,7 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const newSurvey = {
       ...surveyData,
       id: surveyId,
+      scheduledTime: surveyData.scheduledTime || '10:00 AM - 12:00 PM',
       status: surveyData.status || 'Scheduled',
       photosUploaded: surveyData.photosUploaded || [],
       photos: surveyData.photos || [],
@@ -880,12 +1019,12 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return false;
   };
 
-  const submitSurveyForReview = async (surveyId: string, comments?: string, bypassWithExceptions?: boolean) => {
+  const submitSurveyForReview = async (surveyId: string, comments?: string, bypassWithExceptions?: boolean, updates?: Partial<SiteSurvey>) => {
     try {
       const res = await authFetch(`/api/surveys/${surveyId}/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ comments, bypassWithExceptions }),
+        body: JSON.stringify({ comments, bypassWithExceptions, updates }),
       });
       const data = await res.json();
       if (data.success && data.survey) {
@@ -948,17 +1087,50 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const res = await authFetch(`/api/surveys/${surveyId}/reschedule`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scheduledDate: newDate, engineerId, engineerName }),
+        body: JSON.stringify({ scheduledDate: newDate, scheduledTime: newTime, engineerId, engineerName }),
       });
       const data = await res.json();
       if (data.success && data.survey) {
-        setSurveys(prev => prev.map(s => s.id === surveyId ? { ...s, scheduledDate: newDate, engineerName: engineerName || s.engineerName } : s));
-        addTimelineItem('Lead', data.survey.leadId || surveyId, 'Survey Rescheduled', `Rescheduled to ${newDate}.`, 'System', 'survey');
+        setSurveys(prev => prev.map(s => s.id === surveyId ? { 
+          ...s, 
+          scheduledDate: newDate, 
+          scheduledTime: newTime || s.scheduledTime, 
+          engineerName: engineerName || s.engineerName 
+        } : s));
+        addTimelineItem('Lead', data.survey.leadId || surveyId, 'Survey Rescheduled', `Rescheduled to ${newDate} (${newTime || 'Standard Slot'}).`, 'System', 'survey');
       }
     } catch (err) {
       console.error('Failed to reschedule survey:', err);
     }
   };
+
+  const deleteSiteSurvey = async (surveyId: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const surveyToDelete = surveys.find(s => s.id === surveyId);
+      if (surveyToDelete && surveyToDelete.status !== 'Approved') {
+        return { success: false, error: 'Only Approved site surveys can be deleted.' };
+      }
+
+      const res = await authFetch(`/api/surveys/${surveyId}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || 'Failed to delete survey' };
+      }
+
+      setSurveys(prev => prev.filter(s => s.id !== surveyId));
+      if (surveyToDelete?.leadId) {
+        setLeads(prev => prev.map(l => l.id === surveyToDelete.leadId ? { ...l, surveyId: undefined } : l));
+      }
+      addTimelineItem('Lead', surveyToDelete?.leadId || surveyId, 'Survey Deleted', `Site survey ${surveyId} was deleted.`, 'System', 'survey');
+      return { success: true };
+    } catch (err: any) {
+      console.error('Failed to delete survey:', err);
+      return { success: false, error: err.message || 'Network error deleting survey' };
+    }
+  };
+
 
   const reloadSurvey = async (surveyId: string): Promise<SiteSurvey | null> => {
     try {
@@ -2217,6 +2389,10 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createLead,
       updateLead,
       deleteLead,
+      autoAssignAllLeads,
+      updateProject,
+      assignProject,
+      autoAssignAllProjects,
       qualifyLead,
       createSiteSurvey,
       completeSiteSurvey,
@@ -2226,6 +2402,7 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       submitSurveyForReview,
       reviewSurveyAction,
       rescheduleSurveyAction,
+      deleteSiteSurvey,
       reloadSurvey,
       createQuotation,
       createQuotationRevision,

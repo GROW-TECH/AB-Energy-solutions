@@ -73,4 +73,12 @@ apiRouter.use('/installation', installationRouter);
 import { notificationsRouter } from './notifications.routes.js';
 apiRouter.use('/notifications', notificationsRouter);
 
+// 18. SIM Telephony & Live Call Tracker
+import { telephonyRouter } from './telephony.routes.js';
+apiRouter.use('/telephony', telephonyRouter);
+
+// 19. PM Surya Ghar & DISCOM Subsidies
+import { subsidiesRouter } from './subsidies.routes.js';
+apiRouter.use('/subsidies', subsidiesRouter);
+
 

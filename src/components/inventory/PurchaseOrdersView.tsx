@@ -5,8 +5,9 @@ import {
   CheckCircle2, Clock, FileText, AlertCircle, X, Download, Eye, Warehouse, 
   ClipboardList, CheckCheck, PackageCheck, AlertTriangle, ArrowRight,
   ShieldCheck, User, Phone, MapPin, Sparkles, RefreshCw, Eraser,
-  Copy, ExternalLink, Link as LinkIcon, Send, Share2, Ban
+  Copy, ExternalLink, Link as LinkIcon, Send, Share2, Ban, Trash2
 } from 'lucide-react';
+import { getApiUrl } from '../../utils/apiUrl';
 
 export const PurchaseOrdersView: React.FC = () => {
   const { suppliers: contextSuppliers } = useCrm();
@@ -59,6 +60,8 @@ export const PurchaseOrdersView: React.FC = () => {
     { sku: 'MOD-550', name: '550W Mono PERC Bifacial Solar Modules', category: 'Solar PV Modules', quantity: 20, unit: 'Nos', unitPrice: 8500 }
   ]);
   const [isCreatingPo, setIsCreatingPo] = useState(false);
+  const [isPoModalReadOnly, setIsPoModalReadOnly] = useState(false);
+  const [selectedIndentCompleted, setSelectedIndentCompleted] = useState(false);
 
   // EPC Project Conversion State
   const [convertingIndentId, setConvertingIndentId] = useState<string | null>(null);
@@ -66,38 +69,50 @@ export const PurchaseOrdersView: React.FC = () => {
 
   const token = localStorage.getItem('ab_solar_token') || localStorage.getItem('ab_energy_auth_token') || '';
   const authFetch = (url: string, opts: any = {}) => {
+    const fullUrl = url.startsWith('http') ? url : getApiUrl(url);
     const headers = { 
       ...(opts.headers || {}), 
       Authorization: `Bearer ${token}` 
     };
-    return fetch(url, { ...opts, headers });
+    return fetch(fullUrl, { ...opts, headers });
+  };
+
+  const safeJson = async (res: Response | null) => {
+    if (!res || !res.ok) return null;
+    const ct = res.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) return null;
+    try {
+      return await res.json();
+    } catch (_) {
+      return null;
+    }
   };
 
   const fetchOrdersAndIndents = async () => {
     setIsLoading(true);
     try {
       const [poRes, indRes, grnRes] = await Promise.all([
-        authFetch('/api/procurement/orders'),
-        authFetch('/api/procurement/pending-indents'),
-        authFetch('/api/procurement/grns')
+        authFetch('/api/procurement/orders').catch(() => null),
+        authFetch('/api/procurement/pending-indents').catch(() => null),
+        authFetch('/api/procurement/grns').catch(() => null)
       ]);
 
-      const poData = await poRes.json();
-      if (poData.success && poData.purchaseOrders) {
+      const poData = await safeJson(poRes);
+      if (poData && poData.success && poData.purchaseOrders) {
         setPurchaseOrders(poData.purchaseOrders);
       }
 
-      const indData = await indRes.json();
-      if (indData.success && indData.indents) {
+      const indData = await safeJson(indRes);
+      if (indData && indData.success && indData.indents) {
         setPendingIndents(indData.indents);
       }
 
-      const grnData = await grnRes.json();
-      if (grnData.success && grnData.grns) {
+      const grnData = await safeJson(grnRes);
+      if (grnData && grnData.success && grnData.grns) {
         setGrnsList(grnData.grns);
       }
     } catch (err) {
-      console.error('Error fetching procurement data:', err);
+      console.warn('Procurement API unavailable, using offline fallback:', err);
     } finally {
       setIsLoading(false);
     }
@@ -152,6 +167,57 @@ export const PurchaseOrdersView: React.FC = () => {
     }
   };
 
+  const handleDeletePurchaseOrder = async (poId: string, poNum: string) => {
+    if (!window.confirm(`Are you sure you want to delete Purchase Order ${poNum}? This will remove the PO and associated items.`)) {
+      return;
+    }
+    try {
+      const res = await authFetch(`/api/procurement/orders/${poId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) {
+        setPurchaseOrders(prev => prev.filter(p => p.id !== poId));
+      } else {
+        alert(data.error || 'Failed to delete purchase order');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Error deleting purchase order');
+    }
+  };
+
+  const handleDeleteIndent = async (indentId: string, quoteNum: string) => {
+    if (!window.confirm(`Are you sure you want to remove/archive this procurement indent (${quoteNum})?`)) {
+      return;
+    }
+    try {
+      const res = await authFetch(`/api/procurement/indents/${indentId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) {
+        setPendingIndents(prev => prev.filter(i => i.indent_id !== indentId && i.quotation_id !== indentId));
+      } else {
+        alert(data.error || 'Failed to remove indent');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Error removing indent');
+    }
+  };
+
+  const handleClearClosedIndents = async () => {
+    if (!window.confirm('Are you sure you want to clear all closed and completed procurement indents from this view?')) {
+      return;
+    }
+    try {
+      const res = await authFetch('/api/procurement/indents-closed/all', { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) {
+        setPendingIndents(prev => prev.filter(i => !i.is_completed && i.project_stage !== 'Completed'));
+      } else {
+        alert(data.error || 'Failed to clear closed indents');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Error clearing closed indents');
+    }
+  };
+
   useEffect(() => {
     fetchOrdersAndIndents();
   }, []);
@@ -176,8 +242,14 @@ export const PurchaseOrdersView: React.FC = () => {
   const inTransitCount = filteredPos.filter(p => p.status === 'In-Transit' || p.status === 'Partial Delivered').length;
   const pendingCount = filteredPos.filter(p => p.status === 'Issued' || p.status === 'Draft').length;
 
-  // Open PO Modal from Indent
-  const handleOpenIndentPoModal = (indent: any) => {
+  // Open PO Modal from Indent (supports readOnly mode for completed projects / issued POs)
+  const handleOpenIndentPoModal = (indent: any, readOnly = false) => {
+    const isCompleted = Boolean(indent.is_completed || indent.project_stage === 'Completed');
+    const hasExistingPo = (indent.purchase_orders?.length || 0) > 0;
+    const shouldBeReadOnly = readOnly || isCompleted || (hasExistingPo && indent.procurement_status !== 'Partial Shortage');
+
+    setIsPoModalReadOnly(shouldBeReadOnly);
+    setSelectedIndentCompleted(isCompleted);
     setSelectedQuotationId(indent.quotation_id || '');
     setSelectedQuotationNumber(indent.quotation_number || '');
     setSelectedCustomerName(indent.customer_name || '');
@@ -202,6 +274,10 @@ export const PurchaseOrdersView: React.FC = () => {
   // Submit PO Creation
   const handleCreatePo = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isPoModalReadOnly || selectedIndentCompleted) {
+      alert('Cannot issue Purchase Order: This project is already Completed and procurement is locked.');
+      return;
+    }
     try {
       setIsCreatingPo(true);
       const res = await authFetch('/api/procurement/orders', {
@@ -629,12 +705,25 @@ export const PurchaseOrdersView: React.FC = () => {
       {activeTab === 'indents' && (
         /* PENDING BOM INDENTS TAB */
         <div className="space-y-4">
-          <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-2xl flex items-start gap-3">
-            <ClipboardList className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
-            <div className="text-xs text-emerald-950">
-              <span className="font-bold block text-sm">Step 2: Purchase Team Procurement Workflow</span>
-              After customer acceptance, procurement begins directly in this Purchase Team panel. Manage material requirements from accepted quotations/BOMs, issue supplier POs, track site arrivals, capture the customer electronic signature against the material delivery, and unlock EPC Project conversion only when materials are verified and signed.
+          <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <ClipboardList className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+              <div className="text-xs text-emerald-950">
+                <span className="font-bold block text-sm">Step 2: Purchase Team Procurement Workflow</span>
+                Manage material requirements from accepted quotations/BOMs, issue supplier POs, track site arrivals, capture customer electronic signatures against material delivery, and convert to EPC projects.
+              </div>
             </div>
+
+            {pendingIndents.some(i => i.is_completed || i.project_stage === 'Completed') && (
+              <button
+                onClick={handleClearClosedIndents}
+                className="px-3.5 py-2 bg-white hover:bg-rose-50 text-rose-700 border border-rose-300 rounded-xl text-xs font-bold shrink-0 flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                title="Clear all completed closed procurement cards from this view"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                <span>Clear Closed Procurement</span>
+              </button>
+            )}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -648,9 +737,11 @@ export const PurchaseOrdersView: React.FC = () => {
               pendingIndents.map(ind => {
                 const isConverted = !!ind.converted_to_project_id;
                 const canConvert = ind.has_signed_grn && !isConverted;
+                const isProjectCompleted = Boolean(ind.is_completed || ind.project_stage === 'Completed');
+                const hasIssuedPo = (ind.purchase_orders?.length || 0) > 0;
 
                 return (
-                  <div key={ind.indent_id} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4 flex flex-col justify-between">
+                  <div key={ind.indent_id} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4 flex flex-col justify-between relative group">
                     <div className="space-y-3">
                       <div className="flex items-start justify-between gap-3">
                         <div>
@@ -675,6 +766,7 @@ export const PurchaseOrdersView: React.FC = () => {
 
                         <div className="text-right">
                           <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold border ${
+                            isProjectCompleted ? 'bg-slate-100 text-slate-700 border-slate-300' :
                             ind.procurement_status === 'Materials Delivered & Signed' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
                             ind.procurement_status === 'Partial Shortage' ? 'bg-amber-50 text-amber-700 border-amber-200' :
                             ind.procurement_status === 'PO Issued / In-Transit' ? 'bg-blue-50 text-blue-700 border-blue-200' :
@@ -729,35 +821,118 @@ export const PurchaseOrdersView: React.FC = () => {
 
                     {/* Action Buttons */}
                     <div className="flex items-center justify-between pt-3 border-t border-slate-100 gap-2">
-                      <button
-                        onClick={() => handleOpenIndentPoModal(ind)}
-                        className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
-                      >
-                        <ShoppingCart className="w-3.5 h-3.5 text-slate-500" />
-                        <span>Issue PO</span>
-                      </button>
+                      {isProjectCompleted ? (
+                        <>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleOpenIndentPoModal(ind, true)}
+                              className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
+                              title="Project is Completed. View BOM items and materials in read-only mode."
+                            >
+                              <Eye className="w-3.5 h-3.5 text-slate-500" />
+                              <span>View Materials</span>
+                            </button>
 
-                      {/* Step 5: EPC Project Conversion button */}
-                      {isConverted ? (
-                        <span className="px-3 py-1.5 bg-teal-50 text-teal-800 border border-teal-200 rounded-xl text-xs font-bold flex items-center gap-1">
-                          <CheckCircle2 className="w-3.5 h-3.5 text-teal-600" />
-                          <span>Converted: {ind.converted_to_project_id}</span>
-                        </span>
-                      ) : canConvert ? (
-                        <button
-                          onClick={() => handleConvertToEpcProject(ind)}
-                          disabled={convertingIndentId === ind.quotation_id}
-                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-md hover:shadow-lg transition-all animate-pulse"
-                          title="Convert to turnkey EPC project after verifying signed material receipt"
-                        >
-                          <Sparkles className="w-3.5 h-3.5 text-emerald-200" />
-                          <span>{convertingIndentId === ind.quotation_id ? 'Converting...' : 'Convert to EPC Project &rarr;'}</span>
-                        </button>
+                            <span className="px-3 py-1.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold flex items-center gap-1.5">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>Project Completed</span>
+                            </span>
+                          </div>
+
+                          <button
+                            onClick={() => handleDeleteIndent(ind.quotation_id, ind.quotation_number || ind.quotation_id)}
+                            className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold rounded-xl text-xs flex items-center gap-1 cursor-pointer transition-colors"
+                            title="Delete / Dismiss this closed procurement card"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                            <span>Delete</span>
+                          </button>
+                        </>
+                      ) : hasIssuedPo && ind.procurement_status !== 'Partial Shortage' ? (
+                        <>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleOpenIndentPoModal(ind, true)}
+                              className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
+                              title="PO already issued. View BOM line items."
+                            >
+                              <Eye className="w-3.5 h-3.5 text-slate-500" />
+                              <span>View Materials</span>
+                            </button>
+
+                            {isConverted ? (
+                              <span className="px-3 py-1.5 bg-teal-50 text-teal-800 border border-teal-200 rounded-xl text-xs font-bold flex items-center gap-1">
+                                <CheckCircle2 className="w-3.5 h-3.5 text-teal-600" />
+                                <span>Converted: {ind.converted_to_project_id}</span>
+                              </span>
+                            ) : canConvert ? (
+                              <button
+                                onClick={() => handleConvertToEpcProject(ind)}
+                                disabled={convertingIndentId === ind.quotation_id}
+                                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-md hover:shadow-lg transition-all animate-pulse"
+                                title="Convert to turnkey EPC project after verifying signed material receipt"
+                              >
+                                <Sparkles className="w-3.5 h-3.5 text-emerald-200" />
+                                <span>{convertingIndentId === ind.quotation_id ? 'Converting...' : 'Convert to EPC Project &rarr;'}</span>
+                              </button>
+                            ) : (
+                              <span className="px-3 py-1.5 bg-slate-100 text-slate-500 border border-slate-200 rounded-xl text-[11px] font-semibold flex items-center gap-1" title="Materials must be delivered and customer signature captured first">
+                                <Clock className="w-3 h-3 text-slate-400" />
+                                <span>Awaiting Delivery &amp; Signature</span>
+                              </span>
+                            )}
+                          </div>
+
+                          <button
+                            onClick={() => handleDeleteIndent(ind.quotation_id, ind.quotation_number || ind.quotation_id)}
+                            className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"
+                            title="Delete / Archive this indent"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </>
                       ) : (
-                        <span className="px-3 py-1.5 bg-slate-100 text-slate-500 border border-slate-200 rounded-xl text-[11px] font-semibold flex items-center gap-1" title="Materials must be delivered and customer signature captured first">
-                          <Clock className="w-3 h-3 text-slate-400" />
-                          <span>Awaiting Delivery &amp; Signature</span>
-                        </span>
+                        <>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleOpenIndentPoModal(ind, false)}
+                              className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
+                            >
+                              <ShoppingCart className="w-3.5 h-3.5 text-emerald-400" />
+                              <span>Issue PO</span>
+                            </button>
+
+                            {isConverted ? (
+                              <span className="px-3 py-1.5 bg-teal-50 text-teal-800 border border-teal-200 rounded-xl text-xs font-bold flex items-center gap-1">
+                                <CheckCircle2 className="w-3.5 h-3.5 text-teal-600" />
+                                <span>Converted: {ind.converted_to_project_id}</span>
+                              </span>
+                            ) : canConvert ? (
+                              <button
+                                onClick={() => handleConvertToEpcProject(ind)}
+                                disabled={convertingIndentId === ind.quotation_id}
+                                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-md hover:shadow-lg transition-all animate-pulse"
+                                title="Convert to turnkey EPC project after verifying signed material receipt"
+                              >
+                                <Sparkles className="w-3.5 h-3.5 text-emerald-200" />
+                                <span>{convertingIndentId === ind.quotation_id ? 'Converting...' : 'Convert to EPC Project &rarr;'}</span>
+                              </button>
+                            ) : (
+                              <span className="px-3 py-1.5 bg-slate-100 text-slate-500 border border-slate-200 rounded-xl text-[11px] font-semibold flex items-center gap-1" title="Materials must be delivered and customer signature captured first">
+                                <Clock className="w-3 h-3 text-slate-400" />
+                                <span>Awaiting Delivery &amp; Signature</span>
+                              </span>
+                            )}
+                          </div>
+
+                          <button
+                            onClick={() => handleDeleteIndent(ind.quotation_id, ind.quotation_number || ind.quotation_id)}
+                            className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"
+                            title="Delete / Archive this indent"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>
@@ -967,6 +1142,13 @@ export const PurchaseOrdersView: React.FC = () => {
                                 title="View PO Details"
                               >
                                 <Eye className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => handleDeletePurchaseOrder(po.id, pNum)}
+                                className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg cursor-pointer transition-colors"
+                                title="Delete Purchase Order"
+                              >
+                                <Trash2 className="w-4 h-4" />
                               </button>
                             </div>
                           </td>
@@ -1262,17 +1444,26 @@ export const PurchaseOrdersView: React.FC = () => {
         </div>
       )}
 
-      {/* CREATE PO MODAL */}
+      {/* CREATE / VIEW PO MODAL */}
       {showNewPoModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-xl overflow-hidden border border-slate-200">
             <div className="flex items-center justify-between p-4 bg-slate-900 text-white">
               <div className="flex items-center gap-2">
-                <ShoppingCart className="w-5 h-5 text-emerald-400" />
+                {isPoModalReadOnly ? (
+                  <ClipboardList className="w-5 h-5 text-emerald-400" />
+                ) : (
+                  <ShoppingCart className="w-5 h-5 text-emerald-400" />
+                )}
                 <div>
-                  <h3 className="font-bold text-sm">Create Equipment Purchase Order</h3>
+                  <h3 className="font-bold text-sm">
+                    {isPoModalReadOnly ? 'Equipment BOM & Material Specifications' : 'Create Equipment Purchase Order'}
+                  </h3>
                   {selectedQuotationNumber && (
-                    <p className="text-[11px] text-emerald-300">Linked Quotation: {selectedQuotationNumber} • {selectedCustomerName}</p>
+                    <p className="text-[11px] text-emerald-300">
+                      Linked Quotation: {selectedQuotationNumber} • {selectedCustomerName}
+                      {selectedIndentCompleted && ' • Project Completed (Procurement Closed)'}
+                    </p>
                   )}
                 </div>
               </div>
@@ -1285,144 +1476,220 @@ export const PurchaseOrdersView: React.FC = () => {
             </div>
 
             <form onSubmit={handleCreatePo} className="p-5 space-y-4 text-xs max-h-[85vh] overflow-y-auto">
-              <div className="grid grid-cols-2 gap-3">
+              {/* Completed / Read-only Warning Banner */}
+              {selectedIndentCompleted ? (
+                <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl text-emerald-950 text-xs font-semibold flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>
+                    Project {selectedProjectId || 'Completed'} has reached the <strong>Completed</strong> stage. Procurement is finalized and closed; new purchase orders cannot be created.
+                  </span>
+                </div>
+              ) : isPoModalReadOnly ? (
+                <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-blue-900 text-xs font-semibold flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0" />
+                  <span>
+                    Purchase Order already issued for this quotation. Viewing material requirements in read-only mode.
+                  </span>
+                </div>
+              ) : null}
+
+              {isPoModalReadOnly ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200">
+                    <span className="text-[10px] text-slate-500 font-bold uppercase block">Supplier / Channel</span>
+                    <span className="font-semibold text-slate-800 text-xs mt-0.5 block">{supplierName || 'Waaree Solar Tech'}</span>
+                  </div>
+                  <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200">
+                    <span className="text-[10px] text-slate-500 font-bold uppercase block">Destination Warehouse / Site</span>
+                    <span className="font-semibold text-slate-800 text-xs mt-0.5 block">{deliveryWarehouse}</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">Select Supplier *</label>
+                    <input
+                      type="text"
+                      value={supplierName}
+                      onChange={e => setSupplierName(e.target.value)}
+                      placeholder="e.g. Waaree Solar / Solis Inverters / Polycab Cables"
+                      className="w-full p-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 font-semibold"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">Destination Warehouse / Site</label>
+                    <select
+                      value={deliveryWarehouse}
+                      onChange={(e) => setDeliveryWarehouse(e.target.value)}
+                      className="w-full p-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 font-semibold"
+                    >
+                      <option value="Direct to Customer Site">Direct to Customer Site (Preferred)</option>
+                      <option value="Central Warehouse">Central Bengaluru Hub</option>
+                      <option value="Hubli Regional Depot">Hubli Regional Depot</option>
+                      <option value="Chennai Regional Depot">Chennai Regional Depot</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {!isPoModalReadOnly && (
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Select Supplier *</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Expected Delivery Date (ETA)</label>
                   <input
-                    type="text"
-                    value={supplierName}
-                    onChange={e => setSupplierName(e.target.value)}
-                    placeholder="e.g. Waaree Solar / Solis Inverters / Polycab Cables"
+                    type="date"
+                    value={expectedDate}
+                    onChange={(e) => setExpectedDate(e.target.value)}
                     className="w-full p-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 font-semibold"
-                    required
                   />
                 </div>
+              )}
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Destination Warehouse / Site</label>
-                  <select
-                    value={deliveryWarehouse}
-                    onChange={(e) => setDeliveryWarehouse(e.target.value)}
-                    className="w-full p-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 font-semibold"
-                  >
-                    <option value="Direct to Customer Site">Direct to Customer Site (Preferred)</option>
-                    <option value="Central Warehouse">Central Bengaluru Hub</option>
-                    <option value="Hubli Regional Depot">Hubli Regional Depot</option>
-                    <option value="Chennai Regional Depot">Chennai Regional Depot</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Expected Delivery Date (ETA)</label>
-                <input
-                  type="date"
-                  value={expectedDate}
-                  onChange={(e) => setExpectedDate(e.target.value)}
-                  className="w-full p-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 font-semibold"
-                />
-              </div>
-
+              {/* Items Section */}
               <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
                 <div className="flex items-center justify-between">
                   <h4 className="font-bold text-slate-900 text-xs">Order Line Items ({poFormItems.length})</h4>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPoFormItems([
-                        ...poFormItems,
-                        { sku: 'ITEM-NEW', name: 'Material Line Item', category: 'General BOS', quantity: 1, unit: 'Nos', unitPrice: 1000 }
-                      ]);
-                    }}
-                    className="px-2 py-1 bg-emerald-100 text-emerald-800 font-bold rounded-lg text-[10px] cursor-pointer"
-                  >
-                    + Add Item
-                  </button>
+                  {!isPoModalReadOnly && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPoFormItems([
+                          ...poFormItems,
+                          { sku: 'ITEM-NEW', name: 'Material Line Item', category: 'General BOS', quantity: 1, unit: 'Nos', unitPrice: 1000 }
+                        ]);
+                      }}
+                      className="px-2 py-1 bg-emerald-100 text-emerald-800 font-bold rounded-lg text-[10px] cursor-pointer"
+                    >
+                      + Add Item
+                    </button>
+                  )}
                 </div>
 
-                <div className="space-y-2 max-h-48 overflow-y-auto">
-                  {poFormItems.map((item, idx) => (
-                    <div key={idx} className="p-2 bg-white rounded-lg border border-slate-200 grid grid-cols-12 gap-2 items-center">
-                      <div className="col-span-5">
-                        <input
-                          type="text"
-                          value={item.name}
-                          onChange={e => {
-                            const next = [...poFormItems];
-                            next[idx].name = e.target.value;
-                            setPoFormItems(next);
-                          }}
-                          className="w-full p-1 border border-slate-200 rounded text-xs font-semibold"
-                          placeholder="Item Name"
-                        />
+                {isPoModalReadOnly ? (
+                  <div className="space-y-1.5 max-h-56 overflow-y-auto divide-y divide-slate-200/60">
+                    {poFormItems.map((item, idx) => (
+                      <div key={idx} className="pt-1.5 flex items-center justify-between text-xs">
+                        <div>
+                          <span className="font-semibold text-slate-900 block">{item.name}</span>
+                          <span className="text-[10px] text-slate-500">{item.category || 'Solar BOS'}</span>
+                        </div>
+                        <div className="text-right">
+                          <span className="font-bold text-slate-900 block">{item.quantity} {item.unit || 'Nos'}</span>
+                          <span className="text-[10px] text-slate-500 font-mono">₹{Number(item.unitPrice || 0).toLocaleString('en-IN')}</span>
+                        </div>
                       </div>
-                      <div className="col-span-3 flex items-center gap-1">
-                        <input
-                          type="number"
-                          min={1}
-                          value={item.quantity}
-                          onChange={e => {
-                            const next = [...poFormItems];
-                            next[idx].quantity = Number(e.target.value);
-                            setPoFormItems(next);
-                          }}
-                          className="w-14 p-1 border border-slate-200 rounded text-xs font-bold text-center"
-                        />
-                        <span className="text-[10px] text-slate-500">{item.unit || 'Nos'}</span>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {poFormItems.map((item, idx) => (
+                      <div key={idx} className="p-2 bg-white rounded-lg border border-slate-200 grid grid-cols-12 gap-2 items-center">
+                        <div className="col-span-5">
+                          <input
+                            type="text"
+                            value={item.name}
+                            onChange={e => {
+                              const next = [...poFormItems];
+                              next[idx].name = e.target.value;
+                              setPoFormItems(next);
+                            }}
+                            className="w-full p-1 border border-slate-200 rounded text-xs font-semibold"
+                            placeholder="Item Name"
+                          />
+                        </div>
+                        <div className="col-span-3 flex items-center gap-1">
+                          <input
+                            type="number"
+                            min={1}
+                            value={item.quantity}
+                            onChange={e => {
+                              const next = [...poFormItems];
+                              next[idx].quantity = Number(e.target.value);
+                              setPoFormItems(next);
+                            }}
+                            className="w-14 p-1 border border-slate-200 rounded text-xs font-bold text-center"
+                          />
+                          <span className="text-[10px] text-slate-500">{item.unit || 'Nos'}</span>
+                        </div>
+                        <div className="col-span-3">
+                          <input
+                            type="number"
+                            value={item.unitPrice}
+                            onChange={e => {
+                              const next = [...poFormItems];
+                              next[idx].unitPrice = Number(e.target.value);
+                              setPoFormItems(next);
+                            }}
+                            className="w-full p-1 border border-slate-200 rounded text-xs text-right font-mono"
+                            placeholder="Rate ₹"
+                          />
+                        </div>
+                        <div className="col-span-1 text-center">
+                          <button
+                            type="button"
+                            onClick={() => setPoFormItems(poFormItems.filter((_, i) => i !== idx))}
+                            className="text-slate-400 hover:text-red-600 font-bold cursor-pointer"
+                          >
+                            ×
+                          </button>
+                        </div>
                       </div>
-                      <div className="col-span-3">
-                        <input
-                          type="number"
-                          value={item.unitPrice}
-                          onChange={e => {
-                            const next = [...poFormItems];
-                            next[idx].unitPrice = Number(e.target.value);
-                            setPoFormItems(next);
-                          }}
-                          className="w-full p-1 border border-slate-200 rounded text-xs text-right font-mono"
-                          placeholder="Rate ₹"
-                        />
-                      </div>
-                      <div className="col-span-1 text-center">
-                        <button
-                          type="button"
-                          onClick={() => setPoFormItems(poFormItems.filter((_, i) => i !== idx))}
-                          className="text-slate-400 hover:text-red-600 font-bold cursor-pointer"
-                        >
-                          ×
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {!isPoModalReadOnly ? (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">PO Notes &amp; Delivery Instructions</label>
+                  <textarea
+                    rows={2}
+                    value={poNotes}
+                    onChange={e => setPoNotes(e.target.value)}
+                    placeholder="Delivery timing, unloading requirements, contact person on site..."
+                    className="w-full p-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 text-xs"
+                  />
                 </div>
-              </div>
+              ) : (
+                <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-600">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase block mb-0.5">Delivery Notes</span>
+                  <p>{poNotes || 'Standard site delivery instructions recorded.'}</p>
+                </div>
+              )}
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">PO Notes &amp; Delivery Instructions</label>
-                <textarea
-                  rows={2}
-                  value={poNotes}
-                  onChange={e => setPoNotes(e.target.value)}
-                  placeholder="Delivery timing, unloading requirements, contact person on site..."
-                  className="w-full p-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 text-xs"
-                />
-              </div>
-
-              <div className="pt-3 border-t border-slate-200 flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowNewPoModal(false)}
-                  className="px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 rounded-xl cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isCreatingPo}
-                  className="px-5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-xs transition-colors cursor-pointer"
-                >
-                  {isCreatingPo ? 'Issuing PO...' : 'Issue Purchase Order'}
-                </button>
+              <div className="pt-3 border-t border-slate-200 flex items-center justify-between">
+                {isPoModalReadOnly ? (
+                  <>
+                    <span className="text-[11px] text-slate-500 font-medium">
+                      {selectedIndentCompleted ? 'Procurement Closed (Project Completed)' : 'PO Issued • Read Only'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPoModal(false)}
+                      className="px-5 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-xl cursor-pointer"
+                    >
+                      Close
+                    </button>
+                  </>
+                ) : (
+                  <div className="flex items-center justify-end gap-2 w-full">
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPoModal(false)}
+                      className="px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 rounded-xl cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isCreatingPo}
+                      className="px-5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-xs transition-colors cursor-pointer"
+                    >
+                      {isCreatingPo ? 'Issuing PO...' : 'Issue Purchase Order'}
+                    </button>
+                  </div>
+                )}
               </div>
             </form>
           </div>

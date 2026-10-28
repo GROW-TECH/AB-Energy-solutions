@@ -18,7 +18,7 @@ export const SalesDashboard: React.FC<SalesDashboardProps> = ({
   onNavigateToTab,
   onNavigateToQuotation,
 }) => {
-  const { leads, followUps, quotations, activeRole, currentUser, employees, updateLead } = useCrm();
+  const { leads, followUps, quotations, activeRole, currentUser, employees, updateLead, surveys } = useCrm();
 
   const isManager = activeRole === 'Sales Manager' || activeRole === 'Super Admin';
   const isExecutive = activeRole === 'Sales Executive';
@@ -32,17 +32,37 @@ export const SalesDashboard: React.FC<SalesDashboardProps> = ({
   );
 
   // Scoped Data for Sales Executive
-  const myLeads = leads.filter(l => 
-    l.assignedToId === currentUser?.id || 
-    (currentUser?.name && l.assignedToName?.toLowerCase().includes(currentUser.name.toLowerCase().split(' ')[0])) ||
-    l.assignedToName?.toLowerCase().includes('vikram')
-  );
-  // Fallback to active inquiries if rep has no seeded match so interface isn't blank
-  const executiveLeads = myLeads.length > 0 ? myLeads : leads.slice(0, 10);
-  const myPendingFollowups = followUps.filter(f => f.status === 'Pending').slice(0, 6);
+  const isLeadAssignedToCurrentRep = (l: Lead) => {
+    if (!currentUser) return false;
+    if (currentUser.employeeId && l.assignedToId === currentUser.employeeId) return true;
+    if (currentUser.id && l.assignedToId === currentUser.id) return true;
+    if (l.assignedToName && currentUser.name) {
+      const aName = l.assignedToName.trim().toLowerCase();
+      const uName = currentUser.name.trim().toLowerCase();
+      if (aName === uName) return true;
+      const first = uName.split(' ')[0];
+      if (first.length >= 3 && aName.includes(first)) return true;
+    }
+    return false;
+  };
+
+  const myLeads = leads.filter(isLeadAssignedToCurrentRep);
+  const executiveLeads = myLeads;
+  const myPendingFollowups = followUps.filter(f => {
+    if (f.status !== 'Pending') return false;
+    if (currentUser?.employeeId && f.assignedToId === currentUser.employeeId) return true;
+    if (currentUser?.id && f.assignedToId === currentUser.id) return true;
+    return false;
+  }).slice(0, 6);
   const myHotLeads = executiveLeads.filter(l => (l.priority === 'High' || l.priority === 'Urgent') && l.status !== 'Won' && l.status !== 'Lost');
   const myWonLeads = executiveLeads.filter(l => l.status === 'Won');
-  const myActiveProposals = quotations.filter(q => q.status === 'Sent' || q.status === 'Draft' || q.status === 'Negotiation');
+  const myActiveProposals = quotations.filter(q => {
+    const isStatus = q.status === 'Sent' || q.status === 'Draft' || q.status === 'Negotiation';
+    if (!isStatus) return false;
+    if (myLeads.some(l => l.id === q.leadId)) return true;
+    if (q.salespersonName && currentUser?.name && q.salespersonName.toLowerCase().includes(currentUser.name.toLowerCase().split(' ')[0])) return true;
+    return false;
+  });
 
   // Team Data for Sales Manager
   const totalLeads = leads.length;
@@ -443,12 +463,28 @@ export const SalesDashboard: React.FC<SalesDashboardProps> = ({
                   </div>
 
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    <button
-                      onClick={() => onNavigateToQuotation(lead.id)}
-                      className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer"
-                    >
-                      Quote
-                    </button>
+                    {(() => {
+                      const linkedSurvey = surveys.find(s => s.leadId === lead.id || s.id === lead.surveyId);
+                      const isSurveyApproved = linkedSurvey?.status === 'Approved' || lead.status === 'Survey Completed' || lead.status === 'Quotation Sent' || lead.status === 'Negotiation' || lead.status === 'Won' || Boolean(lead.quotationId);
+                      if (isSurveyApproved) {
+                        return (
+                          <button
+                            onClick={() => onNavigateToQuotation(lead.id)}
+                            className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                          >
+                            Quote
+                          </button>
+                        );
+                      }
+                      return (
+                        <button
+                          onClick={() => onNavigateToTab?.('leads')}
+                          className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                        >
+                          View Lead
+                        </button>
+                      );
+                    })()}
                   </div>
                 </div>
               ))}

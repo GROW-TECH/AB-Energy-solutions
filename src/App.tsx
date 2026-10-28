@@ -47,6 +47,8 @@ import { AmcView } from './components/service/AmcView';
 import { AutomationCenter } from './components/automation/AutomationCenter';
 import { AnalyticsView } from './components/analytics/AnalyticsView';
 import { TeamView } from './components/team/TeamView';
+import { CallTrackingView } from './components/telephony/CallTrackingView';
+import { GovtSubsidyMasterView } from './components/solar/GovtSubsidyMasterView';
 
 // Modals
 import { NewLeadModal } from './components/modals/NewLeadModal';
@@ -232,6 +234,15 @@ const AppContent: React.FC = () => {
       }
       return <PurchaseOrdersView />;
     }
+
+    if (activeNav === 'call-tracker') {
+      return <CallTrackingView />;
+    }
+
+    if (activeNav === 'subsidies') {
+      return <GovtSubsidyMasterView />;
+    }
+
     if (activeNav === 'automation-rules' || activeNav === 'automation-logs') {
       return <AutomationCenter />;
     }
@@ -406,8 +417,8 @@ const AppContent: React.FC = () => {
         />
 
         {/* Dynamic Workspace Body */}
-        <main className="flex-1 overflow-y-auto p-2.5 sm:p-6 lg:p-7">
-          <div className="max-w-7xl mx-auto pb-12">
+        <main className="flex-1 overflow-y-auto p-2.5 sm:p-5 lg:p-6">
+          <div className="w-full max-w-[1600px] mx-auto pb-12">
             {renderMainContent()}
           </div>
         </main>

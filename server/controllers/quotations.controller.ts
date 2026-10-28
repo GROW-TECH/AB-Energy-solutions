@@ -221,8 +221,8 @@ export async function createQuotationDraftInternal(
   };
 
   const validUntil = new Date(Date.now() + 86400000 * 14).toISOString().split('T')[0];
-  const salespersonId = user?.employeeId || lead?.assigned_to_id || 'EMP-06';
-  const salespersonName = user?.name || lead?.assigned_to_name || 'Vikram Mehta (Sales)';
+  const salespersonId = lead?.assigned_to_id || user?.employeeId || 'EMP-265286';
+  const salespersonName = lead?.assigned_to_name || (user?.role === 'Sales Executive' ? user?.name : 'Suresh Kumar');
 
   // 5. Insert Draft Quotation into MySQL
   await connOrPool.query(
@@ -657,9 +657,13 @@ export const updateQuotation = async (req: Request, res: Response) => {
         }
       }
     }
-    if (updates.versions !== undefined) { fields.push('versions = ?'); values.push(JSON.stringify(updates.versions)); }
-    if (updates.totalAmount !== undefined) { fields.push('total_amount = ?'); values.push(updates.totalAmount); }
     if (updates.approvalStatus !== undefined) { fields.push('approval_status = ?'); values.push(updates.approvalStatus); }
+    if (updates.status === 'Sent' && (user?.role === 'Sales Manager' || user?.role === 'Super Admin')) {
+      fields.push('approval_status = ?');
+      values.push('Approved');
+      fields.push('discount_approved_by = ?');
+      values.push(user?.name || 'Sales Manager');
+    }
 
     if (fields.length > 0) {
       values.push(id);
@@ -798,19 +802,23 @@ export const editQuotation = async (req: Request, res: Response) => {
       console.warn('PDF regeneration error:', e);
     }
 
+    const isManager = user?.role === 'Sales Manager' || user?.role === 'Super Admin';
+    const finalApproval = body.approvalStatus || (isManager ? 'Approved' : calc.approvalStatus);
+    const approvedBy = isManager ? (user?.name || 'Sales Manager') : existing.discount_approved_by;
+
     await pool.query(
       `UPDATE quotations SET
         system_capacity_kw = ?, package_tier = ?, discount_amount = ?,
         subtotal = ?, taxable_amount = ?, gst_rate = ?, gst_amount = ?,
         total_amount = ?, net_total = ?, total_cgst = ?, total_sgst = ?,
-        total_igst = ?, amount_in_words = ?, approval_status = ?,
+        total_igst = ?, amount_in_words = ?, approval_status = ?, discount_approved_by = ?,
         versions = ?, pdf_url = ?
        WHERE id = ?`,
       [
         calc.systemCapacityKw, calc.packageTier, calc.discountAmount,
         calc.subtotal, calc.taxableAmount, calc.gstRate, calc.gstAmount,
         calc.finalContractAmount, calc.finalContractAmount, calc.cgstAmount,
-        calc.sgstAmount, calc.igstAmount, calc.amountInWords, calc.approvalStatus,
+        calc.sgstAmount, calc.igstAmount, calc.amountInWords, finalApproval, approvedBy,
         JSON.stringify(versions), pdfUrl, id
       ]
     );

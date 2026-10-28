@@ -40,6 +40,7 @@ export const getBom = async (req: Request, res: Response) => {
         projectId: bom.project_id,
         surveyId: bom.survey_id,
         version: bom.version,
+        isEdited: Boolean(bom.is_edited) || (Number(bom.version) > 1),
         status: bom.status,
         preparedById: bom.prepared_by_id,
         preparedByName: bom.prepared_by_name,
@@ -119,14 +120,14 @@ export const saveBom = async (req: Request, res: Response) => {
     if (!existingBom || existingBom.length === 0) {
       await pool.query(
         `INSERT INTO project_boms 
-          (id, project_id, survey_id, version, status, prepared_by_id, prepared_by_name, total_estimated_cost, revision_comments, created_at, updated_at)
-         VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)`,
+          (id, project_id, survey_id, version, status, is_edited, prepared_by_id, prepared_by_name, total_estimated_cost, revision_comments, created_at, updated_at)
+         VALUES (?, ?, ?, 1, ?, 0, ?, ?, ?, ?, ?, ?)`,
         [
           bomId,
           projectId,
           surveyId,
           status,
-          user?.userId || null,
+          user?.userId || user?.id || null,
           user?.name || user?.username || 'Survey Engineer',
           totalEstimatedCost,
           revisionComments,
@@ -135,11 +136,13 @@ export const saveBom = async (req: Request, res: Response) => {
         ]
       );
     } else {
+      const prev = existingBom[0];
+      const newVersion = (Number(prev.version) || 1) + 1;
       await pool.query(
         `UPDATE project_boms 
-         SET status = ?, total_estimated_cost = ?, revision_comments = ?, updated_at = ?
+         SET status = ?, version = ?, is_edited = 1, total_estimated_cost = ?, revision_comments = ?, updated_at = ?
          WHERE id = ?`,
-        [status, totalEstimatedCost, revisionComments, now, bomId]
+        [status, newVersion, totalEstimatedCost, revisionComments, now, bomId]
       );
     }
 
@@ -160,7 +163,7 @@ export const saveBom = async (req: Request, res: Response) => {
           bomId,
           it.productId || null,
           it.category || 'General',
-          it.itemName || 'Solar Component',
+          it.itemName || 'Custom Item',
           it.technicalSpecification || '',
           it.brandMake || '',
           Number(it.quantity) || 1,
@@ -176,7 +179,7 @@ export const saveBom = async (req: Request, res: Response) => {
     // Link bom_id in survey/project if present
     if (surveyId) {
       try {
-        await pool.query('UPDATE site_surveys SET notes = CONCAT(IFNULL(notes, ""), " [BOM: ", ?) WHERE id = ?', [bomId, surveyId]);
+        await pool.query('UPDATE site_surveys SET notes = CONCAT(IFNULL(notes, ""), " [BOM: ", ?, "]") WHERE id = ?', [bomId, surveyId]);
       } catch (_) {}
     }
     if (projectId) {
@@ -320,6 +323,7 @@ export const getAllBoms = async (req: Request, res: Response) => {
         capacityKw: Number(b.survey_kw || b.project_kw || 0),
         roofType: b.roof_type || 'RCC Flat',
         version: b.version,
+        isEdited: Boolean(b.is_edited) || (Number(b.version) > 1),
         status: b.status,
         preparedById: b.prepared_by_id,
         preparedByName: b.prepared_by_name,

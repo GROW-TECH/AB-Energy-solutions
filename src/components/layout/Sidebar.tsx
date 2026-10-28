@@ -6,7 +6,7 @@ import {
   Boxes, BarChart3, Truck, ShoppingCart, LifeBuoy, ShieldCheck, 
   Clock, LineChart, Cpu, History, FolderOpen, Briefcase, 
   Settings, ExternalLink, ChevronDown, ChevronRight, SunMedium,
-  Handshake
+  Handshake, PhoneCall, Landmark
 } from 'lucide-react';
 import { useCrm } from '../../context/CrmContext';
 import { getApiUrl } from '../../utils/apiUrl';
@@ -20,6 +20,7 @@ export type NavItemKey =
   | 'quotations'
   | 'negotiations'
   | 'customers'
+  | 'call-tracker'
   // Solar
   | 'site-surveys'
   | 'field-bom'
@@ -27,6 +28,7 @@ export type NavItemKey =
   | 'solar-packages'
   // Projects
   | 'projects'
+  | 'subsidies'
   | 'installation'
   | 'project-tasks'
   | 'materials'
@@ -86,6 +88,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const pendingReviewsCount = surveys.filter(s => s.status === 'Submitted for Review').length;
   const acceptedQuotesCount = quotations.filter(q => q.status === 'Customer_Accepted').length;
   const activeNegotiationsCount = quotations.filter(q => q.status === 'Sent').length;
+
+  // Completed or reviewed surveys requiring BOM configuration (excluding completed projects)
+  const pendingBomsCount = surveys.filter(s => {
+    const isSurveyCompleted = 
+      s.status === 'Completed' || 
+      s.status === 'Submitted for Review' || 
+      s.status === 'Approved' ||
+      (s.status as string)?.toLowerCase().includes('completed') ||
+      (s.status as string)?.toLowerCase().includes('review');
+    if (!isSurveyCompleted) return false;
+
+    const isProjectCompleted = projects.some(p => 
+      (p.stage === 'Completed' || (p as any).status === 'Completed') && (
+        (s.leadId && p.leadId === s.leadId) ||
+        (s.phone && p.customerPhone === s.phone) ||
+        (s.customerName && p.customerName?.toLowerCase() === s.customerName?.toLowerCase())
+      )
+    );
+    return !isProjectCompleted;
+  }).length;
 
   const isSuperAdmin = activeRole === 'Super Admin' || currentUser?.role === 'Super Admin';
 
@@ -186,13 +208,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </span>
           ) : null
         },
-        { key: 'customers', label: 'Customers', icon: Users }
+        { key: 'customers', label: 'Customers', icon: Users },
+        { key: 'call-tracker', label: 'SIM Call Hub', icon: PhoneCall }
       ]
     },
     {
       id: 'projects',
       label: '4. Projects & EPC',
-      badgeCount: (activeProjectsCount > 0 ? activeProjectsCount : 0) + (pendingReviewsCount > 0 ? pendingReviewsCount : 0),
+      badgeCount: (activeProjectsCount > 0 ? activeProjectsCount : 0) + (pendingReviewsCount > 0 ? pendingReviewsCount : 0) + (pendingBomsCount > 0 ? pendingBomsCount : 0),
       items: [
         {
           key: 'projects',
@@ -205,6 +228,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
           ) : null
         },
         {
+          key: 'subsidies',
+          label: 'Govt. Subsidy (PM Surya)',
+          icon: Landmark,
+          badge: (
+            <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+              ₹78K CFA
+            </span>
+          )
+        },
+        {
           key: 'site-surveys',
           label: 'Site Surveys',
           icon: Compass,
@@ -215,7 +248,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
           ) : null
         },
         { key: 'project-tasks', label: 'Project Tasks', icon: CheckSquare },
-        { key: 'materials', label: 'Material Planning / BOM', icon: Layers },
+        { 
+          key: 'materials', 
+          label: 'Material Planning / BOM', 
+          icon: Layers,
+          badge: pendingBomsCount > 0 ? (
+            <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+              {pendingBomsCount}
+            </span>
+          ) : null
+        },
         { key: 'installation', label: 'Installation Dispatch', icon: Wrench }
       ]
     },
@@ -411,6 +453,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               ) : null)}
               {renderNavButton('customers', 'Customers', UserCheck)}
               {renderNavButton('employees', 'Sales Executives & Team', Users)}
+              {renderNavButton('call-tracker', 'SIM Call Hub', PhoneCall)}
             </div>
           )}
 
@@ -438,6 +481,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   {pendingFollowupsCount}
                 </span>
               ) : null)}
+              {renderNavButton('call-tracker', 'My SIM Calls', PhoneCall)}
             </div>
           )}
 
@@ -453,7 +497,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   {pendingReviewsCount}
                 </span>
               ) : null)}
-              {renderNavButton('field-bom', 'Field BOMs & Materials', Layers)}
+              {renderNavButton('field-bom', 'Field BOMs & Materials', Layers, pendingBomsCount > 0 ? (
+                <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                  {pendingBomsCount}
+                </span>
+              ) : null)}
               {renderNavButton('solar-calculator', 'Solar PV Calculator', Calculator)}
               {renderNavButton('solar-packages', 'Solar Packages', PackageSearch)}
             </div>
@@ -482,7 +530,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </span>
               ) : null)}
               {renderNavButton('project-tasks', 'Project Tasks', CheckSquare)}
-              {renderNavButton('materials', 'BOM Technical Approvals', Layers)}
+              {renderNavButton('materials', 'BOM Technical Approvals', Layers, pendingBomsCount > 0 ? (
+                <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                  {pendingBomsCount}
+                </span>
+              ) : null)}
               {renderNavButton('installation', 'Installation Oversight', Wrench)}
               {renderNavButton('employees', 'Installation Crew & Team', Users)}
             </div>

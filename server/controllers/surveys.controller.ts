@@ -38,6 +38,7 @@ export function formatSurvey(s: any, photos: any[] = [], history: any[] = []) {
     phone: s.phone,
     address: s.address,
     scheduledDate: s.scheduled_date,
+    scheduledTime: s.scheduled_time || '10:00 AM - 12:00 PM',
     engineerId: s.engineer_id,
     engineerName: s.engineer_name,
     status: s.status,
@@ -109,6 +110,9 @@ export function formatSurvey(s: any, photos: any[] = [], history: any[] = []) {
     reviewComments: s.review_comments || null,
     quotationId: s.quotation_id || null,
     isDraft: Boolean(s.is_draft),
+
+    // Custom Fields added by Survey Engineer
+    customFields: typeof s.custom_fields === 'string' ? JSON.parse(s.custom_fields) : (s.custom_fields || []),
 
     // Attached photos and audit review history
     photos: photos.map(formatPhoto),
@@ -233,10 +237,11 @@ export const createSurvey = async (req: Request, res: Response) => {
     }
 
     const scheduledDate = s.scheduledDate || new Date().toISOString().split('T')[0];
+    const scheduledTime = s.scheduledTime || '10:00 AM - 12:00 PM';
 
     await pool.query(
       `INSERT INTO site_surveys (
-        id, lead_id, lead_name, customer_name, phone, address, scheduled_date, 
+        id, lead_id, lead_name, customer_name, phone, address, scheduled_date, scheduled_time,
         engineer_id, engineer_name, status, roof_area_sqft, shadow_free_area_sqft, 
         roof_type, azimuth_angle, tilt_angle, existing_sanction_load_kw, grid_phase, 
         distance_to_lt_panel_meters, recommended_kw, panel_quantity, 
@@ -254,7 +259,7 @@ export const createSurvey = async (req: Request, res: Response) => {
         cable_specification, unresolved_technical_issues, engineer_recommendations,
         is_draft
       ) VALUES (
-        ?, ?, ?, ?, ?, ?, ?, 
+        ?, ?, ?, ?, ?, ?, ?, ?, 
         ?, ?, ?, ?, ?, 
         ?, ?, ?, ?, ?, 
         ?, ?, ?, 
@@ -273,7 +278,7 @@ export const createSurvey = async (req: Request, res: Response) => {
         ?
       )`,
       [
-        surveyId, s.leadId || null, s.leadName || s.customerName, s.customerName, s.phone, s.address, scheduledDate,
+        surveyId, s.leadId || null, s.leadName || s.customerName, s.customerName, s.phone, s.address, scheduledDate, scheduledTime,
         s.engineerId || null, s.engineerName || 'Vikram Mehta', s.status || 'Scheduled', s.roofAreaSqFt || 0, s.shadowFreeAreaSqFt || 0,
         s.roofType || 'RCC Flat', s.azimuthAngle || 180, s.tiltAngle || 15, s.existingSanctionLoadKw || 0, s.gridPhase || 'Three Phase',
         s.distanceToLtPanelMeters || 20, s.recommendedKw || 0, s.panelQuantity || 0,
@@ -375,6 +380,7 @@ export const updateSurvey = async (req: Request, res: Response) => {
       cable_specification: s.cableSpecification !== undefined ? s.cableSpecification : current.cable_specification,
       unresolved_technical_issues: s.unresolvedTechnicalIssues !== undefined ? s.unresolvedTechnicalIssues : current.unresolved_technical_issues,
       engineer_recommendations: s.engineerRecommendations !== undefined ? s.engineerRecommendations : current.engineer_recommendations,
+      custom_fields: s.customFields !== undefined ? (typeof s.customFields === 'string' ? s.customFields : JSON.stringify(s.customFields)) : current.custom_fields,
       
       is_draft: s.isDraft !== undefined ? (s.isDraft ? 1 : 0) : 1,
     };
@@ -538,13 +544,84 @@ export const submitSurveyForReview = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const user = (req as any).user;
+    const { comments, bypassWithExceptions, updates } = req.body;
 
     const [rows]: any = await pool.query('SELECT * FROM site_surveys WHERE id = ?', [id]);
     if (!rows || rows.length === 0) {
       return res.status(404).json({ success: false, error: 'Survey not found' });
     }
 
-    const survey = rows[0];
+    const current = rows[0];
+
+    // If incoming updates were provided, persist them first so validation runs against latest state
+    if (updates && typeof updates === 'object') {
+      const s = updates;
+      const updateMap: Record<string, any> = {
+        roof_area_sqft: s.roofAreaSqFt !== undefined ? s.roofAreaSqFt : current.roof_area_sqft,
+        shadow_free_area_sqft: s.shadowFreeAreaSqFt !== undefined ? s.shadowFreeAreaSqFt : current.shadow_free_area_sqft,
+        roof_type: s.roofType !== undefined ? s.roofType : current.roof_type,
+        azimuth_angle: s.azimuthAngle !== undefined ? s.azimuthAngle : current.azimuth_angle,
+        tilt_angle: s.tiltAngle !== undefined ? s.tiltAngle : current.tilt_angle,
+        existing_sanction_load_kw: s.existingSanctionLoadKw !== undefined ? s.existingSanctionLoadKw : current.existing_sanction_load_kw,
+        grid_phase: s.gridPhase !== undefined ? s.gridPhase : current.grid_phase,
+        distance_to_lt_panel_meters: s.distanceToLtPanelMeters !== undefined ? s.distanceToLtPanelMeters : current.distance_to_lt_panel_meters,
+        recommended_kw: s.recommendedKw !== undefined ? s.recommendedKw : current.recommended_kw,
+        panel_quantity: s.panelQuantity !== undefined ? s.panelQuantity : current.panel_quantity,
+        estimated_generation_units_per_year: s.estimatedGenerationUnitsPerYear !== undefined ? s.estimatedGenerationUnitsPerYear : current.estimated_generation_units_per_year,
+        estimated_annual_savings: s.estimatedAnnualSavings !== undefined ? s.estimatedAnnualSavings : current.estimated_annual_savings,
+        estimated_cost: s.estimatedCost !== undefined ? s.estimatedCost : current.estimated_cost,
+        payback_years: s.paybackYears !== undefined ? s.paybackYears : current.payback_years,
+        co2_reduction_tons_per_year: s.co2ReductionTonsPerYear !== undefined ? s.co2ReductionTonsPerYear : current.co2_reduction_tons_per_year,
+        notes: s.notes !== undefined ? s.notes : current.notes,
+        
+        roof_dimensions_shape: s.roofDimensionsShape !== undefined ? s.roofDimensionsShape : current.roof_dimensions_shape,
+        surface_condition: s.surfaceCondition !== undefined ? s.surfaceCondition : current.surface_condition,
+        measurement_status: s.measurementStatus !== undefined ? s.measurementStatus : current.measurement_status,
+        obstacles_water_tank: s.obstaclesWaterTank !== undefined ? (s.obstaclesWaterTank ? 1 : 0) : current.obstacles_water_tank,
+        obstacles_mumty: s.obstaclesMumty !== undefined ? (s.obstaclesMumty ? 1 : 0) : current.obstacles_mumty,
+        obstacles_parapet: s.obstaclesParapet !== undefined ? (s.obstaclesParapet ? 1 : 0) : current.obstacles_parapet,
+        obstacles_trees_neighbors: s.obstaclesTreesNeighbors !== undefined ? (s.obstaclesTreesNeighbors ? 1 : 0) : current.obstacles_trees_neighbors,
+        obstacles_other: s.obstaclesOther !== undefined ? s.obstaclesOther : current.obstacles_other,
+        access_pathways_clearance: s.accessPathwaysClearance !== undefined ? s.accessPathwaysClearance : current.access_pathways_clearance,
+        
+        main_meter_status: s.mainMeterStatus !== undefined ? s.mainMeterStatus : current.main_meter_status,
+        main_meter_notes: s.mainMeterNotes !== undefined ? s.mainMeterNotes : current.main_meter_notes,
+        db_condition: s.dbCondition !== undefined ? s.dbCondition : current.db_condition,
+        earthing_status: s.earthingStatus !== undefined ? s.earthingStatus : current.earthing_status,
+        earthing_resistance_ohms: s.earthingResistanceOhms !== undefined ? s.earthingResistanceOhms : current.earthing_resistance_ohms,
+        proposed_inverter_location: s.proposedInverterLocation !== undefined ? s.proposedInverterLocation : current.proposed_inverter_location,
+        electrical_constraints: s.electricalConstraints !== undefined ? s.electricalConstraints : current.electrical_constraints,
+        electrical_upgrades_needed: s.electricalUpgradesNeeded !== undefined ? s.electricalUpgradesNeeded : current.electrical_upgrades_needed,
+        
+        structural_concerns: s.structuralConcerns !== undefined ? s.structuralConcerns : current.structural_concerns,
+        visible_cracks_damage: s.visibleCracksDamage !== undefined ? (s.visibleCracksDamage ? 1 : 0) : current.visible_cracks_damage,
+        waterproofing_status: s.waterproofingStatus !== undefined ? s.waterproofingStatus : current.waterproofing_status,
+        mounting_structure_type: s.mountingStructureType !== undefined ? s.mountingStructureType : current.mounting_structure_type,
+        shading_sources: s.shadingSources !== undefined ? s.shadingSources : current.shading_sources,
+        shading_affected_area_sqft: s.shadingAffectedAreaSqFt !== undefined ? s.shadingAffectedAreaSqFt : current.shading_affected_area_sqft,
+        structural_engineer_approval_required: s.structuralEngineerApprovalRequired !== undefined ? (s.structuralEngineerApprovalRequired ? 1 : 0) : current.structural_engineer_approval_required,
+        
+        feasibility_verdict: s.feasibilityVerdict !== undefined ? s.feasibilityVerdict : current.feasibility_verdict,
+        proposed_panel_wattage: s.proposedPanelWattage !== undefined ? s.proposedPanelWattage : current.proposed_panel_wattage,
+        inverter_recommendation: s.inverterRecommendation !== undefined ? s.inverterRecommendation : current.inverter_recommendation,
+        cable_specification: s.cableSpecification !== undefined ? s.cableSpecification : current.cable_specification,
+        unresolved_technical_issues: s.unresolvedTechnicalIssues !== undefined ? s.unresolvedTechnicalIssues : current.unresolved_technical_issues,
+        engineer_recommendations: s.engineerRecommendations !== undefined ? s.engineerRecommendations : current.engineer_recommendations,
+        custom_fields: s.customFields !== undefined ? (typeof s.customFields === 'string' ? s.customFields : JSON.stringify(s.customFields)) : current.custom_fields,
+      };
+
+      const setClauses: string[] = [];
+      const values: any[] = [];
+      for (const [key, val] of Object.entries(updateMap)) {
+        setClauses.push(`${key} = ?`);
+        values.push(val);
+      }
+      values.push(id);
+      await pool.query(`UPDATE site_surveys SET ${setClauses.join(', ')} WHERE id = ?`, values);
+    }
+
+    const [freshRows]: any = await pool.query('SELECT * FROM site_surveys WHERE id = ?', [id]);
+    const survey = freshRows[0];
 
     // Completion Checklist Validation
     const errors: string[] = [];
@@ -565,7 +642,7 @@ export const submitSurveyForReview = async (req: Request, res: Response) => {
       errors.push('Mandatory photograph missing: Full Rooftop View or Mounting Area');
     }
 
-    if (errors.length > 0 && !req.body.bypassWithExceptions) {
+    if (errors.length > 0 && !bypassWithExceptions) {
       return res.status(400).json({ 
         success: false, 
         error: 'Survey completion checklist failed', 
@@ -589,7 +666,7 @@ export const submitSurveyForReview = async (req: Request, res: Response) => {
     await pool.query(
       `INSERT INTO survey_review_history (id, survey_id, reviewer_id, reviewer_name, action, comments, created_at)
        VALUES (?, ?, ?, ?, 'Submitted', ?, ?)`,
-      [historyId, id, user?.id || null, user?.name || 'Engineer', req.body.comments || 'Survey technical audit submitted for review', submittedAt]
+      [historyId, id, user?.id || null, user?.name || 'Engineer', comments || req.body.comments || 'Survey technical audit submitted for review', submittedAt]
     );
 
     const [updated]: any = await pool.query('SELECT * FROM site_surveys WHERE id = ?', [id]);
@@ -642,31 +719,13 @@ export const reviewSurvey = async (req: Request, res: Response) => {
       [historyId, id, user?.id || null, user?.name || 'Reviewer', decision, comments || '', reviewedAt]
     );
 
-    // If approved, update lead status to 'Survey Completed' so Quotation module can immediately pick it up
-    let createdQuotation: any = null;
-    let quotationError: string | null = null;
-    let quotationCreated = false;
-
+    // If approved, update lead status so Survey Engineer can configure Field BOM
     if (decision === 'Approved') {
       if (survey.lead_id) {
         await pool.query(
           "UPDATE leads SET status = 'Survey Completed' WHERE id = ?",
           [survey.lead_id]
         );
-      }
-
-      // Automatically create a linked quotation draft (Idempotent & Safe)
-      try {
-        const result = await createQuotationDraftInternal(pool, {
-          surveyId: id,
-          leadId: survey.lead_id,
-          user: user || { id: 'EMP-01', name: 'Project Manager' },
-        });
-        createdQuotation = result.quotation;
-        quotationCreated = result.created;
-      } catch (qErr: any) {
-        console.error('Failed to create linked quotation draft on survey approval:', qErr);
-        quotationError = `Survey approved successfully, but quotation draft creation encountered an issue: ${qErr.message}. You can generate the quotation draft from Sales Pipeline.`;
       }
     }
 
@@ -676,11 +735,8 @@ export const reviewSurvey = async (req: Request, res: Response) => {
 
     res.json({
       success: true,
-      message: `Survey ${decision}`,
+      message: `Survey marked as ${decision}. Ready for Field BOM material configuration.`,
       survey: formatSurvey(updated[0], surveyPhotos, history),
-      quotation: createdQuotation,
-      quotationCreated,
-      quotationError,
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -691,7 +747,7 @@ export const reviewSurvey = async (req: Request, res: Response) => {
 export const rescheduleSurvey = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { scheduledDate, engineerId, engineerName, notes } = req.body;
+    const { scheduledDate, scheduledTime, engineerId, engineerName, notes } = req.body;
 
     if (!scheduledDate) {
       return res.status(400).json({ success: false, error: 'New scheduled date is required' });
@@ -705,6 +761,10 @@ export const rescheduleSurvey = async (req: Request, res: Response) => {
     const fields: string[] = ['scheduled_date = ?'];
     const values: any[] = [scheduledDate];
 
+    if (scheduledTime) {
+      fields.push('scheduled_time = ?');
+      values.push(scheduledTime);
+    }
     if (engineerId) {
       fields.push('engineer_id = ?');
       values.push(engineerId);
@@ -727,3 +787,71 @@ export const rescheduleSurvey = async (req: Request, res: Response) => {
     res.status(500).json({ success: false, error: err.message });
   }
 };
+
+// 10. Delete Survey (Allowed only when survey is in Approved state)
+export const deleteSurvey = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const [rows]: any = await pool.query('SELECT * FROM site_surveys WHERE id = ?', [id]);
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Survey not found' });
+    }
+
+    const survey = rows[0];
+
+    // Enforce business rule: survey can only be deleted once it has been Approved
+    if (survey.status !== 'Approved') {
+      return res.status(400).json({ 
+        success: false, 
+        error: `Survey ${id} cannot be deleted because it is '${survey.status}'. Surveys can only be deleted once they reach the 'Approved' state.` 
+      });
+    }
+
+    // Clean up survey photos from filesystem & DB
+    try {
+      const [photos]: any = await pool.query('SELECT * FROM survey_photos WHERE survey_id = ?', [id]);
+      if (photos && photos.length > 0) {
+        for (const p of photos) {
+          if (p.file_path) {
+            const absPath = path.resolve(process.cwd(), p.file_path);
+            if (fs.existsSync(absPath)) {
+              try { fs.unlinkSync(absPath); } catch (e) { /* ignore cleanup error */ }
+            }
+          }
+        }
+        await pool.query('DELETE FROM survey_photos WHERE survey_id = ?', [id]);
+      }
+    } catch (e) {
+      console.warn('Photos cleanup error:', e);
+    }
+
+    // Clean up review history from survey_review_history
+    try {
+      await pool.query('DELETE FROM survey_review_history WHERE survey_id = ?', [id]);
+    } catch (e) {
+      console.warn('Review history cleanup error:', e);
+    }
+
+    // Unlink project BOMs if any
+    try {
+      await pool.query('UPDATE project_boms SET survey_id = NULL WHERE survey_id = ?', [id]);
+    } catch (e) {
+      // ignore
+    }
+
+    // Delete survey
+    await pool.query('DELETE FROM site_surveys WHERE id = ?', [id]);
+
+    // Unlink lead reference if any
+    try {
+      await pool.query("UPDATE leads SET survey_id = NULL WHERE survey_id = ?", [id]);
+    } catch (e) {
+      // ignore
+    }
+
+    res.json({ success: true, message: `Survey ${id} successfully deleted.` });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+

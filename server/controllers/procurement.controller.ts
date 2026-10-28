@@ -35,11 +35,23 @@ export async function getPurchaseOrders(req: Request, res: Response): Promise<vo
     sql += ' ORDER BY created_at DESC';
 
     const [orders]: any = await pool.query(sql, params);
+    if (!orders || orders.length === 0) {
+      res.json({ success: true, purchaseOrders: [] });
+      return;
+    }
 
-    // Fetch items and GRNs for each PO
-    for (const po of orders) {
-      const [items]: any = await pool.query('SELECT * FROM purchase_order_items WHERE po_id = ?', [po.id]);
-      po.items = items.map((it: any) => ({
+    const poIds = orders.map((p: any) => p.id);
+
+    // Parallel batch queries for items and GRNs
+    const [[allItems], [allGrns]]: any = await Promise.all([
+      pool.query('SELECT * FROM purchase_order_items WHERE po_id IN (?)', [poIds]),
+      pool.query('SELECT * FROM goods_receipt_notes WHERE po_id IN (?) ORDER BY created_at DESC', [poIds])
+    ]);
+
+    const itemsMap: Record<string, any[]> = {};
+    for (const it of (allItems || [])) {
+      if (!itemsMap[it.po_id]) itemsMap[it.po_id] = [];
+      itemsMap[it.po_id].push({
         id: it.id,
         sku: it.sku,
         name: it.item_name,
@@ -49,11 +61,18 @@ export async function getPurchaseOrders(req: Request, res: Response): Promise<vo
         unitPrice: Number(it.unit_price),
         totalAmount: Number(it.total_amount),
         receivedQuantity: Number(it.received_quantity || 0),
-      }));
+      });
+    }
 
-      // Fetch GRNs for this PO if any
-      const [grns]: any = await pool.query('SELECT * FROM goods_receipt_notes WHERE po_id = ? ORDER BY created_at DESC', [po.id]);
-      po.grns = grns;
+    const grnsMap: Record<string, any[]> = {};
+    for (const g of (allGrns || [])) {
+      if (!grnsMap[g.po_id]) grnsMap[g.po_id] = [];
+      grnsMap[g.po_id].push(g);
+    }
+
+    for (const po of orders) {
+      po.items = itemsMap[po.id] || [];
+      po.grns = grnsMap[po.id] || [];
     }
 
     res.json({ success: true, purchaseOrders: orders });
@@ -87,6 +106,31 @@ export async function createPurchaseOrder(req: Request, res: Response): Promise<
     if (!supplierName || !items || !Array.isArray(items) || items.length === 0) {
       res.status(400).json({ success: false, error: 'Supplier and at least one item are required' });
       return;
+    }
+
+    // RBAC & Lifecycle Integrity: Reject PO issuance if the project is already Completed
+    if (projectId) {
+      const [pRows]: any = await pool.query('SELECT stage FROM projects WHERE id = ?', [projectId]);
+      if (pRows && pRows.length > 0 && pRows[0].stage === 'Completed') {
+        res.status(400).json({ 
+          success: false, 
+          error: `Cannot issue Purchase Order: Project ${projectId} is already Completed and procurement is closed.` 
+        });
+        return;
+      }
+    }
+    if (quotationId) {
+      const [qRows]: any = await pool.query(
+        'SELECT q.status, q.converted_to_project_id, p.stage as project_stage FROM quotations q LEFT JOIN projects p ON p.id = q.converted_to_project_id WHERE q.id = ?',
+        [quotationId]
+      );
+      if (qRows && qRows.length > 0 && (qRows[0].project_stage === 'Completed' || qRows[0].status === 'Completed')) {
+        res.status(400).json({ 
+          success: false, 
+          error: 'Cannot issue Purchase Order: The linked project has already reached Completed stage and procurement is finalized.' 
+        });
+        return;
+      }
     }
 
     const id = `PO-${Date.now().toString().slice(-6)}`;
@@ -461,40 +505,124 @@ export async function createGoodsReceiptNote(req: Request, res: Response): Promi
  */
 export async function getPendingIndents(req: Request, res: Response): Promise<void> {
   try {
-    // 1. Fetch all accepted quotations that are not yet converted or have ongoing procurement
+    // 1. Fetch all accepted quotations that are not archived
     const [quotations]: any = await pool.query(`
       SELECT q.id as quotation_id, q.quotation_number, q.lead_name as customer_name,
              q.customer_phone, q.customer_address, q.system_capacity_kw, q.total_amount,
              q.status as quotation_status, q.survey_id, q.converted_to_project_id,
-             q.versions
+             q.versions,
+             p.stage as project_stage
       FROM quotations q
-      WHERE q.status IN ('Customer_Accepted', 'Accepted') 
-         OR (q.status = 'Converted_To_Project' AND q.converted_to_project_id IS NOT NULL)
+      LEFT JOIN projects p ON p.id = q.converted_to_project_id
+      WHERE (q.procurement_archived IS NULL OR q.procurement_archived = 0)
+        AND (q.status IN ('Customer_Accepted', 'Accepted') 
+         OR (q.status = 'Converted_To_Project' AND q.converted_to_project_id IS NOT NULL))
       ORDER BY q.created_at DESC
     `);
+
+    if (!quotations || quotations.length === 0) {
+      res.json({ success: true, indents: [] });
+      return;
+    }
+
+    const quotationIds = quotations.map((q: any) => q.quotation_id);
+    const projectIds = quotations.map((q: any) => q.converted_to_project_id).filter(Boolean);
+    const surveyIds = quotations.map((q: any) => q.survey_id).filter(Boolean);
+
+    // Parallel batch queries for POs, GRNs, and BOMs
+    const queryPromises: Promise<any>[] = [
+      projectIds.length > 0
+        ? pool.query('SELECT * FROM purchase_orders WHERE quotation_id IN (?) OR project_id IN (?)', [quotationIds, projectIds])
+        : pool.query('SELECT * FROM purchase_orders WHERE quotation_id IN (?)', [quotationIds]),
+      projectIds.length > 0
+        ? pool.query('SELECT * FROM goods_receipt_notes WHERE quotation_id IN (?) OR project_id IN (?)', [quotationIds, projectIds])
+        : pool.query('SELECT * FROM goods_receipt_notes WHERE quotation_id IN (?)', [quotationIds]),
+    ];
+
+    if (surveyIds.length > 0) {
+      queryPromises.push(pool.query("SELECT * FROM project_boms WHERE survey_id IN (?) AND status = 'Approved' ORDER BY id DESC", [surveyIds]));
+    } else {
+      queryPromises.push(Promise.resolve([[]]));
+    }
+
+    const [[allPos], [allGrns], [allBoms]]: any = await Promise.all(queryPromises);
+
+    // If any BOMs found, fetch their items in one batch query
+    const bomIds = (allBoms || []).map((b: any) => b.id);
+    let allBomItems: any[] = [];
+    if (bomIds.length > 0) {
+      const [items]: any = await pool.query('SELECT * FROM bom_items WHERE bom_id IN (?)', [bomIds]);
+      allBomItems = items || [];
+    }
+
+    // Index BOMs by survey_id
+    const bomsBySurveyId: Record<string, any> = {};
+    for (const b of (allBoms || [])) {
+      if (!bomsBySurveyId[b.survey_id]) {
+        bomsBySurveyId[b.survey_id] = b;
+      }
+    }
+
+    // Index BOM items by bom_id
+    const itemsByBomId: Record<string, any[]> = {};
+    for (const it of allBomItems) {
+      if (!itemsByBomId[it.bom_id]) itemsByBomId[it.bom_id] = [];
+      itemsByBomId[it.bom_id].push(it);
+    }
+
+    // Index POs by quotation_id and project_id
+    const posByQuote: Record<string, any[]> = {};
+    for (const p of (allPos || [])) {
+      if (p.quotation_id) {
+        if (!posByQuote[p.quotation_id]) posByQuote[p.quotation_id] = [];
+        posByQuote[p.quotation_id].push(p);
+      }
+      if (p.project_id) {
+        if (!posByQuote[p.project_id]) posByQuote[p.project_id] = [];
+        posByQuote[p.project_id].push(p);
+      }
+    }
+
+    // Index GRNs by quotation_id and project_id
+    const grnsByQuote: Record<string, any[]> = {};
+    for (const g of (allGrns || [])) {
+      if (g.quotation_id) {
+        if (!grnsByQuote[g.quotation_id]) grnsByQuote[g.quotation_id] = [];
+        grnsByQuote[g.quotation_id].push(g);
+      }
+      if (g.project_id) {
+        if (!grnsByQuote[g.project_id]) grnsByQuote[g.project_id] = [];
+        grnsByQuote[g.project_id].push(g);
+      }
+    }
 
     const indents: any[] = [];
 
     for (const q of quotations) {
-      // Fetch any existing POs for this quotation
-      const [pos]: any = await pool.query(
-        'SELECT * FROM purchase_orders WHERE quotation_id = ? OR (project_id IS NOT NULL AND project_id = ?)',
-        [q.quotation_id, q.converted_to_project_id]
-      );
+      const posMap = new Map<string, any>();
+      (posByQuote[q.quotation_id] || []).forEach(p => posMap.set(p.id, p));
+      if (q.converted_to_project_id) {
+        (posByQuote[q.converted_to_project_id] || []).forEach(p => posMap.set(p.id, p));
+      }
+      const pos = Array.from(posMap.values());
 
-      // Fetch any signed GRNs for this quotation
-      const [grns]: any = await pool.query(
-        'SELECT * FROM goods_receipt_notes WHERE quotation_id = ? OR (project_id IS NOT NULL AND project_id = ?)',
-        [q.quotation_id, q.converted_to_project_id]
-      );
+      const grnsMap = new Map<string, any>();
+      (grnsByQuote[q.quotation_id] || []).forEach(g => grnsMap.set(g.id, g));
+      if (q.converted_to_project_id) {
+        (grnsByQuote[q.converted_to_project_id] || []).forEach(g => grnsMap.set(g.id, g));
+      }
+      const grns = Array.from(grnsMap.values());
 
       const hasSignedGrn = grns.some((g: any) => g.customer_signature_data || g.customer_signature_name);
       const isDelivered = pos.some((p: any) => p.status === 'Delivered');
       const isPartial = pos.some((p: any) => p.status === 'Partial Delivered') || grns.some((g: any) => g.status === 'Partial Shortage');
       const isIssued = pos.length > 0;
+      const isProjectCompleted = q.project_stage === 'Completed';
 
       let procurementStatus = 'Pending Indent';
-      if (hasSignedGrn && isDelivered && !isPartial) {
+      if (isProjectCompleted) {
+        procurementStatus = 'Project Completed (Procurement Closed)';
+      } else if (hasSignedGrn && isDelivered && !isPartial) {
         procurementStatus = 'Materials Delivered & Signed';
       } else if (isPartial) {
         procurementStatus = 'Partial Shortage';
@@ -502,20 +630,12 @@ export async function getPendingIndents(req: Request, res: Response): Promise<vo
         procurementStatus = 'PO Issued / In-Transit';
       }
 
-      // Fetch items from approved Survey BOM if survey_id is linked
       let items: any[] = [];
       let bomId = null;
 
-      if (q.survey_id) {
-        const [boms]: any = await pool.query(
-          "SELECT * FROM project_boms WHERE survey_id = ? AND status = 'Approved' ORDER BY id DESC LIMIT 1",
-          [q.survey_id]
-        );
-        if (boms && boms.length > 0) {
-          bomId = boms[0].id;
-          const [bomItems]: any = await pool.query('SELECT * FROM bom_items WHERE bom_id = ?', [bomId]);
-          items = bomItems;
-        }
+      if (q.survey_id && bomsBySurveyId[q.survey_id]) {
+        bomId = bomsBySurveyId[q.survey_id].id;
+        items = itemsByBomId[bomId] || [];
       }
 
       // If no survey bom items, extract from quotation versions JSON
@@ -551,6 +671,8 @@ export async function getPendingIndents(req: Request, res: Response): Promise<vo
         procurement_status: procurementStatus,
         quotation_status: q.quotation_status,
         converted_to_project_id: q.converted_to_project_id,
+        project_stage: q.project_stage || null,
+        is_completed: isProjectCompleted,
         has_signed_grn: hasSignedGrn,
         signed_grn: grns[0] || null,
         purchase_orders: pos,
@@ -562,6 +684,58 @@ export async function getPendingIndents(req: Request, res: Response): Promise<vo
     res.json({ success: true, indents });
   } catch (error: any) {
     console.error('Error fetching pending indents:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+}
+
+/**
+ * DELETE /api/procurement/orders/:id
+ * Deletes a purchase order and its linked items
+ */
+export async function deletePurchaseOrder(req: Request, res: Response): Promise<void> {
+  try {
+    const { id } = req.params;
+    await pool.query('DELETE FROM purchase_order_items WHERE po_id = ?', [id]);
+    await pool.query('DELETE FROM goods_receipt_notes WHERE po_id = ?', [id]);
+    await pool.query('DELETE FROM purchase_orders WHERE id = ?', [id]);
+    res.json({ success: true, message: `Purchase order ${id} deleted successfully.` });
+  } catch (error: any) {
+    console.error('Error in deletePurchaseOrder:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+}
+
+/**
+ * DELETE /api/procurement/indents/:id
+ * Removes/archives an indent from active procurement view
+ */
+export async function deleteIndent(req: Request, res: Response): Promise<void> {
+  try {
+    const { id } = req.params;
+    const cleanId = id.replace(/^IND-/, '');
+    await pool.query('UPDATE quotations SET procurement_archived = 1 WHERE id = ?', [cleanId]);
+    res.json({ success: true, message: `Indent ${id} removed.` });
+  } catch (error: any) {
+    console.error('Error in deleteIndent:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+}
+
+/**
+ * DELETE /api/procurement/indents-closed/all
+ * Clears/removes all closed/completed procurement indents
+ */
+export async function clearClosedIndents(req: Request, res: Response): Promise<void> {
+  try {
+    await pool.query(`
+      UPDATE quotations q
+      LEFT JOIN projects p ON p.id = q.converted_to_project_id
+      SET q.procurement_archived = 1
+      WHERE p.stage = 'Completed' OR q.status = 'Converted_To_Project'
+    `);
+    res.json({ success: true, message: 'All closed procurement indents cleared.' });
+  } catch (error: any) {
+    console.error('Error in clearClosedIndents:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 }

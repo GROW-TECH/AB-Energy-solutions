@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { X, Plus, Trash2, Save, Calculator, AlertTriangle, ShieldAlert } from 'lucide-react';
 import { Quotation, QuotationItem } from '../../types';
 import { convertNumberToWords } from '../../utils/quotationEngine';
+import { useCrm } from '../../context/CrmContext';
 
 interface EditQuotationModalProps {
   quotation: Quotation;
@@ -17,6 +18,9 @@ export const EditQuotationModal: React.FC<EditQuotationModalProps> = ({
   onSave,
 }) => {
   if (!isOpen) return null;
+
+  const { currentUser, activeRole } = useCrm();
+  const isSalesManager = activeRole === 'Sales Manager' || currentUser?.role === 'Sales Manager' || currentUser?.role === 'Super Admin';
 
   const currentVer = quotation.versions?.[quotation.currentVersion - 1] || quotation.versions?.[0];
 
@@ -151,6 +155,7 @@ export const EditQuotationModal: React.FC<EditQuotationModalProps> = ({
         systemCapacityKw: Number(capacityKw),
         packageTier,
         discountAmount: calculations.discount,
+        approvalStatus: isSalesManager ? 'Approved' : (calculations.requiresApproval ? 'Pending_Approval' : 'Approved'),
         notes,
         customItems: items.map(it => ({
           id: it.id,
@@ -247,8 +252,11 @@ export const EditQuotationModal: React.FC<EditQuotationModalProps> = ({
               <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center justify-between">
                 <span>Commercial Discount (₹)</span>
                 {calculations.requiresApproval && (
-                  <span className="text-[10px] text-amber-600 font-bold flex items-center gap-1">
-                    <ShieldAlert className="w-3 h-3" /> &gt; ₹15k Needs Approval
+                  <span className={`text-[10px] font-bold flex items-center gap-1 ${
+                    isSalesManager ? 'text-emerald-700' : 'text-amber-600'
+                  }`}>
+                    <ShieldAlert className="w-3 h-3" />
+                    {isSalesManager ? '> ₹15k (Pre-Approved as Manager)' : '> ₹15k Needs Approval'}
                   </span>
                 )}
               </label>

@@ -22,7 +22,13 @@ interface PriorityRecommendation {
 }
 
 export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) => {
-  const { createLead, qualifyLead, leads, employees, authFetch } = useCrm();
+  const { createLead, qualifyLead, leads, employees, authFetch, currentUser, surveys } = useCrm();
+
+  const salesExecutives = employees.filter(e => e.role === 'Sales Executive' && e.status !== 'Inactive');
+  const isExecutive = currentUser?.role === 'Sales Executive';
+  const [assignedToId, setAssignedToId] = useState<string>(() => {
+    return isExecutive ? (currentUser?.employeeId || currentUser?.id || 'auto') : 'auto';
+  });
 
   // 1. Contact & Site Details (NO pre-filled fake defaults)
   const [name, setName] = useState('');
@@ -204,8 +210,12 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
 
     try {
       const selectedEng = surveyEngineers.find(e => e.id === surveyEngineerId) || surveyEngineers[0];
+      const selectedRep = salesExecutives.find(e => e.id === assignedToId || e.name === assignedToId);
+      const newSurveyId = scheduleSurveyNow && isQualified 
+        ? `SRV-2026-${String(surveys.length + 1).padStart(3, '0')}` 
+        : undefined;
 
-      // 1. Create Lead with executive's final chosen priority, customerType, systemType and metadata
+      // 1. Create Lead with executive's final chosen priority, customerType, systemType, assignment, and metadata
       const created = createLead({
         name: name.trim(),
         phone,
@@ -226,6 +236,10 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
         priorityOverrideReason: hasManualPriorityOverride && priority !== recommendation?.recommendedPriority ? priorityOverrideReason : undefined,
         buyingIntent,
         notes: notes.trim(),
+        assignedToId: assignedToId !== 'auto' ? assignedToId : undefined,
+        assignedToName: selectedRep ? selectedRep.name : undefined,
+        status: newSurveyId ? 'Site Survey Scheduled' : 'New',
+        surveyId: newSurveyId,
       });
 
       // 2. Schedule Site Survey if explicitly enabled & verified
@@ -236,6 +250,7 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
           scheduledDate: surveyDate,
           scheduledTime: surveyTime,
           notes: surveyNotes.trim(),
+          leadData: { ...created, surveyId: newSurveyId, status: 'Site Survey Scheduled' },
         });
       }
 
@@ -273,6 +288,7 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
     setPriorityOverrideReason('');
     setScheduleSurveyNow(false);
     setSurveyNotes('');
+    setAssignedToId(isExecutive ? (currentUser?.employeeId || currentUser?.id || 'auto') : 'auto');
   };
 
 
@@ -453,7 +469,7 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="block text-[11px] font-bold text-slate-700 mb-1">
                 Email Address
@@ -484,6 +500,38 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
                 <option value="PM Surya Ghar Portal">PM Surya Ghar Portal</option>
                 <option value="Walk-in">Direct Walk-in / Expo</option>
               </select>
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-bold text-slate-700 mb-1 flex items-center justify-between">
+                <span>Assigned Executive</span>
+                {isExecutive && <span className="text-[10px] text-emerald-600 font-semibold">Your Account</span>}
+              </label>
+              {isExecutive ? (
+                <div className="w-full text-xs p-2.5 bg-emerald-50 border border-emerald-200 rounded-lg font-bold text-emerald-800 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span className="truncate">{currentUser?.name} (Assigned to You)</span>
+                </div>
+              ) : (
+                <select
+                  value={assignedToId}
+                  onChange={e => setAssignedToId(e.target.value)}
+                  className="w-full text-xs p-2.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-hidden font-medium text-slate-800"
+                >
+                  <option value="auto">⚡ Auto-Assign (Lowest Lead Count)</option>
+                  {salesExecutives.map(exec => {
+                    const activeCount = leads.filter(l => 
+                      (l.assignedToId === exec.id || l.assignedToId === exec.employeeId || l.assignedToName?.toLowerCase() === exec.name.toLowerCase()) && 
+                      l.status !== 'Lost'
+                    ).length;
+                    return (
+                      <option key={exec.id} value={exec.id}>
+                        {exec.name} ({activeCount} active {activeCount === 1 ? 'lead' : 'leads'})
+                      </option>
+                    );
+                  })}
+                </select>
+              )}
             </div>
           </div>
 

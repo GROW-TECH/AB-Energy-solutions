@@ -19,11 +19,36 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
   onNavigateToQuotation,
   onNavigateToSurvey,
 }) => {
-  const { leads, updateLead, qualifyLead, employees } = useCrm();
+  const { leads, updateLead, qualifyLead, employees, currentUser, surveys, quotations } = useCrm();
+
+  const isExecutive = currentUser?.role === 'Sales Executive';
+  // Default to personal deals for sales executive; all team for manager/admin
+  const [pipelineScope, setPipelineScope] = useState<'my' | 'all'>(() => isExecutive ? 'my' : 'all');
 
   // Search & Filters
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedRep, setSelectedRep] = useState('All');
+
+  // Strict RBAC lead matching for the current logged-in representative
+  const isLeadAssignedToMe = (lead: Lead) => {
+    if (!currentUser) return false;
+    const currentEmpId = currentUser.employeeId?.toLowerCase() || '';
+    const currentUserId = currentUser.id?.toLowerCase() || '';
+    const currentName = currentUser.name?.toLowerCase() || '';
+    const currentUsername = currentUser.username?.toLowerCase() || '';
+
+    const assignedId = lead.assignedToId?.toLowerCase() || '';
+    const assignedName = lead.assignedToName?.toLowerCase() || '';
+
+    return (
+      (currentEmpId && (assignedId === currentEmpId || assignedId.includes(currentEmpId))) ||
+      (currentUserId && (assignedId === currentUserId || assignedId.includes(currentUserId))) ||
+      (currentUsername && (assignedId === currentUsername || assignedId.includes(currentUsername))) ||
+      (currentName && (assignedName === currentName || assignedName.includes(currentName)))
+    );
+  };
+
+  const myDealsCount = leads.filter(isLeadAssignedToMe).length;
 
   // Drag and Drop State
   const [draggingLeadId, setDraggingLeadId] = useState<string | null>(null);
@@ -119,8 +144,13 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
     }
   };
 
-  // Filter leads
+  // Filter leads strictly scoped by RBAC
   const filteredLeads = leads.filter(lead => {
+    // If sales executive is viewing personal pipeline ('my'), strictly filter to their assigned leads
+    if (isExecutive && pipelineScope === 'my') {
+      if (!isLeadAssignedToMe(lead)) return false;
+    }
+
     const matchesSearch = 
       lead.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       lead.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -150,10 +180,16 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
         <div>
           <h1 className="text-xl font-extrabold text-slate-900 flex items-center gap-2">
             <GitBranch className="w-5 h-5 text-emerald-600" />
-            <span>Solar Sales Pipeline</span>
+            <span>
+              {isExecutive && pipelineScope === 'my' 
+                ? 'My Sales Deals Pipeline' 
+                : 'Solar Sales Pipeline'}
+            </span>
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            Interactive Drag-and-Drop deals pipeline with automated step advancement.
+            {isExecutive && pipelineScope === 'my'
+              ? 'Personal assigned deals pipeline with automated step advancement.'
+              : 'Interactive Drag-and-Drop deals pipeline with automated step advancement.'}
           </p>
         </div>
 
@@ -190,18 +226,53 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
           />
         </div>
 
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-slate-500 font-medium">Assigned Rep:</span>
-          <select
-            value={selectedRep}
-            onChange={(e) => setSelectedRep(e.target.value)}
-            className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20"
-          >
-            <option value="All">All Representatives</option>
-            {employees.filter(e => e.role === 'Sales Executive' || e.role === 'Sales Manager').map(emp => (
-              <option key={emp.id} value={emp.name}>{emp.name}</option>
-            ))}
-          </select>
+        <div className="flex items-center gap-2.5 flex-wrap">
+          {/* Segmented scope toggle for sales executive */}
+          {isExecutive && (
+            <div className="flex bg-slate-100 p-0.5 rounded-lg text-xs font-semibold text-slate-600">
+              <button
+                type="button"
+                onClick={() => {
+                  setPipelineScope('my');
+                  setSelectedRep('All');
+                }}
+                className={`px-3 py-1.5 rounded-md transition-colors cursor-pointer ${
+                  pipelineScope === 'my'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                My Deals ({myDealsCount})
+              </button>
+              <button
+                type="button"
+                onClick={() => setPipelineScope('all')}
+                className={`px-3 py-1.5 rounded-md transition-colors cursor-pointer ${
+                  pipelineScope === 'all'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                All Team ({leads.length})
+              </button>
+            </div>
+          )}
+
+          {(!isExecutive || pipelineScope === 'all') && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-500 font-medium">Assigned Rep:</span>
+              <select
+                value={selectedRep}
+                onChange={(e) => setSelectedRep(e.target.value)}
+                className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20"
+              >
+                <option value="All">All Representatives</option>
+                {employees.filter(e => e.role === 'Sales Executive' || e.role === 'Sales Manager').map(emp => (
+                  <option key={emp.id} value={emp.name}>{emp.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
       </div>
 
@@ -521,18 +592,25 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
                 </button>
               )}
 
-              {onNavigateToQuotation && (
-                <button
-                  onClick={() => {
-                    onNavigateToQuotation(selectedLead.id);
-                    setSelectedLead(null);
-                  }}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
-                >
-                  <FileText className="w-3.5 h-3.5" />
-                  <span>Open Quotation</span>
-                </button>
-              )}
+              {(() => {
+                const linkedSurvey = surveys.find(s => s.leadId === selectedLead.id || s.id === selectedLead.surveyId);
+                const isSurveyApproved = linkedSurvey?.status === 'Approved' || selectedLead.status === 'Survey Completed' || selectedLead.status === 'Quotation Sent' || selectedLead.status === 'Negotiation' || selectedLead.status === 'Won' || Boolean(selectedLead.quotationId);
+                if (isSurveyApproved && onNavigateToQuotation) {
+                  return (
+                    <button
+                      onClick={() => {
+                        onNavigateToQuotation(selectedLead.id);
+                        setSelectedLead(null);
+                      }}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                      <span>{selectedLead.quotationId ? 'Open Quotation' : 'Create Quotation'}</span>
+                    </button>
+                  );
+                }
+                return null;
+              })()}
             </div>
           </div>
         </div>

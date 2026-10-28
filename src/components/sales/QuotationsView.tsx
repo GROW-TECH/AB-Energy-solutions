@@ -26,11 +26,15 @@ export const QuotationsView: React.FC<QuotationsViewProps> = ({
   const { 
     quotations, leads, surveys, projects, sendQuotation, acceptQuotation, 
     createQuotation, approveQuotationDiscount, recordCustomerAcceptance,
-    editQuotationData, currentUser 
+    editQuotationData, currentUser, activeRole 
   } = useCrm();
+
+  const isSalesManager = activeRole === 'Sales Manager' || currentUser?.role === 'Sales Manager' || currentUser?.role === 'Super Admin';
+  const isSalesExec = activeRole === 'Sales Executive' || currentUser?.role === 'Sales Executive';
 
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('All');
+  const [repFilter, setRepFilter] = useState<string>('all');
   const [activeViewMode, setActiveViewMode] = useState<'grid' | 'document'>('grid');
   const [selectedQuoteForPreview, setSelectedQuoteForPreview] = useState<Quotation | null>(quotations[0] || null);
   const [selectedVersionIdx, setSelectedVersionIdx] = useState<number>(0);
@@ -60,6 +64,7 @@ export const QuotationsView: React.FC<QuotationsViewProps> = ({
       const existing = quotations.find(q => q.leadId === initialLeadId || (linkedSurvey && q.surveyId === linkedSurvey.id));
       if (existing) {
         setSelectedQuoteForPreview(existing);
+        setSelectedVersionIdx(existing.versions && existing.versions.length > 0 ? existing.versions.length - 1 : 0);
         setActiveViewMode('document');
       } else {
         setSelectedLeadId(initialLeadId);
@@ -75,6 +80,19 @@ export const QuotationsView: React.FC<QuotationsViewProps> = ({
       }
     }
   }, [initialLeadId, surveys, quotations]);
+
+  // Keep selectedQuoteForPreview continuously in-sync with latest quotation state (reflecting negotiation revisions)
+  useEffect(() => {
+    if (selectedQuoteForPreview) {
+      const refreshed = quotations.find(q => q.id === selectedQuoteForPreview.id);
+      if (refreshed && refreshed !== selectedQuoteForPreview) {
+        setSelectedQuoteForPreview(refreshed);
+        if (refreshed.versions && refreshed.versions.length > 0) {
+          setSelectedVersionIdx(refreshed.versions.length - 1);
+        }
+      }
+    }
+  }, [quotations]);
 
   const getLinkedProject = (q: Quotation) => {
     return projects.find(p => p.id === q.convertedToProjectId || p.quotationId === q.id || p.leadId === q.leadId);
@@ -99,7 +117,19 @@ export const QuotationsView: React.FC<QuotationsViewProps> = ({
     const matchesSearch = 
       q.quotationNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
       q.leadName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (q.salespersonName && q.salespersonName.toLowerCase().includes(searchTerm.toLowerCase())) ||
       q.customerPhone.includes(searchTerm);
+
+    // Sales Rep Filter
+    let matchesRep = true;
+    if (repFilter === 'my') {
+      const myName = (currentUser?.name || '').toLowerCase();
+      const myId = currentUser?.employeeId || '';
+      matchesRep = (Boolean(q.salespersonId) && q.salespersonId === myId) || 
+                   (Boolean(q.salespersonName) && Boolean(myName) && q.salespersonName.toLowerCase().includes(myName));
+    } else if (repFilter !== 'all') {
+      matchesRep = q.salespersonName === repFilter || q.salespersonId === repFilter;
+    }
     
     let matchesStatus = true;
     if (statusFilter === 'pm_drafts') {
@@ -120,7 +150,7 @@ export const QuotationsView: React.FC<QuotationsViewProps> = ({
       matchesStatus = q.status === statusFilter;
     }
 
-    return matchesSearch && matchesStatus;
+    return matchesSearch && matchesRep && matchesStatus;
   }).sort((a, b) => {
     // Sort actionable quotes (Customer_Accepted, Sent, Draft) to the top
     const getPriority = (status: string) => {
@@ -229,39 +259,64 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
             size: A4 portrait;
             margin: 8mm 10mm;
           }
-          body {
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            height: auto !important;
+            min-height: 100% !important;
+            overflow: visible !important;
+            position: static !important;
+            background: #FFFFFF !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
+          }
+          .no-print {
+            display: none !important;
+          }
+          .fixed, .inset-0, .overflow-y-auto, .overflow-hidden, .max-h-\\[95vh\\], .max-h-\\[90vh\\] {
+            position: static !important;
+            display: block !important;
+            overflow: visible !important;
+            height: auto !important;
+            min-height: auto !important;
+            max-height: none !important;
+            padding: 0 !important;
+            margin: 0 !important;
             background: #FFFFFF !important;
-          }
-          body * {
-            visibility: hidden;
-          }
-          #printable-solar-proposal, #printable-solar-proposal * {
-            visibility: visible;
+            border: none !important;
+            box-shadow: none !important;
           }
           #printable-solar-proposal {
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 100%;
+            position: static !important;
+            display: block !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            height: auto !important;
+            overflow: visible !important;
             margin: 0 !important;
             padding: 0 !important;
             background: #FFFFFF !important;
           }
           .print-page-break {
+            display: block !important;
             page-break-after: always !important;
             break-after: page !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
             box-shadow: none !important;
             border: 1px solid #CBD5E1 !important;
             border-radius: 0 !important;
-            margin-bottom: 0 !important;
-            min-height: 275mm;
-            padding: 24px !important;
+            margin: 0 0 15mm 0 !important;
+            padding: 20px !important;
             background: #FFFFFF !important;
+            min-height: 265mm !important;
+            height: auto !important;
+            overflow: visible !important;
+            box-sizing: border-box !important;
           }
-          .no-print {
-            display: none !important;
+          .print-page-break:last-child {
+            page-break-after: auto !important;
+            break-after: auto !important;
           }
         }
       `}} />
@@ -348,7 +403,7 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
               )}
 
               {/* APPROVE DISCOUNT (Sales Manager / Super Admin) */}
-              {selectedQuoteForPreview.approvalStatus === 'Pending_Approval' && (currentUser?.role === 'Sales Manager' || currentUser?.role === 'Super Admin') && (
+              {(selectedQuoteForPreview.approvalStatus === 'Pending_Approval' || ((selectedQuoteForPreview.discountAmount || 0) > 15000 && !selectedQuoteForPreview.discountApprovedBy)) && isSalesManager && (
                 <button
                   onClick={async () => {
                     const ok = await approveQuotationDiscount(selectedQuoteForPreview.id);
@@ -356,7 +411,7 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                       setSelectedQuoteForPreview({ ...selectedQuoteForPreview, approvalStatus: 'Approved' });
                     }
                   }}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-lg shadow-xs transition-colors cursor-pointer"
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg shadow-xs transition-colors cursor-pointer"
                 >
                   <ShieldCheck className="w-3.5 h-3.5" />
                   <span>Approve Discount</span>
@@ -364,11 +419,14 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
               )}
 
               {/* SEND TO CLIENT (Sales Executive / Sales Manager / Super Admin) */}
-              {selectedQuoteForPreview.status === 'Draft' && selectedQuoteForPreview.approvalStatus !== 'Pending_Approval' && (
+              {selectedQuoteForPreview.status === 'Draft' && (selectedQuoteForPreview.approvalStatus !== 'Pending_Approval' || isSalesManager) && (
                 <button
-                  onClick={() => {
+                  onClick={async () => {
+                    if (isSalesManager && selectedQuoteForPreview.approvalStatus === 'Pending_Approval') {
+                      await approveQuotationDiscount(selectedQuoteForPreview.id);
+                    }
                     sendQuotation(selectedQuoteForPreview.id);
-                    setSelectedQuoteForPreview({ ...selectedQuoteForPreview, status: 'Sent' });
+                    setSelectedQuoteForPreview({ ...selectedQuoteForPreview, status: 'Sent', approvalStatus: 'Approved' });
                   }}
                   className="flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-xs transition-colors cursor-pointer"
                 >
@@ -385,10 +443,11 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                     setClientPoNumber('');
                     setShowAcceptanceModal(true);
                   }}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-lg shadow-xs transition-colors cursor-pointer"
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg shadow-xs transition-colors cursor-pointer"
+                  title="Record agreement reached after negotiation"
                 >
                   <CheckCircle className="w-3.5 h-3.5" />
-                  <span>Record Customer Acceptance</span>
+                  <span>Record Negotiation / Acceptance</span>
                 </button>
               )}
 
@@ -1161,7 +1220,7 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
               }`}
             >
               <AlertCircle className="w-3.5 h-3.5" />
-              <span>Needs Manager Approval ({managerApprovalCount})</span>
+              <span>{isSalesManager ? `Pending My Approval (${managerApprovalCount})` : `Needs Manager Approval (${managerApprovalCount})`}</span>
             </button>
 
             <button
@@ -1173,7 +1232,7 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
               }`}
             >
               <Send className="w-3.5 h-3.5" />
-              <span>Sent to Client ({sentCount})</span>
+              <span>In Negotiation / Sent ({sentCount})</span>
             </button>
 
             <button
@@ -1234,6 +1293,48 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                     className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
                 </div>
+
+                {/* Sales Representative / Ownership Filter */}
+                {isSalesExec && !isSalesManager ? (
+                  <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg border border-slate-200">
+                    <button
+                      type="button"
+                      onClick={() => setRepFilter('my')}
+                      className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all cursor-pointer ${
+                        repFilter === 'my'
+                          ? 'bg-white text-emerald-800 shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      My Assigned Quotes
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRepFilter('all')}
+                      className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all cursor-pointer ${
+                        repFilter === 'all'
+                          ? 'bg-white text-slate-900 shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      All Quotes
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Representative:</span>
+                    <select
+                      value={repFilter}
+                      onChange={e => setRepFilter(e.target.value)}
+                      className="px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    >
+                      <option value="all">All Sales Team</option>
+                      {Array.from(new Set(quotations.map(q => q.salespersonName).filter(Boolean))).map((name: any) => (
+                        <option key={name} value={name}>{name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
 
               <div className="text-xs text-slate-500 font-medium">
@@ -1248,19 +1349,20 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                   <tr>
                     <th className="py-3 px-4">Quote Number</th>
                     <th className="py-3 px-4">Customer &amp; Location</th>
+                    <th className="py-3 px-4">Assigned To</th>
                     <th className="py-3 px-4">Capacity</th>
                     <th className="py-3 px-4">Inverter / Modules</th>
                     <th className="py-3 px-4 text-right">Gross Amount</th>
                     <th className="py-3 px-4 text-right">Central Subsidy</th>
                     <th className="py-3 px-4 text-right">Net Investment</th>
-                    <th className="py-3 px-4 text-center">Lifecycle &amp; Stage</th>
+                    <th className="py-3 px-4 text-center">Status</th>
                     <th className="py-3 px-4 text-right">Sales Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-medium">
                   {filteredQuotations.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="py-12 text-center text-slate-400">
+                      <td colSpan={10} className="py-12 text-center text-slate-400">
                         No quotations match your current search or status filter.
                       </td>
                     </tr>
@@ -1295,6 +1397,24 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                             <div className="text-[11px] text-slate-400">{q.customerAddress || 'Bengaluru, KA'} • {q.customerPhone}</div>
                           </td>
                           <td className="py-3.5 px-4">
+                            <div className="flex items-center gap-2">
+                              <div className="w-7 h-7 rounded-full bg-slate-100 border border-slate-200 text-slate-700 flex items-center justify-center font-bold text-[10px] shrink-0">
+                                {(q.salespersonName || 'SK').split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()}
+                              </div>
+                              <div className="min-w-0">
+                                <div className="font-bold text-slate-900 truncate text-xs flex items-center gap-1">
+                                  <span>{q.salespersonName || 'Suresh Kumar'}</span>
+                                  {currentUser?.name && q.salespersonName && q.salespersonName.toLowerCase().includes(currentUser.name.toLowerCase()) && (
+                                    <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1 rounded font-bold">You</span>
+                                  )}
+                                </div>
+                                <div className="text-[10px] text-slate-400 font-mono">
+                                  {q.salespersonId || 'EMP-265286'}
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="py-3.5 px-4">
                             <span className="font-bold text-slate-900 font-mono">{q.systemCapacityKw} kW</span>
                             {q.surveyId && (
                               <div className="text-[10px] text-blue-600 font-medium">Survey: {q.surveyId}</div>
@@ -1313,12 +1433,12 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                             ₹{q.totalAmount.toLocaleString('en-IN')}
                           </td>
 
-                          {/* Explicit Lifecycle Stage Badge */}
+                          {/* Explicit Status Badge */}
                           <td className="py-3.5 px-4 text-center">
                             {q.status === 'Customer_Accepted' ? (
-                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider bg-amber-50 text-amber-900 border border-amber-300 shadow-2xs">
-                                <Truck className="w-3.5 h-3.5 text-amber-600 animate-pulse" />
-                                <span>Accepted • Sourcing Materials</span>
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-900 border border-emerald-300 shadow-2xs">
+                                <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
+                                <span>Client Accepted</span>
                               </span>
                             ) : q.status === 'Converted_To_Project' || q.status === 'Accepted' ? (
                               (() => {
@@ -1338,18 +1458,19 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                                 );
                               })()
                             ) : q.status === 'Sent' ? (
-                              <span className="inline-block px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-blue-50 text-blue-800 border border-blue-300">
-                                Sent to Client
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-blue-50 text-blue-800 border border-blue-300">
+                                <Send className="w-3 h-3 text-blue-600" />
+                                <span>Sent • In Negotiation</span>
                               </span>
                             ) : q.approvalStatus === 'Pending_Approval' || ((q.discountAmount || 0) > 15000 && !q.discountApprovedBy) ? (
                               <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-amber-50 text-amber-800 border border-amber-300">
                                 <AlertCircle className="w-3 h-3 text-amber-600" />
-                                Needs Manager Sign-off
+                                <span>{isSalesManager ? 'Awaiting Your Approval' : 'Needs Manager Approval'}</span>
                               </span>
                             ) : q.surveyId ? (
                               <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-purple-50 text-purple-800 border border-purple-300">
                                 <Sparkles className="w-3 h-3 text-purple-600" />
-                                PM Technical Draft
+                                <span>PM Technical Draft</span>
                               </span>
                             ) : (
                               <span className="inline-block px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-slate-100 text-slate-700 border border-slate-200">
@@ -1361,22 +1482,22 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                           {/* Quick Inline Actions */}
                           <td className="py-3.5 px-4 text-right" onClick={e => e.stopPropagation()}>
                             <div className="flex items-center justify-end gap-1.5">
-                              {/* If Sent: Quick button to record client acceptance directly from list */}
+                              {/* If Sent: In Negotiation -> Action to record client acceptance after negotiation */}
                               {q.status === 'Sent' && (
                                 <button
                                   onClick={() => {
                                     setSelectedQuoteForPreview(q);
                                     setShowAcceptanceModal(true);
                                   }}
-                                  className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs shadow-xs transition-colors flex items-center gap-1 cursor-pointer"
-                                  title="Mark Client Accepted"
+                                  className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg text-xs shadow-xs transition-colors flex items-center gap-1 cursor-pointer"
+                                  title="Record Negotiation Terms & Client Acceptance"
                                 >
                                   <CheckCircle className="w-3.5 h-3.5" />
-                                  <span>Client Accepted</span>
+                                  <span>Negotiation / Accept</span>
                                 </button>
                               )}
 
-                              {/* If Draft: Quick button to send or edit */}
+                              {/* If Draft: Quick button to send or edit, or approve if Sales Manager */}
                               {q.status === 'Draft' && (
                                 <>
                                   <button
@@ -1390,9 +1511,27 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                                     <Pencil className="w-3.5 h-3.5" />
                                   </button>
 
-                                  {q.approvalStatus !== 'Pending_Approval' && (
+                                  {/* If Manager and pending approval: One-click Approve */}
+                                  {isSalesManager && (q.approvalStatus === 'Pending_Approval' || ((q.discountAmount || 0) > 15000 && !q.discountApprovedBy)) && (
                                     <button
                                       onClick={async () => {
+                                        await approveQuotationDiscount(q.id);
+                                      }}
+                                      className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs shadow-xs transition-colors flex items-center gap-1 cursor-pointer"
+                                      title="Approve Commercial Discount"
+                                    >
+                                      <ShieldCheck className="w-3 h-3" />
+                                      <span>Approve</span>
+                                    </button>
+                                  )}
+
+                                  {/* Send button: available if not pending approval, OR if Sales Manager (who can send anytime) */}
+                                  {(q.approvalStatus !== 'Pending_Approval' || isSalesManager) && (
+                                    <button
+                                      onClick={async () => {
+                                        if (isSalesManager && q.approvalStatus === 'Pending_Approval') {
+                                          await approveQuotationDiscount(q.id);
+                                        }
                                         await sendQuotation(q.id);
                                       }}
                                       className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg text-xs shadow-xs transition-colors flex items-center gap-1 cursor-pointer"
@@ -1405,11 +1544,11 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                                 </>
                               )}
 
-                              {/* If Customer Accepted: Show indicator that deal is in procurement */}
+                              {/* If Customer Accepted: Show indicator that deal is ready for PM */}
                               {q.status === 'Customer_Accepted' && (
                                 <span className="px-2 py-1 text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg flex items-center gap-1">
                                   <Truck className="w-3 h-3 text-emerald-600" />
-                                  <span>In Procurement</span>
+                                  <span>Ready for PM</span>
                                 </span>
                               )}
 
@@ -1664,8 +1803,14 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                   <span className="font-mono">{modalCalc.annualGenerationKwh.toLocaleString('en-IN')} kWh/yr (~{modalCalc.simplePaybackYears} yr payback)</span>
                 </div>
                 {modalCalc.requiresApproval && (
-                  <div className="p-2 bg-amber-50 border border-amber-300 rounded text-[11px] text-amber-800">
-                    ⚠️ Discount exceeds ₹15,000 threshold and will require Sales Manager approval before sending.
+                  <div className={`p-2 rounded text-[11px] ${
+                    isSalesManager 
+                      ? 'bg-emerald-50 border border-emerald-300 text-emerald-800' 
+                      : 'bg-amber-50 border border-amber-300 text-amber-800'
+                  }`}>
+                    {isSalesManager 
+                      ? '✓ Pre-Approved: As Sales Manager, this discount (> ₹15,000) is pre-authorized for immediate client delivery.' 
+                      : '⚠️ Discount exceeds ₹15,000 threshold and will require Sales Manager approval before sending.'}
                   </div>
                 )}
               </div>

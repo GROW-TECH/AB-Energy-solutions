@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { 
   Users, Plus, Search, Filter, Phone, Mail, MapPin, 
   CheckCircle2, ChevronRight, ChevronLeft, X, Calendar, 
-  ArrowRight, Clock, ShieldAlert, FileText, Send, Sun, Compass, Trash2, UserCheck
+  ArrowRight, Clock, ShieldAlert, FileText, Send, Sun, Compass, Trash2, UserCheck,
+  Sparkles, AlertCircle
 } from 'lucide-react';
 import { useCrm } from '../../context/CrmContext';
 import { Lead, LeadStatus, Priority, CustomerApplicationType, SolarSystemType } from '../../types';
@@ -18,17 +19,38 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
   onNavigateToQuotation,
   onNavigateToSurvey,
 }) => {
-  const { leads, updateLead, qualifyLead, deleteLead, timeline, activeRole, currentUser, employees } = useCrm();
+  const { leads, updateLead, qualifyLead, deleteLead, timeline, activeRole, currentUser, employees, surveys, quotations, rescheduleSurveyAction } = useCrm();
 
   const isExecutive = activeRole === 'Sales Executive';
+  const isManager = activeRole === 'Sales Manager' || activeRole === 'Super Admin';
   const CUSTOMER_TYPES: CustomerApplicationType[] = ['Home', 'Residential', 'Commercial', 'Industrial', 'Water Pump'];
   const SYSTEM_TYPES: SolarSystemType[] = ['On-Grid', 'Off-Grid', 'Hybrid'];
+
+  const salesExecutives = employees.filter(
+    e => e.role === 'Sales Executive' || e.department?.toLowerCase().includes('sales')
+  );
+
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3500);
+  };
+
   const isLeadAssignedToMe = (lead: Lead) => {
-    return (
-      lead.assignedToId === currentUser?.id || 
-      (currentUser?.name && lead.assignedToName?.toLowerCase().includes(currentUser.name.toLowerCase().split(' ')[0])) ||
-      lead.assignedToName?.toLowerCase().includes('vikram')
-    );
+    if (!currentUser) return false;
+    const userEmpId = currentUser.employeeId;
+    const userId = currentUser.id;
+    const userName = (currentUser.name || '').trim().toLowerCase();
+
+    if (userEmpId && lead.assignedToId === userEmpId) return true;
+    if (userId && lead.assignedToId === userId) return true;
+    if (lead.assignedToName && userName) {
+      const aName = lead.assignedToName.trim().toLowerCase();
+      if (aName === userName) return true;
+      const first = userName.split(' ')[0];
+      if (first.length >= 3 && aName.includes(first)) return true;
+    }
+    return false;
   };
 
   const myLeadsCount = leads.filter(isLeadAssignedToMe).length;
@@ -41,8 +63,35 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [leadToDelete, setLeadToDelete] = useState<Lead | null>(null);
 
+  const handleAutoAssignLeads = () => {
+    if (salesExecutives.length === 0) {
+      showToast('No active sales executives available to assign leads.', 'error');
+      return;
+    }
+
+    const unassigned = leads.filter(l => 
+      !l.assignedToId || 
+      l.assignedToName === 'Unassigned' || 
+      l.assignedToName === 'Ananya Deshmukh'
+    );
+
+    const leadsToDistribute = unassigned.length > 0 ? unassigned : leads;
+    let count = 0;
+    leadsToDistribute.forEach((lead, idx) => {
+      const targetRep = salesExecutives[idx % salesExecutives.length];
+      updateLead(lead.id, {
+        assignedToId: targetRep.id,
+        assignedToName: targetRep.name,
+      });
+      count++;
+    });
+
+    showToast(`Successfully auto-assigned ${count} leads across active sales executives!`, 'success');
+  };
+
   // Survey Scheduling Modal State
   const [surveyLeadToSchedule, setSurveyLeadToSchedule] = useState<Lead | null>(null);
+  const [editingSurvey, setEditingSurvey] = useState<SiteSurvey | null>(null);
   const [scheduleEngineerId, setScheduleEngineerId] = useState<string>('');
   const [scheduleDate, setScheduleDate] = useState<string>(() => {
     const d = new Date(Date.now() + 86400000 * 2);
@@ -61,13 +110,13 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
   }, [searchTerm, statusFilter, priorityFilter, pageSize, assignedScope]);
 
   // Scoped baseline leads for counts
-  const activeBaseLeads = (isExecutive && assignedScope === 'my' && myLeadsCount > 0)
+  const activeBaseLeads = (isExecutive && assignedScope === 'my')
     ? leads.filter(isLeadAssignedToMe)
     : leads;
 
   // Filtered Leads
   const filteredLeads = leads.filter(lead => {
-    if (isExecutive && assignedScope === 'my' && myLeadsCount > 0) {
+    if (isExecutive && assignedScope === 'my') {
       if (!isLeadAssignedToMe(lead)) return false;
     }
 
@@ -99,7 +148,16 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
   const surveyReadyCount = activeBaseLeads.filter(l => l.status === 'Qualified' || l.status === 'Survey Completed').length;
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-200">
+    <div className="space-y-6 animate-in fade-in duration-200 relative">
+      {/* Floating In-App Toast Notification */}
+      {toast && (
+        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-[9999] flex items-center gap-2.5 px-4 py-3 bg-slate-900 text-white rounded-2xl shadow-2xl border border-slate-700 animate-in fade-in slide-in-from-top-3 duration-200 max-w-md w-[92%] sm:w-auto">
+          {toast.type === 'success' && <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />}
+          {toast.type === 'error' && <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />}
+          {toast.type === 'info' && <Sparkles className="w-5 h-5 text-blue-400 shrink-0" />}
+          <span className="text-xs sm:text-sm font-semibold">{toast.message}</span>
+        </div>
+      )}
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -127,6 +185,17 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
               Kanban
             </button>
           </div>
+
+          {isManager && (
+            <button
+              onClick={handleAutoAssignLeads}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-bold shadow-xs transition-colors cursor-pointer"
+              title="Automatically distribute leads evenly across active sales executives"
+            >
+              <Sparkles className="w-4 h-4 text-emerald-600" />
+              <span>Auto-Assign Leads</span>
+            </button>
+          )}
 
           <button
             onClick={onOpenNewLead}
@@ -268,11 +337,28 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                   <th className="py-3 px-4">Monthly Bill &amp; Roof</th>
                   <th className="py-3 px-4">Assigned To</th>
                   <th className="py-3 px-4">Status &amp; Priority</th>
-                  <th className="py-3 px-4 text-right">Instant Automation</th>
+                  <th className="py-3 px-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {paginatedLeads.map(lead => (
+                {paginatedLeads.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="py-12 text-center text-slate-500">
+                      <Users className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                      <div className="font-semibold text-slate-700">
+                        {isExecutive && assignedScope === 'my'
+                          ? 'No leads currently assigned to your queue.'
+                          : 'No solar leads match the selected filter.'}
+                      </div>
+                      <div className="text-xs text-slate-400 mt-1">
+                        {isExecutive && assignedScope === 'my'
+                          ? 'Switch to "All Team" to view available leads or contact your Sales Manager to allocate inquiries.'
+                          : 'Try clearing your search or adjusting the status/priority filter.'}
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  paginatedLeads.map(lead => (
                   <tr 
                     key={lead.id}
                     className="hover:bg-slate-50/80 transition-colors cursor-pointer group"
@@ -322,16 +408,47 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                       </div>
                     </td>
 
-                    <td className="py-3 px-4">
-                      <div className="font-medium text-slate-800">{lead.assignedToName}</div>
-                      <div className="text-[10px] text-slate-400">Sales Representative</div>
+                    <td className="py-3 px-4" onClick={e => e.stopPropagation()}>
+                      {isManager ? (
+                        <div className="flex flex-col gap-1">
+                          <select
+                            value={lead.assignedToId || ''}
+                            onChange={e => {
+                              const repId = e.target.value;
+                              const rep = employees.find(emp => emp.id === repId);
+                              if (rep) {
+                                updateLead(lead.id, {
+                                  assignedToId: rep.id,
+                                  assignedToName: rep.name
+                                });
+                                showToast(`Lead assigned to ${rep.name}!`, 'success');
+                              }
+                            }}
+                            className="text-xs font-semibold bg-emerald-50/80 border border-emerald-300 text-emerald-900 rounded-lg px-2 py-1 focus:ring-2 focus:ring-emerald-500 cursor-pointer shadow-xs max-w-[170px]"
+                            title="Assign lead to a sales executive"
+                          >
+                            <option value="" disabled>Select Executive</option>
+                            {salesExecutives.map(rep => (
+                              <option key={rep.id} value={rep.id}>
+                                {rep.name}
+                              </option>
+                            ))}
+                          </select>
+                          <span className="text-[10px] text-slate-400 font-medium">Click to reassign</span>
+                        </div>
+                      ) : (
+                        <div>
+                          <div className="font-semibold text-slate-800">{lead.assignedToName || 'Unassigned'}</div>
+                          <div className="text-[10px] text-slate-400">Sales Representative</div>
+                        </div>
+                      )}
                     </td>
 
                     <td className="py-3 px-4">
                       <div className="flex flex-col gap-1 items-start">
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                           lead.status === 'Won' ? 'bg-emerald-100 text-emerald-800' :
-                          lead.status === 'Qualified' ? 'bg-blue-100 text-blue-800' :
+                          lead.status === 'Qualified' || lead.status === 'Site Survey Scheduled' ? 'bg-cyan-100 text-cyan-800 border border-cyan-200' :
                           lead.status === 'Survey Completed' ? 'bg-purple-100 text-purple-800' :
                           lead.status === 'New' ? 'bg-amber-100 text-amber-800' :
                           'bg-slate-100 text-slate-700'
@@ -350,43 +467,99 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                     </td>
 
                     <td className="py-3 px-4 text-right" onClick={e => e.stopPropagation()}>
-                      <div className="flex items-center justify-end gap-1.5">
-                        {lead.status === 'New' || lead.status === 'Contacted' ? (
-                          <button
-                            onClick={() => {
-                              setSurveyLeadToSchedule(lead);
-                              const engs = employees.filter(e => e.role === 'Survey Engineer');
-                              if (engs.length > 0 && !scheduleEngineerId) setScheduleEngineerId(engs[0].id);
-                            }}
-                            className="flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer"
-                            title="Schedule site survey and assign engineer"
-                          >
-                            <Compass className="w-3 h-3" />
-                            <span>Survey</span>
-                          </button>
-                        ) : null}
+                      {(() => {
+                        const linkedSurvey = surveys.find(s => 
+                          s.leadId === lead.id || 
+                          s.id === lead.surveyId || 
+                          (lead.phone && s.phone === lead.phone) || 
+                          (lead.name && s.leadName && s.leadName.toLowerCase() === lead.name.toLowerCase())
+                        );
+                        const hasSurveyScheduled = Boolean(lead.surveyId || linkedSurvey || lead.status === 'Site Survey Scheduled' || lead.status === 'Qualified' || lead.status === 'Survey Completed');
+                        const isSurveyApproved = 
+                          linkedSurvey?.status === 'Approved' || 
+                          lead.status === 'Survey Completed' || 
+                          lead.status === 'Quotation Sent' || 
+                          lead.status === 'Negotiation' || 
+                          lead.status === 'Won' || 
+                          Boolean(lead.quotationId) ||
+                          quotations.some(q => q.leadId === lead.id);
 
-                        <button
-                          onClick={() => onNavigateToQuotation(lead.id)}
-                          className="flex items-center gap-1 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer"
-                          title="Generate Solar Techno-Commercial Proposal"
-                        >
-                          <FileText className="w-3 h-3" />
-                          <span>Quote</span>
-                        </button>
+                        return (
+                          <div className="flex items-center justify-end gap-1.5">
+                            {/* CASE 1: Survey NOT yet scheduled -> show "Survey" button */}
+                            {!hasSurveyScheduled && !isSurveyApproved && (
+                              <button
+                                onClick={() => {
+                                  setSurveyLeadToSchedule(lead);
+                                  setEditingSurvey(null);
+                                  const engs = employees.filter(e => e.role === 'Survey Engineer');
+                                  if (engs.length > 0) setScheduleEngineerId(engs[0].id);
+                                  setScheduleDate(new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0]);
+                                  setScheduleTime('10:00 AM - 12:00 PM');
+                                  setScheduleNotes('');
+                                }}
+                                className="flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+                                title="Schedule site survey and assign engineer"
+                              >
+                                <Compass className="w-3 h-3" />
+                                <span>Survey</span>
+                              </button>
+                            )}
 
+                            {/* CASE 2: Survey ALREADY scheduled -> show "Edit Survey" button (NOT create new) */}
+                            {hasSurveyScheduled && !isSurveyApproved && (
+                              <button
+                                onClick={() => {
+                                  setSurveyLeadToSchedule(lead);
+                                  setEditingSurvey(linkedSurvey || null);
+                                  if (linkedSurvey?.engineerId) {
+                                    setScheduleEngineerId(linkedSurvey.engineerId);
+                                  } else {
+                                    const engs = employees.filter(e => e.role === 'Survey Engineer');
+                                    if (engs.length > 0) setScheduleEngineerId(engs[0].id);
+                                  }
+                                  if (linkedSurvey?.scheduledDate) {
+                                    setScheduleDate(linkedSurvey.scheduledDate.split('T')[0]);
+                                  } else {
+                                    setScheduleDate(new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0]);
+                                  }
+                                  setScheduleTime('10:00 AM - 12:00 PM');
+                                  if (linkedSurvey?.notes) setScheduleNotes(linkedSurvey.notes);
+                                  else setScheduleNotes('');
+                                }}
+                                className="flex items-center gap-1 px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+                                title={`Survey already scheduled with ${linkedSurvey?.engineerName || 'Field Engineer'} for ${linkedSurvey?.scheduledDate ? linkedSurvey.scheduledDate.split('T')[0] : 'Audit'}. Click to edit or reschedule.`}
+                              >
+                                <Calendar className="w-3 h-3 text-amber-600" />
+                                <span>Edit Survey</span>
+                              </button>
+                            )}
 
-                        <button
-                          onClick={() => setLeadToDelete(lead)}
-                          className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
-                          title="Delete Solar Lead"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+                            {/* CASE 3: Quote button ONLY appears after survey engineer completes BOM and PM approves */}
+                            {isSurveyApproved ? (
+                              <button
+                                onClick={() => onNavigateToQuotation(lead.id)}
+                                className="flex items-center gap-1 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+                                title={lead.quotationId ? "View Approved Quotation" : "Generate Proposal from Approved BOM"}
+                              >
+                                <FileText className="w-3 h-3" />
+                                <span>{lead.quotationId ? 'View Quote' : 'Quote'}</span>
+                              </button>
+                            ) : null}
+
+                            <button
+                              onClick={() => setLeadToDelete(lead)}
+                              className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                              title="Delete Solar Lead"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        );
+                      })()}
                     </td>
                   </tr>
-                ))}
+                )))}
               </tbody>
             </table>
           </div>
@@ -548,28 +721,67 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
 
             {/* Quick Action Bar */}
             <div className="p-3 bg-slate-50 border-b border-slate-200 flex items-center gap-2 text-xs">
+              {(() => {
+                const linkedSurvey = surveys.find(s => 
+                  s.leadId === selectedLead.id || 
+                  s.id === selectedLead.surveyId || 
+                  (selectedLead.phone && s.phone === selectedLead.phone)
+                );
+                const isSurveyApproved = 
+                  linkedSurvey?.status === 'Approved' || 
+                  selectedLead.status === 'Survey Completed' || 
+                  selectedLead.status === 'Quotation Sent' || 
+                  selectedLead.status === 'Negotiation' || 
+                  selectedLead.status === 'Won' || 
+                  Boolean(selectedLead.quotationId) ||
+                  quotations.some(q => q.leadId === selectedLead.id);
+                const hasSurveyScheduled = Boolean(selectedLead.surveyId || linkedSurvey || selectedLead.status === 'Site Survey Scheduled' || selectedLead.status === 'Qualified');
 
-              {selectedLead.status === 'New' || selectedLead.status === 'Contacted' ? (
-                <button
-                  onClick={() => {
-                    setSurveyLeadToSchedule(selectedLead);
-                    const engs = employees.filter(e => e.role === 'Survey Engineer');
-                    if (engs.length > 0 && !scheduleEngineerId) setScheduleEngineerId(engs[0].id);
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg transition-colors cursor-pointer"
-                >
-                  <Compass className="w-3.5 h-3.5" />
-                  <span>Schedule &amp; Dispatch Survey</span>
-                </button>
-              ) : (
-                <button
-                  onClick={() => onNavigateToQuotation(selectedLead.id)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors"
-                >
-                  <FileText className="w-3.5 h-3.5" />
-                  <span>Generate Quotation</span>
-                </button>
-              )}
+                if (isSurveyApproved) {
+                  return (
+                    <button
+                      onClick={() => onNavigateToQuotation(selectedLead.id)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors cursor-pointer"
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                      <span>{selectedLead.quotationId ? 'View Quotation' : 'Generate Quotation'}</span>
+                    </button>
+                  );
+                }
+
+                if (hasSurveyScheduled) {
+                  return (
+                    <button
+                      onClick={() => {
+                        setSurveyLeadToSchedule(selectedLead);
+                        setEditingSurvey(linkedSurvey || null);
+                        if (linkedSurvey?.engineerId) setScheduleEngineerId(linkedSurvey.engineerId);
+                        if (linkedSurvey?.scheduledDate) setScheduleDate(linkedSurvey.scheduledDate.split('T')[0]);
+                        if (linkedSurvey?.notes) setScheduleNotes(linkedSurvey.notes);
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 font-semibold rounded-lg transition-colors cursor-pointer"
+                    >
+                      <Calendar className="w-3.5 h-3.5 text-amber-600" />
+                      <span>Edit Survey Schedule</span>
+                    </button>
+                  );
+                }
+
+                return (
+                  <button
+                    onClick={() => {
+                      setSurveyLeadToSchedule(selectedLead);
+                      setEditingSurvey(null);
+                      const engs = employees.filter(e => e.role === 'Survey Engineer');
+                      if (engs.length > 0 && !scheduleEngineerId) setScheduleEngineerId(engs[0].id);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg transition-colors cursor-pointer"
+                  >
+                    <Compass className="w-3.5 h-3.5" />
+                    <span>Schedule &amp; Dispatch Survey</span>
+                  </button>
+                );
+              })()}
 
               <a
                 href={`https://wa.me/${selectedLead.phone.replace(/\D/g, '')}?text=${encodeURIComponent(`Hello ${selectedLead.name}, greetings from AB Energy Solutions regarding your ${selectedLead.recommendedKw}kW Solar System inquiry!`)}`}
@@ -657,18 +869,50 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                 </div>
               </div>
 
-              {/* Quick Action: Generate Proposal */}
+              {/* Quick Action: Generate Proposal (Gated behind approved survey & BOM) */}
               <div>
-                <button
-                  onClick={() => {
-                    onNavigateToQuotation(selectedLead.id);
-                    setSelectedLead(null);
-                  }}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors cursor-pointer"
-                >
-                  <FileText className="w-4 h-4" />
-                  <span>Generate Solar Quotation &amp; Proposal</span>
-                </button>
+                {(() => {
+                  const linkedSurvey = surveys.find(s => 
+                    s.leadId === selectedLead.id || 
+                    s.id === selectedLead.surveyId || 
+                    (selectedLead.phone && s.phone === selectedLead.phone)
+                  );
+                  const isSurveyApproved = 
+                    linkedSurvey?.status === 'Approved' || 
+                    selectedLead.status === 'Survey Completed' || 
+                    selectedLead.status === 'Quotation Sent' || 
+                    selectedLead.status === 'Negotiation' || 
+                    selectedLead.status === 'Won' || 
+                    Boolean(selectedLead.quotationId) ||
+                    quotations.some(q => q.leadId === selectedLead.id);
+
+                  if (isSurveyApproved) {
+                    return (
+                      <button
+                        onClick={() => {
+                          onNavigateToQuotation(selectedLead.id);
+                          setSelectedLead(null);
+                        }}
+                        className="w-full flex items-center justify-center gap-2 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors cursor-pointer"
+                      >
+                        <FileText className="w-4 h-4" />
+                        <span>{selectedLead.quotationId ? 'View Approved Quotation' : 'Generate Solar Quotation from Approved BOM'}</span>
+                      </button>
+                    );
+                  }
+
+                  return (
+                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-1 text-xs text-amber-900">
+                      <div className="font-bold flex items-center gap-1.5 text-amber-800">
+                        <Clock className="w-4 h-4 text-amber-600 shrink-0" />
+                        <span>Quotation Locked — Engineering Audit Required</span>
+                      </div>
+                      <p className="text-[11px] text-amber-700 leading-snug">
+                        Quotations cannot be generated until the site survey engineer fills the rooftop Bill of Materials (BOM) and the Project Manager approves the technical audit.
+                      </p>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Solar Application & System Classification */}
@@ -819,12 +1063,20 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                   <Compass className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="font-bold text-slate-900 text-sm">Schedule &amp; Dispatch Survey</h3>
-                  <p className="text-[11px] text-slate-500 font-mono">{surveyLeadToSchedule.id} • {surveyLeadToSchedule.name}</p>
+                  <h3 className="font-bold text-slate-900 text-sm">
+                    {editingSurvey ? 'Edit / Reschedule Site Survey' : 'Schedule & Dispatch Survey'}
+                  </h3>
+                  <p className="text-[11px] text-slate-500 font-mono">
+                    {surveyLeadToSchedule.id} • {surveyLeadToSchedule.name}
+                    {editingSurvey ? ` (${editingSurvey.id})` : ''}
+                  </p>
                 </div>
               </div>
               <button 
-                onClick={() => setSurveyLeadToSchedule(null)}
+                onClick={() => {
+                  setSurveyLeadToSchedule(null);
+                  setEditingSurvey(null);
+                }}
                 className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
               >
                 <X className="w-4 h-4" />
@@ -851,17 +1103,24 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
               onSubmit={(e) => {
                 e.preventDefault();
                 const selectedEng = employees.find(emp => emp.id === scheduleEngineerId) || employees.find(emp => emp.role === 'Survey Engineer');
-                qualifyLead(surveyLeadToSchedule.id, {
-                  engineerId: selectedEng?.id,
-                  engineerName: selectedEng?.name,
-                  scheduledDate: scheduleDate,
-                  scheduledTime: scheduleTime,
-                  notes: scheduleNotes.trim(),
-                });
+                if (editingSurvey) {
+                  rescheduleSurveyAction(editingSurvey.id, scheduleDate, scheduleTime, selectedEng?.id, selectedEng?.name);
+                  showToast(`Survey schedule updated for ${surveyLeadToSchedule.name}!`, 'success');
+                } else {
+                  qualifyLead(surveyLeadToSchedule.id, {
+                    engineerId: selectedEng?.id,
+                    engineerName: selectedEng?.name,
+                    scheduledDate: scheduleDate,
+                    scheduledTime: scheduleTime,
+                    notes: scheduleNotes.trim(),
+                  });
+                  showToast(`Survey scheduled for ${surveyLeadToSchedule.name}!`, 'success');
+                }
                 if (selectedLead?.id === surveyLeadToSchedule.id) {
-                  setSelectedLead({ ...selectedLead, status: 'Qualified' });
+                  setSelectedLead({ ...selectedLead, status: 'Site Survey Scheduled' });
                 }
                 setSurveyLeadToSchedule(null);
+                setEditingSurvey(null);
                 setScheduleNotes('');
               }}
               className="space-y-3.5 text-xs"
@@ -935,7 +1194,10 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
               <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setSurveyLeadToSchedule(null)}
+                  onClick={() => {
+                    setSurveyLeadToSchedule(null);
+                    setEditingSurvey(null);
+                  }}
                   className="px-3.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
                 >
                   Cancel
@@ -945,7 +1207,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                   className="px-4 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
                 >
                   <Compass className="w-3.5 h-3.5" />
-                  <span>Confirm &amp; Dispatch Survey</span>
+                  <span>{editingSurvey ? 'Update Survey Schedule' : 'Confirm & Dispatch Survey'}</span>
                 </button>
               </div>
             </form>

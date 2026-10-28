@@ -70,46 +70,72 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
-      {/* Print Specific CSS to ensure authentic A4 printing matching the PDF */}
+      {/* Print Specific CSS to ensure authentic multi-page A4 printing */}
       <style dangerouslySetInnerHTML={{ __html: `
         @media print {
           @page {
             size: A4 portrait;
             margin: 8mm 10mm;
           }
-          body {
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            height: auto !important;
+            min-height: 100% !important;
+            overflow: visible !important;
+            position: static !important;
+            background: #FFFFFF !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
+          }
+          .no-print {
+            display: none !important;
+          }
+          /* Neutralize modal container fixed positioning & overflow clipping in print */
+          .fixed, .inset-0, .overflow-y-auto, .overflow-hidden, .max-h-\\[95vh\\], .max-h-\\[90vh\\] {
+            position: static !important;
+            display: block !important;
+            overflow: visible !important;
+            height: auto !important;
+            min-height: auto !important;
+            max-height: none !important;
+            padding: 0 !important;
+            margin: 0 !important;
             background: #FFFFFF !important;
-          }
-          body * {
-            visibility: hidden;
-          }
-          #printable-proposal-modal, #printable-proposal-modal * {
-            visibility: visible;
+            border: none !important;
+            box-shadow: none !important;
           }
           #printable-proposal-modal {
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 100%;
+            position: static !important;
+            display: block !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            height: auto !important;
+            overflow: visible !important;
             margin: 0 !important;
             padding: 0 !important;
             background: #FFFFFF !important;
           }
           .print-page-break {
+            display: block !important;
             page-break-after: always !important;
             break-after: page !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
             box-shadow: none !important;
             border: 1px solid #CBD5E1 !important;
             border-radius: 0 !important;
-            margin-bottom: 0 !important;
-            min-height: 275mm;
-            padding: 24px !important;
+            margin: 0 0 15mm 0 !important;
+            padding: 20px !important;
             background: #FFFFFF !important;
+            min-height: 265mm !important;
+            height: auto !important;
+            overflow: visible !important;
+            box-sizing: border-box !important;
           }
-          .no-print {
-            display: none !important;
+          .print-page-break:last-child {
+            page-break-after: auto !important;
+            break-after: auto !important;
           }
         }
       `}} />

@@ -31,8 +31,7 @@ async function startServer() {
   const distPath = fs.existsSync(path.resolve(__dirname, 'dist', 'index.html'))
     ? path.resolve(__dirname, 'dist')
     : path.resolve(process.cwd(), 'dist');
-  const distExists = fs.existsSync(path.resolve(distPath, 'index.html'));
-  const isProd = process.env.NODE_ENV === 'production' || distExists;
+  const isProd = process.env.NODE_ENV === 'production';
 
   if (!isProd) {
     const vite = await createViteServer({

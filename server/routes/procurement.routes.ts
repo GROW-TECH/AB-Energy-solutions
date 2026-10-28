@@ -9,7 +9,10 @@ import {
   getPublicSigningGrn,
   submitPublicCustomerSignature,
   resendSigningLink,
-  revokeSigningLink
+  revokeSigningLink,
+  deletePurchaseOrder,
+  deleteIndent,
+  clearClosedIndents
 } from '../controllers/procurement.controller.js';
 import { authenticateToken, requireRole } from '../middleware/auth.js';
 
@@ -27,6 +30,7 @@ router.post('/sign-grn/:token', submitPublicCustomerSignature);
 // ==========================================
 router.get('/orders', authenticateToken, getPurchaseOrders);
 router.post('/orders', authenticateToken, requireRole(['Purchase Team', 'Project Manager', 'Super Admin']), createPurchaseOrder);
+router.delete('/orders/:id', authenticateToken, requireRole(['Purchase Team', 'Project Manager', 'Super Admin', 'Sales Manager']), deletePurchaseOrder);
 
 // GRN Generation & Management
 router.get('/grns', authenticateToken, getGoodsReceiptNotes);
@@ -36,6 +40,8 @@ router.post('/grn/:id/revoke-link', authenticateToken, requireRole(['Purchase Te
 
 router.get('/pending-indents', authenticateToken, getPendingIndents);
 router.get('/indents', authenticateToken, getPendingIndents);
+router.delete('/indents-closed/all', authenticateToken, requireRole(['Purchase Team', 'Project Manager', 'Super Admin', 'Sales Manager']), clearClosedIndents);
+router.delete('/indents/:id', authenticateToken, requireRole(['Purchase Team', 'Project Manager', 'Super Admin', 'Sales Manager']), deleteIndent);
 
 // Convert to EPC Project: Allowed only when material receipt & customer signature are completed!
 router.post('/convert-to-project', authenticateToken, requireRole(['Purchase Team', 'Project Manager', 'Super Admin']), convertToEpcProject);

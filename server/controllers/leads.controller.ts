@@ -143,6 +143,36 @@ export const createLead = async (req: Request, res: Response) => {
     const customerType = l.customerType || l.customer_type || 'Residential';
     const systemType = l.systemType || l.system_type || 'On-Grid';
 
+    let finalAssignedId = l.assignedToId;
+    let finalAssignedName = l.assignedToName;
+
+    if (!finalAssignedId || finalAssignedId === 'auto' || !finalAssignedName) {
+      try {
+        const [execs]: any = await pool.query(`
+          SELECT u.id, u.name, COUNT(l.id) as lead_count
+          FROM user_accounts u
+          LEFT JOIN leads l ON (l.assigned_to_id = u.id OR l.assigned_to_name = u.name) AND l.status != 'Lost'
+          WHERE u.role = 'Sales Executive' AND u.is_active = 1
+          GROUP BY u.id, u.name
+          ORDER BY lead_count ASC, u.id ASC
+          LIMIT 1
+        `);
+        if (execs && execs.length > 0) {
+          finalAssignedId = execs[0].id;
+          finalAssignedName = execs[0].name;
+        } else {
+          finalAssignedId = 'EMP-06';
+          finalAssignedName = 'Vikram Mehta';
+        }
+      } catch {
+        finalAssignedId = 'EMP-06';
+        finalAssignedName = 'Vikram Mehta';
+      }
+    }
+
+    l.assignedToId = finalAssignedId;
+    l.assignedToName = finalAssignedName;
+
     await pool.query(
       `INSERT INTO leads (id, name, email, phone, city, state, address, pincode, source, status, priority, recommended_priority, priority_override_reason, buying_intent, assigned_to_id, assigned_to_name, monthly_bill, sanction_load, roof_area_sqft, roof_type, recommended_kw, estimated_budget, notes, customer_type, system_type, created_at, updated_at, last_contacted_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -150,7 +180,7 @@ export const createLead = async (req: Request, res: Response) => {
         l.id, l.name.trim(), l.email || null, cleanPhone, l.city || '', l.state || '', l.address || '', l.pincode.toString().trim(),
         l.source || 'Website', l.status || 'New', l.priority || 'Medium',
         l.recommendedPriority || null, l.priorityOverrideReason || null, l.buyingIntent || null,
-        l.assignedToId || 'EMP-02', l.assignedToName || 'Ananya Deshmukh', l.monthlyBill || 0,
+        finalAssignedId, finalAssignedName, l.monthlyBill || 0,
         l.sanctionLoad || 0, l.roofAreaSqFt || 0, l.roofType || null, l.recommendedKw || 0,
         l.estimatedBudget || 0, l.notes || '', customerType, systemType,
         l.createdAt || new Date().toISOString(), l.updatedAt || new Date().toISOString(), l.lastContactedAt || null

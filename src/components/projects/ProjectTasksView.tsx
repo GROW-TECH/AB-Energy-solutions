@@ -344,7 +344,7 @@ export const ProjectTasksView: React.FC = () => {
                   className="w-full p-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500"
                   required
                 >
-                  {projects.map(p => (
+                  {projects.filter(p => p.stage !== 'Completed').map(p => (
                     <option key={p.id} value={p.id}>
                       {p.id} — {p.customerName} ({p.capacityKw} kW) [{p.stage}]
                     </option>

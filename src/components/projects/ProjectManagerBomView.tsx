@@ -305,7 +305,14 @@ export const ProjectManagerBomView: React.FC<ProjectManagerBomViewProps> = ({
                 {filteredBoms.map(bom => (
                   <tr key={bom.id} className="hover:bg-slate-50/80 transition-colors">
                     <td className="p-3.5">
-                      <div className="font-bold text-slate-900 text-sm">{bom.customerName}</div>
+                      <div className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                        <span>{bom.customerName}</span>
+                        {(bom.isEdited || (bom.version && bom.version > 1)) && (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-900 border border-amber-300">
+                            Edited v{bom.version || 2}
+                          </span>
+                        )}
+                      </div>
                       <div className="text-[11px] text-slate-500 font-mono">{bom.id} • {bom.phone}</div>
                     </td>
                     <td className="p-3.5">
@@ -343,7 +350,7 @@ export const ProjectManagerBomView: React.FC<ProjectManagerBomViewProps> = ({
                         }`}
                       >
                         <ShieldCheck className="w-3.5 h-3.5" />
-                        <span>{bom.status === 'Submitted' ? 'Verify & Approve' : 'Inspect Specs'}</span>
+                        <span>{bom.status === 'Submitted' ? 'Verify & Approve' : 'View Approved Materials'}</span>
                       </button>
                     </td>
                   </tr>
@@ -437,44 +444,70 @@ export const ProjectManagerBomView: React.FC<ProjectManagerBomViewProps> = ({
               )}
 
               {/* Review Comments & Decision Form */}
-              <div className="space-y-2 pt-2">
-                <label className="block text-xs font-bold text-slate-800">
-                  Project Manager Technical Notes / Feedback:
-                </label>
-                <textarea
-                  rows={2}
-                  value={reviewComments}
-                  onChange={e => setReviewComments(e.target.value)}
-                  placeholder="Enter technical comments or reasons if requesting changes from survey engineer..."
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-hidden focus:border-emerald-500"
-                />
-              </div>
+              {selectedBom.status === 'Approved' ? (
+                <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-900 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>Approved &amp; verified by <strong>{selectedBom.approvedByName || 'Project Manager'}</strong>. Specifications locked.</span>
+                  </div>
+                  {selectedBom.revisionComments && (
+                    <span className="text-[11px] text-emerald-700 italic">Note: {selectedBom.revisionComments}</span>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-2 pt-2">
+                  <label className="block text-xs font-bold text-slate-800">
+                    Project Manager Technical Notes / Feedback:
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={reviewComments}
+                    onChange={e => setReviewComments(e.target.value)}
+                    placeholder="Enter technical comments or reasons if requesting changes from survey engineer..."
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-hidden focus:border-emerald-500"
+                  />
+                </div>
+              )}
             </div>
 
             {/* Modal Actions */}
             <div className="border-t border-slate-100 pt-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
               <span className="text-[11px] text-slate-400">
-                Approving this BOM locks the specifications and generates the procurement indent for the Purchase Team.
+                {selectedBom.status === 'Approved'
+                  ? 'This BOM is approved and active for quotation and project execution.'
+                  : 'Approving this BOM locks the specifications and authorizes commercial quotation generation.'}
               </span>
               <div className="flex items-center gap-2.5">
-                <button
-                  type="button"
-                  disabled={isSubmittingDecision}
-                  onClick={() => handleDecision('Request Changes')}
-                  className="px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-800 font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  <span>Request Changes</span>
-                </button>
-                <button
-                  type="button"
-                  disabled={isSubmittingDecision}
-                  onClick={() => handleDecision('Approve')}
-                  className="px-5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
-                >
-                  <Check className="w-4 h-4" />
-                  <span>{isSubmittingDecision ? 'Processing...' : 'Approve & Lock BOM'}</span>
-                </button>
+                {selectedBom.status === 'Submitted' ? (
+                  <>
+                    <button
+                      type="button"
+                      disabled={isSubmittingDecision}
+                      onClick={() => handleDecision('Request Changes')}
+                      className="px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-800 font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>Request Changes</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isSubmittingDecision}
+                      onClick={() => handleDecision('Approve')}
+                      className="px-5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                    >
+                      <Check className="w-4 h-4" />
+                      <span>{isSubmittingDecision ? 'Processing...' : 'Approve & Lock BOM'}</span>
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedBom(null)}
+                    className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs cursor-pointer shadow-xs transition-colors"
+                  >
+                    Close
+                  </button>
+                )}
               </div>
             </div>
           </div>

@@ -251,3 +251,90 @@ export const toggleUserStatus = async (req: Request, res: Response) => {
     res.status(500).json({ success: false, error: 'Failed to toggle account status' });
   }
 };
+
+export const importUsers = async (req: Request, res: Response) => {
+  try {
+    const currentUser = req.user;
+    if (!currentUser) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
+
+    const { users } = req.body;
+    if (!Array.isArray(users) || users.length === 0) {
+      return res.status(400).json({ success: false, error: 'No users provided for import' });
+    }
+
+    const imported: string[] = [];
+    const skipped: string[] = [];
+    const errors: string[] = [];
+
+    for (const u of users) {
+      const name = (u.Name || u.name || '').trim();
+      const username = (u.Username || u.username || '').trim();
+      const password = (u.Password || u.password || '').trim();
+      let role = (u.Role || u.role || '').trim();
+      const email = (u.Email || u.email || `${username}@abenergy.in`).trim();
+      const phone = (u.Phone || u.phone || '+91 98000-00000').trim();
+      const department = (u.Department || u.department || '').trim();
+      const location = (u.Location || u.location || 'Bengaluru').trim();
+
+      if (!name || !username || !password) {
+        errors.push(`Row for ${name || username || 'unknown'} missing mandatory Name, Username, or Password`);
+        continue;
+      }
+
+      // Enforce role permission by caller persona
+      if (currentUser.role === 'Sales Manager') {
+        role = 'Sales Executive';
+      } else if (currentUser.role === 'Project Manager') {
+        role = 'Installation Team';
+      } else if (!role) {
+        role = 'Sales Executive';
+      }
+
+      // Check duplicate
+      const [existing]: any = await pool.query(
+        'SELECT id FROM user_accounts WHERE username = ? OR (email = ? AND email != "") LIMIT 1',
+        [username, email]
+      );
+
+      if (existing && existing.length > 0) {
+        skipped.push(username);
+        continue;
+      }
+
+      const { hash, salt } = hashPassword(password);
+      const userId = `USR-${Date.now().toString().slice(-6)}${Math.floor(Math.random() * 90 + 10)}`;
+      const empId = `EMP-${Date.now().toString().slice(-4)}${Math.floor(Math.random() * 90 + 10)}`;
+
+      await pool.query(
+        `INSERT INTO user_accounts (id, username, email, password_hash, password_salt, role, employee_id, customer_id, name, is_active)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, TRUE)`,
+        [userId, username, email, hash, salt, role, empId, name]
+      );
+
+      if (role !== 'Customer') {
+        await pool.query(
+          `INSERT INTO employees (id, name, email, phone, role, department, location, active_leads_count, completed_projects_count, username)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
+           ON DUPLICATE KEY UPDATE name = VALUES(name), role = VALUES(role), department = VALUES(department), location = VALUES(location)`,
+          [empId, name, email, phone, role, department || 'Solar Operations', location, username]
+        );
+      }
+
+      imported.push(username);
+    }
+
+    res.json({
+      success: true,
+      message: `Import complete: ${imported.length} imported, ${skipped.length} existing skipped, ${errors.length} errors`,
+      count: imported.length,
+      imported,
+      skipped,
+      errors
+    });
+  } catch (error: any) {
+    console.error('importUsers error:', error);
+    res.status(500).json({ success: false, error: error.message || 'Bulk import failed' });
+  }
+};

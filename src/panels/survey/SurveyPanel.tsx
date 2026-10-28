@@ -172,6 +172,9 @@ export const SurveyPanel: React.FC<SurveyPanelProps> = ({
             onNavigateToQuotation={(leadId) => {
               if (onNavigateToQuotation) onNavigateToQuotation(leadId);
             }}
+            onNavigateToBom={(surveyId) => {
+              handleSubTabClick('field-bom');
+            }}
             onAuditModeChange={(auditing) => setIsAuditing(auditing)}
           />
         )}

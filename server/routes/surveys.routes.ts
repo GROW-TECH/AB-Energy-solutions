@@ -8,7 +8,8 @@ import {
   deleteSurveyPhoto, 
   submitSurveyForReview, 
   reviewSurvey, 
-  rescheduleSurvey 
+  rescheduleSurvey,
+  deleteSurvey
 } from '../controllers/surveys.controller.js';
 import { authenticateToken, requireRole } from '../middleware/auth.js';
 
@@ -41,3 +42,6 @@ surveysRouter.post('/:id/review', authenticateToken, requireRole(['Project Manag
 
 // 9. Reschedule survey visit
 surveysRouter.post('/:id/reschedule', authenticateToken, requireRole(['Survey Engineer', 'Project Manager', 'Sales Manager', 'Super Admin']), rescheduleSurvey);
+
+// 10. Delete survey (Enabled only when survey is in Approved state)
+surveysRouter.delete('/:id', authenticateToken, requireRole(['Survey Engineer', 'Project Manager', 'Sales Manager', 'Super Admin']), deleteSurvey);

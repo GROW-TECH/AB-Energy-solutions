@@ -2,12 +2,12 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import dotenv3 from "dotenv";
-import path6 from "path";
+import path7 from "path";
 import { fileURLToPath } from "url";
-import fs5 from "fs";
+import fs6 from "fs";
 
 // server/routes/index.ts
-import { Router as Router17 } from "express";
+import { Router as Router19 } from "express";
 
 // server/db.ts
 import mysql from "mysql2/promise";
@@ -25,2021 +25,8 @@ var pool = mysql.createPool({
 });
 
 // server/controllers/surveys.controller.ts
-import fs2 from "fs";
-import path3 from "path";
-
-// server/controllers/quotations.controller.ts
-import path2 from "path";
-
-// src/utils/quotationEngine.ts
-var QUOTATION_CONFIG = {
-  // Discount threshold requiring manager approval
-  DISCOUNT_APPROVAL_THRESHOLD_INR: 15e3,
-  MAX_DISCOUNT_PERCENT: 15,
-  // max 15% discount allowed
-  // Default Company Location (Karnataka / Tamil Nadu)
-  DEFAULT_SUPPLIER_STATE: "Karnataka",
-  DEFAULT_SUPPLIER_GSTIN: "29AABCS1429B1Z8",
-  // Client-Configured Statutory Defaults:
-  // - Solar Panels & Inverters: 5% GST
-  // - Structure, Cables/BOS, Installation Services: 18% GST
-  DEFAULT_GST_RATES: {
-    PANELS: 5,
-    INVERTER: 5,
-    STRUCTURE: 18,
-    BOS: 18,
-    INSTALLATION: 18
-  },
-  // Standard HSN / SAC Codes
-  DEFAULT_HSN_CODES: {
-    PANELS: "8541",
-    INVERTER: "8504",
-    STRUCTURE: "7308",
-    BOS: "8544",
-    INSTALLATION: "9954"
-  },
-  // Legacy composite rate for backward compatibility
-  COMPOSITE_GST_RATE: 13.8,
-  // 70% goods @ 12% + 30% services @ 18%
-  // Solar irradiance & financial defaults
-  SPECIFIC_YIELD_KWH_PER_KWP: 1450,
-  DEFAULT_TARIFF_INR: 8.2,
-  // PM Surya Ghar Muft Bijli Yojana Central Subsidy Slabs (Residential Only)
-  RESIDENTIAL_SUBSIDY: {
-    SLAB_1KW_MAX: 3e4,
-    SLAB_2KW_MAX: 6e4,
-    SLAB_3KW_AND_ABOVE_MAX: 78e3
-  }
-};
-function convertNumberToWords(amount) {
-  const rounded = Math.round(Number(amount) || 0);
-  if (rounded === 0) return "Rupees Zero Only";
-  const units = [
-    "",
-    "One",
-    "Two",
-    "Three",
-    "Four",
-    "Five",
-    "Six",
-    "Seven",
-    "Eight",
-    "Nine",
-    "Ten",
-    "Eleven",
-    "Twelve",
-    "Thirteen",
-    "Fourteen",
-    "Fifteen",
-    "Sixteen",
-    "Seventeen",
-    "Eighteen",
-    "Nineteen"
-  ];
-  const tens = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
-  function convertHundreds(n) {
-    let str = "";
-    if (n >= 100) {
-      str += units[Math.floor(n / 100)] + " Hundred ";
-      n %= 100;
-    }
-    if (n >= 20) {
-      str += tens[Math.floor(n / 10)] + (n % 10 ? " " + units[n % 10] : "");
-    } else if (n > 0) {
-      str += units[n];
-    }
-    return str.trim();
-  }
-  let words = "";
-  let crore = Math.floor(rounded / 1e7);
-  let remCrore = rounded % 1e7;
-  let lakh = Math.floor(remCrore / 1e5);
-  let remLakh = remCrore % 1e5;
-  let thousand = Math.floor(remLakh / 1e3);
-  let remThousand = remLakh % 1e3;
-  if (crore > 0) words += convertHundreds(crore) + " Crore ";
-  if (lakh > 0) words += convertHundreds(lakh) + " Lakh ";
-  if (thousand > 0) words += convertHundreds(thousand) + " Thousand ";
-  if (remThousand > 0) words += convertHundreds(remThousand);
-  return `Rupees ${words.trim()} Only`;
-}
-function resolveTaxType(input) {
-  if (input.taxType) return input.taxType;
-  const supplier = (input.supplierState || QUOTATION_CONFIG.DEFAULT_SUPPLIER_STATE).toLowerCase().trim();
-  const address = (input.customerAddress || "").toLowerCase();
-  const customerState = (input.customerState || "").toLowerCase().trim();
-  if (customerState && customerState !== supplier) {
-    return "IGST";
-  }
-  if (supplier === "karnataka") {
-    if (address.includes("tamil nadu") || address.includes("kerala") || address.includes("andhra") || address.includes("telangana") || address.includes("delhi")) {
-      return "IGST";
-    }
-  } else if (supplier === "tamil nadu") {
-    if (address.includes("karnataka") || address.includes("bengaluru") || address.includes("bangalore") || address.includes("kerala")) {
-      return "IGST";
-    }
-  }
-  return "CGST_SGST";
-}
-function calculateQuotation(input) {
-  const capacityKw = Math.max(0.5, Number(input.systemCapacityKw) || 5);
-  const tier = input.packageTier || "Premium Bifacial";
-  const category = input.customerCategory || (capacityKw > 20 ? "Commercial" : "Residential");
-  const roof = input.roofType || "RCC Flat";
-  const tariff = input.customTariffPerKwh || QUOTATION_CONFIG.DEFAULT_TARIFF_INR;
-  const isApproved = Boolean(input.isSurveyApproved);
-  const taxMode = input.taxMode || "ITEMIZED";
-  const taxType = resolveTaxType(input);
-  let moduleWattageW = 550;
-  let moduleBrand = "Waaree 550W Mono PERC Half-Cut Bifacial (ALMM Approved)";
-  let modulePrice = 11500;
-  if (tier === "Premium Bifacial") {
-    moduleWattageW = 575;
-    moduleBrand = "Jinko 575W Tiger Neo N-Type TOPCon Bifacial Module";
-    modulePrice = 12800;
-  } else if (tier === "Commercial Heavy Duty") {
-    moduleWattageW = 550;
-    moduleBrand = "Waaree 550W High-Efficiency Bifacial Mono PERC";
-    modulePrice = 11200;
-  }
-  const panelCount = Math.ceil(capacityKw * 1e3 / moduleWattageW);
-  const actualCapacityKwp = Number((panelCount * moduleWattageW / 1e3).toFixed(2));
-  const panelTotal = panelCount * modulePrice;
-  let inverterDesc = "";
-  let inverterPrice = 0;
-  let inverterBrand = "";
-  if (capacityKw <= 3) {
-    inverterDesc = "3 kW Single-Phase Grid-Tied Inverter with Dual MPPT and Cloud WiFi";
-    inverterBrand = "Sungrow / Growatt 3K-1P";
-    inverterPrice = 32e3;
-  } else if (capacityKw <= 5) {
-    inverterDesc = "5 kW Single/Three-Phase Dual-MPPT Inverter with WiFi & IP65";
-    inverterBrand = "Sungrow SG5.0RT / Growatt";
-    inverterPrice = 38500;
-  } else if (capacityKw <= 10) {
-    inverterDesc = "10 kW Three-Phase 415V Grid Inverter with Dual MPPT & DC Switch";
-    inverterBrand = "Sungrow SG10RT 3-Phase";
-    inverterPrice = 68e3;
-  } else if (capacityKw <= 25) {
-    inverterDesc = `${capacityKw} kW Three-Phase Dual-MPPT Commercial Inverter with Cloud Monitoring`;
-    inverterBrand = "Sungrow SG20RT / Growatt 25K";
-    inverterPrice = 115e3;
-  } else {
-    inverterDesc = `${capacityKw} kW Commercial Multi-MPPT High Yield Solar Inverter`;
-    inverterBrand = "Growatt MAX / Sungrow Commercial";
-    inverterPrice = Math.round(capacityKw * 4300);
-  }
-  let structureRatePerKw = 2500;
-  let structureDesc = "Hot Dip Galvanized (HDG) 80-micron elevated structure (15\xB0 Tilt)";
-  if (roof === "Metal Sheet") {
-    structureRatePerKw = 1900;
-    structureDesc = "Anodized Aluminum AL6005-T5 Mini-Rail structure with EPDM rubber gaskets";
-  } else if (tier === "Premium Bifacial") {
-    structureRatePerKw = 2800;
-    structureDesc = "Heavy Duty 80-micron HDG elevated mounting structure with SS304 fasteners";
-  }
-  const structureTotal = Math.round(capacityKw * structureRatePerKw);
-  const bosRatePerKw = tier === "Premium Bifacial" ? 4800 : 4500;
-  const bosTotal = Math.round(capacityKw * bosRatePerKw);
-  const bosDesc = "ACDB & DCDB with Type-II SPDs, Polycab Solar DC/AC Cables, Chemical Earthing Pits & ESE Lightning Arrester";
-  const installRatePerKw = tier === "Premium Bifacial" ? 4200 : 4e3;
-  const installTotal = Math.round(capacityKw * installRatePerKw);
-  const installDesc = "Complete civil mounting, cable routing in conduits, safety labeling, DISCOM net-metering liaison and synchronization";
-  let rawItems = [];
-  if (input.customItems && input.customItems.length > 0) {
-    rawItems = input.customItems.map((ci, idx) => {
-      const catLower = (ci.category || ci.description || "").toLowerCase();
-      const isFivePercent = catLower.includes("solar") || catLower.includes("panel") || catLower.includes("inverter") || catLower.includes("module");
-      const defaultGst = isFivePercent ? 5 : 18;
-      const gstRate = ci.gstRate !== void 0 ? ci.gstRate : defaultGst;
-      const hsn = ci.hsnSacCode || (isFivePercent ? "8541" : catLower.includes("cable") || catLower.includes("wire") ? "8544" : "7308");
-      const qty = Number(ci.quantity) || 1;
-      const rate = Number(ci.unitPrice !== void 0 ? ci.unitPrice : ci.estimated_unit_cost) || 0;
-      const gross = Math.round(qty * rate);
-      const spec = ci.specification || ci.technical_specification || "";
-      const make = ci.make || ci.brand_make || "";
-      const makeModel = ci.makeModel || `${make} ${spec}`.trim() || "Standard";
-      return {
-        id: ci.id || `QI-${idx + 1}`,
-        category: ci.category || "General",
-        description: ci.description || ci.item_name || ci.category,
-        specification: spec,
-        make,
-        makeModel,
-        hsnSacCode: hsn,
-        quantity: qty,
-        unit: ci.unit || "Nos",
-        unitPrice: rate,
-        grossAmount: gross,
-        defaultGstRate: gstRate,
-        warrantyPeriod: ci.warrantyPeriod || (isFivePercent ? "10-Yr Replacement / 25-Yr Performance" : "5-Yr Comprehensive Warranty")
-      };
-    });
-  } else {
-    rawItems = [
-      {
-        id: "QI-1",
-        category: "Panels",
-        description: `${panelCount} \xD7 ${moduleBrand}`,
-        specification: `${moduleWattageW}W Mono PERC Bifacial`,
-        make: moduleBrand.split(" ")[0] || "Waaree",
-        makeModel: moduleBrand,
-        hsnSacCode: QUOTATION_CONFIG.DEFAULT_HSN_CODES.PANELS,
-        quantity: panelCount,
-        unit: "Nos",
-        unitPrice: modulePrice,
-        grossAmount: panelTotal,
-        defaultGstRate: QUOTATION_CONFIG.DEFAULT_GST_RATES.PANELS,
-        // 5%
-        warrantyPeriod: "12-Yr Product / 25-Yr Linear Performance"
-      },
-      {
-        id: "QI-2",
-        category: "Inverter",
-        description: inverterDesc,
-        specification: `${capacityKw} kW Grid-Tied Inverter`,
-        make: inverterBrand.split(" ")[0] || "Sungrow",
-        makeModel: inverterBrand,
-        hsnSacCode: QUOTATION_CONFIG.DEFAULT_HSN_CODES.INVERTER,
-        quantity: 1,
-        unit: "Unit",
-        unitPrice: inverterPrice,
-        grossAmount: inverterPrice,
-        defaultGstRate: QUOTATION_CONFIG.DEFAULT_GST_RATES.INVERTER,
-        // 5%
-        warrantyPeriod: "10-Yr Replacement Warranty"
-      },
-      {
-        id: "QI-3",
-        category: "Structure",
-        description: structureDesc,
-        specification: "Pre-Galvanized / Mini Rail",
-        make: "Reputed",
-        makeModel: "AB Solar HDG Custom Fabricated",
-        hsnSacCode: QUOTATION_CONFIG.DEFAULT_HSN_CODES.STRUCTURE,
-        quantity: capacityKw,
-        unit: "kW",
-        unitPrice: structureRatePerKw,
-        grossAmount: structureTotal,
-        defaultGstRate: QUOTATION_CONFIG.DEFAULT_GST_RATES.STRUCTURE,
-        // 18%
-        warrantyPeriod: "10-Yr Anti-Corrosion Warranty"
-      },
-      {
-        id: "QI-4",
-        category: "Protection & BOS",
-        description: bosDesc,
-        specification: "63A DCDB & ACDB with SPDs",
-        make: "Schneider / L&T / Polycab",
-        makeModel: "Schneider / L&T / Polycab",
-        hsnSacCode: QUOTATION_CONFIG.DEFAULT_HSN_CODES.BOS,
-        quantity: 1,
-        unit: "Set",
-        unitPrice: bosTotal,
-        grossAmount: bosTotal,
-        defaultGstRate: QUOTATION_CONFIG.DEFAULT_GST_RATES.BOS,
-        // 18%
-        warrantyPeriod: "5-Yr Comprehensive Warranty"
-      },
-      {
-        id: "QI-5",
-        category: "Installation & Commissioning",
-        description: installDesc,
-        specification: "Civil mounting & liaison",
-        make: "AB Energy Solutions",
-        makeModel: "AB Energy Solutions Certified EPC Crew",
-        hsnSacCode: QUOTATION_CONFIG.DEFAULT_HSN_CODES.INSTALLATION,
-        quantity: 1,
-        unit: "Turnkey",
-        unitPrice: installTotal,
-        grossAmount: installTotal,
-        defaultGstRate: QUOTATION_CONFIG.DEFAULT_GST_RATES.INSTALLATION,
-        // 18%
-        warrantyPeriod: "5-Yr Comprehensive Workmanship & O&M"
-      }
-    ];
-  }
-  const subtotal = rawItems.reduce((sum, item) => sum + item.grossAmount, 0);
-  let rawDiscount = Math.max(0, Number(input.discountAmount) || 0);
-  const maxAllowedDiscount = Math.round(subtotal * (QUOTATION_CONFIG.MAX_DISCOUNT_PERCENT / 100));
-  if (rawDiscount > maxAllowedDiscount) {
-    rawDiscount = maxAllowedDiscount;
-  }
-  const requiresApproval = rawDiscount > QUOTATION_CONFIG.DISCOUNT_APPROVAL_THRESHOLD_INR;
-  const approvalStatus = requiresApproval ? "Pending_Approval" : "Approved";
-  const taxableAmount = Math.max(0, subtotal - rawDiscount);
-  let allocatedDiscountTotal = 0;
-  const items = rawItems.map((raw, idx) => {
-    let lineDiscount = 0;
-    if (subtotal > 0 && rawDiscount > 0) {
-      if (idx === rawItems.length - 1) {
-        lineDiscount = rawDiscount - allocatedDiscountTotal;
-      } else {
-        lineDiscount = Math.round(raw.grossAmount / subtotal * rawDiscount);
-        allocatedDiscountTotal += lineDiscount;
-      }
-    }
-    const lineTaxable = Math.max(0, raw.grossAmount - lineDiscount);
-    const gstRate = taxMode === "COMPOSITE" ? QUOTATION_CONFIG.COMPOSITE_GST_RATE : raw.defaultGstRate;
-    const lineTax = Math.round(lineTaxable * (gstRate / 100));
-    let cgstRate = 0;
-    let sgstRate = 0;
-    let igstRate = 0;
-    let cgstAmount = 0;
-    let sgstAmount = 0;
-    let igstAmount = 0;
-    if (taxType === "IGST") {
-      igstRate = gstRate;
-      igstAmount = lineTax;
-    } else {
-      cgstRate = Number((gstRate / 2).toFixed(2));
-      sgstRate = Number((gstRate / 2).toFixed(2));
-      cgstAmount = Math.round(lineTax / 2);
-      sgstAmount = lineTax - cgstAmount;
-    }
-    return {
-      id: raw.id,
-      category: raw.category,
-      description: raw.description,
-      specification: raw.specification,
-      make: raw.make,
-      makeModel: raw.makeModel,
-      hsnSacCode: raw.hsnSacCode,
-      quantity: raw.quantity,
-      unit: raw.unit,
-      unitPrice: raw.unitPrice,
-      grossAmount: raw.grossAmount,
-      discountAmount: lineDiscount,
-      taxableAmount: lineTaxable,
-      gstRate,
-      taxType,
-      cgstRate,
-      sgstRate,
-      igstRate,
-      cgstAmount,
-      sgstAmount,
-      igstAmount,
-      taxAmount: lineTax,
-      totalPrice: lineTaxable + lineTax,
-      warrantyPeriod: raw.warrantyPeriod
-    };
-  });
-  const totalCgstAmount = items.reduce((sum, item) => sum + item.cgstAmount, 0);
-  const totalSgstAmount = items.reduce((sum, item) => sum + item.sgstAmount, 0);
-  const totalIgstAmount = items.reduce((sum, item) => sum + item.igstAmount, 0);
-  const totalGstAmount = totalCgstAmount + totalSgstAmount + totalIgstAmount;
-  const finalContractAmount = taxableAmount + totalGstAmount;
-  const effectiveGstRate = taxableAmount > 0 ? Number((totalGstAmount / taxableAmount * 100).toFixed(2)) : 0;
-  const amountInWords = convertNumberToWords(finalContractAmount);
-  let subsidyEligible = false;
-  let subsidyAmount = 0;
-  let subsidyNotes = "";
-  if (category === "Residential") {
-    subsidyEligible = true;
-    if (capacityKw <= 1) {
-      subsidyAmount = QUOTATION_CONFIG.RESIDENTIAL_SUBSIDY.SLAB_1KW_MAX;
-      subsidyNotes = "PM Surya Ghar: \u20B930,000 for 1 kW residential rooftop";
-    } else if (capacityKw <= 2) {
-      subsidyAmount = QUOTATION_CONFIG.RESIDENTIAL_SUBSIDY.SLAB_2KW_MAX;
-      subsidyNotes = "PM Surya Ghar: \u20B960,000 for 2 kW residential rooftop";
-    } else {
-      subsidyAmount = QUOTATION_CONFIG.RESIDENTIAL_SUBSIDY.SLAB_3KW_AND_ABOVE_MAX;
-      subsidyNotes = "PM Surya Ghar: \u20B978,000 maximum capped central subsidy for \u2265 3 kW";
-    }
-  } else {
-    subsidyEligible = false;
-    subsidyAmount = 0;
-    subsidyNotes = "Commercial / Industrial / Institutional installations are not eligible for PM Surya Ghar residential central subsidy.";
-  }
-  const indicativeNetCustomerCost = Math.max(0, finalContractAmount - subsidyAmount);
-  const annualGenerationKwh = Math.round(actualCapacityKwp * QUOTATION_CONFIG.SPECIFIC_YIELD_KWH_PER_KWP);
-  const annualSavingsInr = Math.round(annualGenerationKwh * tariff);
-  const lifetimeSavings25Yr = Math.round(annualSavingsInr * 25);
-  const simplePaybackYears = annualSavingsInr > 0 ? Number((indicativeNetCustomerCost / annualSavingsInr).toFixed(1)) : 0;
-  const advanceAmount = Math.round(finalContractAmount * 0.4);
-  const dispatchAmount = Math.round(finalContractAmount * 0.5);
-  const handoverAmount = finalContractAmount - advanceAmount - dispatchAmount;
-  return {
-    proposalType: isApproved ? "Final_Technical" : "Preliminary",
-    packageTier: tier,
-    systemCapacityKw: capacityKw,
-    actualCapacityKwp,
-    panelCount,
-    moduleWattageW,
-    inverterDescription: inverterDesc,
-    items,
-    subtotal,
-    discountAmount: rawDiscount,
-    requiresApproval,
-    approvalStatus,
-    taxableAmount,
-    taxMode,
-    taxType,
-    gstRate: effectiveGstRate,
-    cgstAmount: totalCgstAmount,
-    sgstAmount: totalSgstAmount,
-    igstAmount: totalIgstAmount,
-    gstAmount: totalGstAmount,
-    finalContractAmount,
-    amountInWords,
-    subsidyEligible,
-    subsidyAmount,
-    subsidyNotes,
-    indicativeNetCustomerCost,
-    annualGenerationKwh,
-    annualSavingsInr,
-    lifetimeSavings25Yr,
-    simplePaybackYears,
-    tariffAssumedPerKwh: tariff,
-    milestones: {
-      advanceBooking: {
-        percentage: 40,
-        amount: advanceAmount,
-        description: "40% Advance on project booking and detailed engineering approval"
-      },
-      materialDispatch: {
-        percentage: 50,
-        amount: dispatchAmount,
-        description: "50% on material dispatch and arrival at installation site"
-      },
-      finalHandover: {
-        percentage: 10,
-        amount: handoverAmount,
-        description: "10% upon DISCOM net-metering synchronization and commissioning handover"
-      }
-    },
-    terms: [
-      "40% Advance on project booking and detailed engineering approval.",
-      "50% upon material dispatch against warehouse delivery challan.",
-      "10% upon successful DISCOM net-metering synchronization and commissioning sign-off.",
-      "Quotation valid for 14 calendar days from date of issuance.",
-      "Central subsidy under PM Surya Ghar is credited directly by the Government to the customer bank account post DISCOM inspection via DBT.",
-      "Standard 25-Year linear performance warranty on Tier-1 ALMM solar panels."
-    ],
-    warranties: {
-      panels: "12-Year Product Workmanship / 25-Year 80% Linear Power Output",
-      inverter: "10-Year Comprehensive Replacement Warranty",
-      structure: "10-Year Corrosion-Free Galvanization Warranty",
-      workmanship: "5-Year Comprehensive EPC Workmanship & Operations & Maintenance"
-    }
-  };
-}
-
-// server/services/pdf-generator.ts
-import PDFDocument from "pdfkit";
 import fs from "fs";
 import path from "path";
-async function generateProposalPdf(data) {
-  const proposalsDir = path.join(process.cwd(), "uploads", "proposals");
-  if (!fs.existsSync(proposalsDir)) {
-    fs.mkdirSync(proposalsDir, { recursive: true });
-  }
-  const sanitizedQuoteNo = data.quotationNumber.replace(/[^a-zA-Z0-9_-]/g, "_");
-  const fileName = `Quotation_${sanitizedQuoteNo}.pdf`;
-  const filePath = path.join(proposalsDir, fileName);
-  const fileUrl = `/uploads/proposals/${fileName}`;
-  return new Promise((resolve, reject) => {
-    try {
-      const doc = new PDFDocument({
-        size: "A4",
-        margin: 40,
-        bufferPages: true,
-        info: {
-          Title: `AB Energy Solutions - Quotation ${data.quotationNumber}`,
-          Author: "AB Energy Solutions",
-          Subject: `${data.systemCapacityKw} kW Grid-Connected Rooftop Solar Power System`
-        }
-      });
-      const writeStream = fs.createWriteStream(filePath);
-      doc.pipe(writeStream);
-      const logoPath = path.join(process.cwd(), "public", "logo.png");
-      const coverPhotoPath = path.join(process.cwd(), "public", "solar-roof-cover.jpg");
-      const hasLogo = fs.existsSync(logoPath);
-      const hasCoverPhoto = fs.existsSync(coverPhotoPath);
-      const headingNavy = "#0F172A";
-      const bodyDark = "#1E293B";
-      const textMuted = "#475569";
-      const greenAccent = "#059669";
-      const greenLight = "#ECFDF5";
-      const borderSlate = "#CBD5E1";
-      const bgLight = "#F8FAFC";
-      const drawHeaderBanner = (pageTitle) => {
-        if (hasLogo) {
-          doc.save();
-          doc.opacity(0.035);
-          doc.image(logoPath, 127, 260, { width: 340 });
-          doc.restore();
-        }
-        doc.font("Helvetica-Bold").fontSize(9).fillColor(headingNavy).text("AB ENERGY SOLUTIONS", 40, 26);
-        doc.font("Helvetica").fontSize(7.5).fillColor(textMuted).text("Turnkey Solar EPC & Engineering", 40, 37);
-        doc.font("Helvetica-Bold").fontSize(8).fillColor(greenAccent).text(`Quotation: ${data.quotationNumber}`, 200, 26, { width: 195, align: "center" });
-        if (pageTitle) {
-          doc.font("Helvetica-Oblique").fontSize(7).fillColor(textMuted).text(pageTitle, 200, 37, { width: 195, align: "center" });
-        }
-        doc.font("Helvetica-Bold").fontSize(8.5).fillColor(headingNavy).text("GST: 33FSQPA3244H1ZU", 40, 26, { align: "right", width: 515 });
-        doc.font("Helvetica").fontSize(7.5).fillColor(textMuted).text("CIN/MSME Registered", 40, 37, { align: "right", width: 515 });
-        doc.moveTo(40, 48).lineTo(555, 48).lineWidth(0.5).strokeColor("#E2E8F0").stroke();
-      };
-      const drawFooter = (pageNum, totalPages) => {
-        doc.moveTo(40, 785).lineTo(555, 785).lineWidth(0.5).strokeColor("#E2E8F0").stroke();
-        doc.font("Helvetica").fontSize(8).fillColor(textMuted).text(`AB Energy Solutions  \u2022  Turnkey Solar EPC & Engineering  \u2022  Page ${pageNum} of ${totalPages}`, 40, 792, { align: "center", width: 515 });
-      };
-      if (hasLogo) {
-        doc.image(logoPath, 40, 28, { width: 125, height: 70, fit: [125, 70] });
-      } else {
-        doc.font("Helvetica-Bold").fontSize(16).fillColor(headingNavy).text("AB ENERGY SOLUTIONS", 40, 35);
-      }
-      doc.font("Helvetica-Bold").fontSize(10).fillColor(headingNavy).text("GST: 33FSQPA3244H1ZU", 40, 35, { align: "right", width: 515 });
-      doc.font("Helvetica").fontSize(8.5).fillColor(textMuted).text("Solar EPC \u2022 Electrical Infrastructure \u2022 O&M", 40, 49, { align: "right", width: 515 });
-      doc.font("Helvetica-Bold").fontSize(8).fillColor(greenAccent).text("TNEB C-Licence Certified Enterprise", 40, 62, { align: "right", width: 515 });
-      doc.moveTo(40, 105).lineTo(555, 105).lineWidth(0.75).strokeColor("#E2E8F0").stroke();
-      doc.font("Helvetica-Bold").fontSize(15).fillColor(headingNavy).text(`Quotation for ${data.systemCapacityKw} kW Grid-Connected Rooftop Solar Power System`, 40, 118, { align: "center", width: 515 });
-      doc.font("Helvetica").fontSize(9).fillColor(greenAccent).text("Turnkey Engineering, Procurement, Installation & Commissioning Proposal", 40, 137, { align: "center", width: 515 });
-      const formattedDate = new Date(data.createdAt || Date.now()).toLocaleDateString("en-GB", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric"
-      });
-      doc.font("Helvetica-Bold").fontSize(9).fillColor(headingNavy).text(`Quotation No.: ${data.quotationNumber}`, 45, 154);
-      doc.font("Helvetica").fontSize(8.5).fillColor(textMuted).text(`Package Tier: ${data.packageTier || "Premium Tier-1"}`, 210, 154, { width: 175, align: "center" });
-      doc.font("Helvetica-Bold").fontSize(9).fillColor(headingNavy).text(`Date: ${formattedDate}`, 40, 154, { align: "right", width: 515 });
-      if (hasCoverPhoto) {
-        doc.image(coverPhotoPath, 40, 172, { width: 515, height: 265, fit: [515, 265], align: "center" });
-      } else {
-        doc.rect(40, 172, 515, 265).fillAndStroke(bgLight, borderSlate);
-        doc.font("Helvetica-Bold").fontSize(14).fillColor("#64748B").text("Grid-Connected Solar Rooftop EPC System", 40, 290, { align: "center", width: 515 });
-      }
-      const custBoxY = 452;
-      doc.rect(40, custBoxY, 515, 112).fillAndStroke(bgLight, borderSlate);
-      doc.rect(40, custBoxY, 515, 24).fillAndStroke("#F1F5F9", borderSlate);
-      doc.font("Helvetica-Bold").fontSize(9.5).fillColor(headingNavy).text("CUSTOMER DETAILS", 55, custBoxY + 7);
-      doc.font("Helvetica").fontSize(8.5).fillColor(bodyDark);
-      doc.text(`Client Name: `, 55, custBoxY + 32, { continued: true }).font("Helvetica-Bold").text(data.leadName);
-      doc.font("Helvetica").text(`Service Number: `, 55, custBoxY + 50, { continued: true }).font("Helvetica-Bold").text(`045310081264 / ${data.systemCapacityKw}KWp`);
-      doc.font("Helvetica").text(`Quoted Capacity: `, 55, custBoxY + 68, { continued: true }).font("Helvetica-Bold").text(`${data.systemCapacityKw} kW On-Grid Solar`);
-      doc.font("Helvetica").text(`Proposal Type: `, 55, custBoxY + 86, { continued: true }).font("Helvetica-Bold").text(`${data.proposalType || "Grid-Tied Commercial/Residential"}`);
-      doc.font("Helvetica").text(`Phone: `, 300, custBoxY + 32, { continued: true }).font("Helvetica-Bold").text(data.customerPhone || "N/A");
-      doc.font("Helvetica").text(`Site Address: `, 300, custBoxY + 50);
-      doc.font("Helvetica-Bold").text(data.customerAddress || "West Rajapalayam, P.N palayam, TN", 300, custBoxY + 62, { width: 240 });
-      const metricY = 580;
-      const metricW = 165;
-      const metrics = [
-        { label: "Plant Capacity", val: `${data.systemCapacityKw} kW On-Grid` },
-        { label: "Estimated Annual Yield", val: `~${Math.round(data.annualGenerationKwh || data.systemCapacityKw * 1500).toLocaleString("en-IN")} Units` },
-        { label: "Module Performance", val: "25-30 Years Tier-1" }
-      ];
-      metrics.forEach((m, idx) => {
-        const mX = 40 + idx * 175;
-        doc.rect(mX, metricY, metricW, 46).fillAndStroke("#FFFFFF", borderSlate);
-        doc.font("Helvetica").fontSize(7.5).fillColor(textMuted).text(m.label, mX + 8, metricY + 8);
-        doc.font("Helvetica-Bold").fontSize(10).fillColor(greenAccent).text(m.val, mX + 8, metricY + 24);
-      });
-      doc.addPage();
-      drawHeaderBanner("Corporate Profile & Executive Letter");
-      let p2Y = 60;
-      doc.font("Helvetica-Bold").fontSize(10).fillColor(headingNavy).text(`Subject: Proposal for Supply, Installation, Testing & Commissioning of ${data.systemCapacityKw} kW Grid-Connected Rooftop Solar Power System`, 40, p2Y, { width: 515, lineGap: 3 });
-      p2Y += 32;
-      doc.font("Helvetica").fontSize(9).fillColor(bodyDark).text("Dear Sir,", 40, p2Y);
-      p2Y += 16;
-      doc.font("Helvetica").fontSize(9).fillColor(bodyDark).text(
-        `Thank you for giving us the opportunity to submit our quotation for your ${data.systemCapacityKw} kW Solar Rooftop Project. We are pleased to offer our professional turnkey services as detailed below.
-
-The quotation includes the complete supply, installation, testing, and commissioning of a Grid-Connected Solar Rooftop System.`,
-        40,
-        p2Y,
-        { width: 515, lineGap: 3.5 }
-      );
-      p2Y += 56;
-      doc.font("Helvetica-Bold").fontSize(11).fillColor(headingNavy).text("ABOUT AB ENERGY SOLUTION", 40, p2Y);
-      p2Y += 20;
-      doc.font("Helvetica").fontSize(9).fillColor("#334155").text(
-        "AB Energy Solution is a trusted Solar EPC & Electrical Engineering Company specializing in Project Management Consultancy (PMC), Owner's Engineer Services, Solar EPC, Installation, Testing & Commissioning (I&C), HT/LT Electrical Works, and Solar Material Supply.\n\nWith 12+ years of industry experience, we have successfully completed 50+ Solar & Electrical Projects across Residential, Commercial, Industrial, and Agricultural sectors. Our team includes TNEB C Licence Certified Engineers and experienced professionals dedicated to delivering projects with the highest standards of Quality, Safety, and On-Time Delivery.\n\nWe provide complete end-to-end solar solutions, from Site Survey, Design, Engineering, Procurement, Installation, Testing & Commissioning to Net Metering, CEIG Documentation, and Annual Maintenance (O&M).",
-        40,
-        p2Y,
-        { width: 515, lineGap: 4, align: "justify" }
-      );
-      p2Y += 160;
-      doc.rect(40, p2Y, 515, 68).fillAndStroke(bgLight, borderSlate);
-      doc.font("Helvetica-Bold").fontSize(9).fillColor(headingNavy).text("Quality & Compliance Assurance", 55, p2Y + 12);
-      doc.font("Helvetica").fontSize(8.5).fillColor(textMuted).text(
-        "All engineering designs, structural fabrications, module installations, and electrical grid synchronizations are performed strictly complying with MNRE standards, CEA technical regulations, DISCOM grid codes, and TANGEDCO net-metering protocols.",
-        55,
-        p2Y + 28,
-        { width: 485, lineGap: 2.5 }
-      );
-      doc.addPage();
-      drawHeaderBanner("Services, Advantages & Corporate Vision");
-      let p3Y = 60;
-      doc.font("Helvetica-Bold").fontSize(11).fillColor(headingNavy).text("OUR SERVICES", 40, p3Y);
-      p3Y += 20;
-      const servicesCol1 = [
-        "Solar Rooftop EPC Projects",
-        "Ground Mounted Solar Power Plants",
-        "Project Management Consultancy (PMC)",
-        "Owner's Engineer Services",
-        "Installation, Testing & Commissioning (I&C)",
-        "Solar Water Pump Systems"
-      ];
-      const servicesCol2 = [
-        "HT & LT Electrical Works",
-        "Transmission Line & Pole Yard Works",
-        "Net Metering & CEIG Approval Support",
-        "Operation & Maintenance (O&M)",
-        "Solar Material Supply"
-      ];
-      let sY1 = p3Y;
-      servicesCol1.forEach((srv) => {
-        doc.font("Helvetica-Bold").fontSize(8.5).fillColor(greenAccent).text("\u2022", 48, sY1);
-        doc.font("Helvetica").fontSize(8.5).fillColor(bodyDark).text(`  ${srv}`, 58, sY1);
-        sY1 += 18;
-      });
-      let sY2 = p3Y;
-      servicesCol2.forEach((srv) => {
-        doc.font("Helvetica-Bold").fontSize(8.5).fillColor(greenAccent).text("\u2022", 300, sY2);
-        doc.font("Helvetica").fontSize(8.5).fillColor(bodyDark).text(`  ${srv}`, 310, sY2);
-        sY2 += 18;
-      });
-      p3Y = Math.max(sY1, sY2) + 24;
-      doc.font("Helvetica-Bold").fontSize(11).fillColor(headingNavy).text("WHY CHOOSE AB ENERGY SOLUTION?", 40, p3Y);
-      p3Y += 20;
-      const whyCol1 = [
-        "12+ Years of Industry Experience",
-        "50+ Successfully Completed Projects",
-        "TNEB C Licence Certified Engineers",
-        "Quality Workmanship & Safety Standards"
-      ];
-      const whyCol2 = [
-        "Professional Project Management",
-        "On-Time Project Delivery",
-        "Transparent Communication",
-        "Reliable After-Sales Support"
-      ];
-      let wY1 = p3Y;
-      whyCol1.forEach((item) => {
-        doc.font("Helvetica-Bold").fontSize(9).fillColor(greenAccent).text("\u2714", 48, wY1);
-        doc.font("Helvetica").fontSize(8.5).fillColor(bodyDark).text(`   ${item}`, 62, wY1);
-        wY1 += 18;
-      });
-      let wY2 = p3Y;
-      whyCol2.forEach((item) => {
-        doc.font("Helvetica-Bold").fontSize(9).fillColor(greenAccent).text("\u2714", 300, wY2);
-        doc.font("Helvetica").fontSize(8.5).fillColor(bodyDark).text(`   ${item}`, 314, wY2);
-        wY2 += 18;
-      });
-      p3Y = Math.max(wY1, wY2) + 28;
-      doc.rect(40, p3Y, 515, 80).fillAndStroke(bgLight, borderSlate);
-      doc.font("Helvetica-Bold").fontSize(9.5).fillColor(headingNavy).text("Our Commitment", 55, p3Y + 14);
-      doc.font("Helvetica").fontSize(8.5).fillColor(bodyDark).text("Quality  \u2022  Safety  \u2022  Innovation  \u2022  Integrity  \u2022  Customer Satisfaction", 55, p3Y + 28);
-      doc.font("Helvetica-Bold").fontSize(9.5).fillColor(headingNavy).text("Our Vision", 55, p3Y + 46);
-      doc.font("Helvetica-Oblique").fontSize(8).fillColor(textMuted).text(
-        '"To deliver sustainable, reliable, and high-quality solar energy solutions that create long-term value for our customers and contribute to a greener future."',
-        55,
-        p3Y + 60,
-        { width: 485 }
-      );
-      doc.addPage();
-      drawHeaderBanner("Technical Scope of Work & Bill of Materials");
-      let p4Y = 60;
-      doc.font("Helvetica-Bold").fontSize(11).fillColor(headingNavy).text("Scope of Work", 40, p4Y);
-      p4Y += 16;
-      doc.font("Helvetica").fontSize(8.5).fillColor(bodyDark).text("We will execute the complete following turnkey EPC activities:", 40, p4Y);
-      p4Y += 15;
-      const scopeCol1 = ["Site Survey", "Engineering Support", "Supply of Material"];
-      const scopeCol2 = ["Complete Installation", "Testing & Commissioning", "Service Support"];
-      let scY1 = p4Y;
-      scopeCol1.forEach((sc) => {
-        doc.font("Helvetica-Bold").fontSize(8).fillColor(greenAccent).text("\u2022", 48, scY1);
-        doc.font("Helvetica").fontSize(8.5).fillColor(bodyDark).text(`   ${sc}`, 58, scY1);
-        scY1 += 14;
-      });
-      let scY2 = p4Y;
-      scopeCol2.forEach((sc) => {
-        doc.font("Helvetica-Bold").fontSize(8).fillColor(greenAccent).text("\u2022", 300, scY2);
-        doc.font("Helvetica").fontSize(8.5).fillColor(bodyDark).text(`   ${sc}`, 310, scY2);
-        scY2 += 14;
-      });
-      p4Y = Math.max(scY1, scY2) + 20;
-      doc.font("Helvetica-Bold").fontSize(11).fillColor(headingNavy).text("Bill Of Materials", 40, p4Y);
-      p4Y += 16;
-      const colX = [40, 75, 185, 360, 455, 500];
-      const colW = [35, 110, 175, 95, 45, 55];
-      const tableW = 515;
-      const drawBOMTableHeader = (y, isContinued = false) => {
-        doc.rect(40, y, tableW, 20).fillAndStroke("#0F172A", "#0F172A");
-        doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#FFFFFF");
-        doc.text("S.NO", colX[0], y + 6, { width: colW[0], align: "center" });
-        doc.text(isContinued ? "MATERIALS (Contd.)" : "MATERIALS", colX[1], y + 6, { width: colW[1], align: "left" });
-        doc.text("SPECIFICATION", colX[2], y + 6, { width: colW[2], align: "left" });
-        doc.text("MAKE", colX[3], y + 6, { width: colW[3], align: "left" });
-        doc.text("UNITS", colX[4], y + 6, { width: colW[4], align: "center" });
-        doc.text("QUANTITY", colX[5], y + 6, { width: colW[5], align: "center" });
-      };
-      drawBOMTableHeader(p4Y);
-      p4Y += 20;
-      const bomItems = data.items && data.items.length > 0 ? data.items : [];
-      bomItems.forEach((item, idx) => {
-        const materialName = item.category || item.description || "Solar Component";
-        const spec = item.specification || item.description || item.makeModel || "Standard";
-        const make = item.make || item.makeModel?.split(" ")[0] || "Reputed Tier-1";
-        const unit = item.unit || "Nos";
-        const qty = item.quantity || 1;
-        const rowHeight = 19;
-        if (p4Y + rowHeight > 730) {
-          doc.addPage();
-          drawHeaderBanner("Bill of Materials (Continued)");
-          p4Y = 60;
-          drawBOMTableHeader(p4Y, true);
-          p4Y += 20;
-        }
-        const rowBg = idx % 2 === 0 ? "#FFFFFF" : "#F8FAFC";
-        doc.rect(40, p4Y, tableW, rowHeight).fillAndStroke(rowBg, "#CBD5E1");
-        doc.font("Helvetica").fontSize(7.5).fillColor(bodyDark);
-        doc.text(String(idx + 1), colX[0], p4Y + 5, { width: colW[0], align: "center" });
-        doc.font("Helvetica-Bold").text(materialName, colX[1], p4Y + 5, { width: colW[1], ellipsis: true });
-        doc.font("Helvetica").text(spec, colX[2], p4Y + 5, { width: colW[2], ellipsis: true });
-        doc.text(make, colX[3], p4Y + 5, { width: colW[3], ellipsis: true });
-        doc.text(unit, colX[4], p4Y + 5, { width: colW[4], align: "center" });
-        doc.font("Helvetica-Bold").text(String(qty), colX[5], p4Y + 5, { width: colW[5], align: "center" });
-        p4Y += rowHeight;
-      });
-      p4Y += 12;
-      if (p4Y + 36 > 730) {
-        doc.addPage();
-        drawHeaderBanner("Technical Compliance");
-        p4Y = 60;
-      }
-      doc.rect(40, p4Y, tableW, 28).fillAndStroke("#FEF3C7", "#F59E0B");
-      doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#92400E").text("Note: As this project is proposed under the Government Subsidy Scheme, all supplied solar modules must comply with the Domestic Content Requirement (DCR) guidelines.", 48, p4Y + 9, { width: 495 });
-      doc.addPage();
-      drawHeaderBanner("Client Scope, Features, Warranty & Commercials");
-      let p5Y = 60;
-      doc.font("Helvetica-Bold").fontSize(11).fillColor(headingNavy).text("Client Scope", 40, p5Y);
-      p5Y += 16;
-      const clientScopeCol1 = [
-        "Provide a shadow-free installation area.",
-        "Minor civil works, if required.",
-        "Statutory charges for Bi-Directional Net Meter."
-      ];
-      const clientScopeCol2 = [
-        "Non-statutory charges related to Net Metering.",
-        "Additional charges for elevated structures (if applicable).",
-        "SIM card for the Wi-Fi monitoring dongle / APFC."
-      ];
-      let csY1 = p5Y;
-      clientScopeCol1.forEach((cs) => {
-        doc.font("Helvetica-Bold").fontSize(8.5).fillColor(greenAccent).text("\u27A2", 48, csY1);
-        doc.font("Helvetica").fontSize(8.5).fillColor(bodyDark).text(`   ${cs}`, 58, csY1);
-        csY1 += 15;
-      });
-      let csY2 = p5Y;
-      clientScopeCol2.forEach((cs) => {
-        doc.font("Helvetica-Bold").fontSize(8.5).fillColor(greenAccent).text("\u27A2", 300, csY2);
-        doc.font("Helvetica").fontSize(8.5).fillColor(bodyDark).text(`   ${cs}`, 310, csY2);
-        csY2 += 15;
-      });
-      p5Y = Math.max(csY1, csY2) + 20;
-      doc.font("Helvetica-Bold").fontSize(11).fillColor(headingNavy).text("Features and Warranty", 40, p5Y);
-      p5Y += 16;
-      const dailyKwh = Math.round(data.systemCapacityKw * 5);
-      const featCol1 = [
-        "Tier-1 High-Efficiency Solar Modules",
-        "Inverter Warranty: Up to 8 Years",
-        "Solar Module Product Warranty: 12 Years",
-        "Solar Module Performance Warranty: Up to 30 Years"
-      ];
-      const featCol2 = [
-        "Workmanship Warranty: 1 Year",
-        `Estimated Energy Generation: ~${dailyKwh} kWh/day`,
-        "Non DCR / DCR Solar Panels as applicable",
-        "Compliant with MNRE and DISCOM Standards"
-      ];
-      let ftY1 = p5Y;
-      featCol1.forEach((ft) => {
-        doc.font("Helvetica-Bold").fontSize(8.5).fillColor(greenAccent).text("-", 48, ftY1);
-        doc.font("Helvetica").fontSize(8.5).fillColor(bodyDark).text(`   ${ft}`, 58, ftY1);
-        ftY1 += 15;
-      });
-      let ftY2 = p5Y;
-      featCol2.forEach((ft) => {
-        doc.font("Helvetica-Bold").fontSize(8.5).fillColor(greenAccent).text("-", 300, ftY2);
-        doc.font("Helvetica").fontSize(8.5).fillColor(bodyDark).text(`   ${ft}`, 310, ftY2);
-        ftY2 += 15;
-      });
-      p5Y = Math.max(ftY1, ftY2) + 24;
-      doc.font("Helvetica-Bold").fontSize(11).fillColor(headingNavy).text("System Capacity & Pricing", 40, p5Y);
-      p5Y += 16;
-      const priceW = 515;
-      const hasSubsidy = data.subsidyEligible && data.subsidyAmount > 0;
-      doc.rect(40, p5Y, priceW, 22).fillAndStroke("#0F172A", "#0F172A");
-      doc.font("Helvetica-Bold").fontSize(8).fillColor("#FFFFFF");
-      doc.text("System Capacity", 45, p5Y + 6, { width: 145, align: "center" });
-      doc.text("Domestic Price (Including GST)", 195, p5Y + 6, { width: 165, align: "center" });
-      doc.text(hasSubsidy ? "Govt Subsidy / Net Cost" : "Estimated ROI", 365, p5Y + 6, { width: 185, align: "center" });
-      p5Y += 22;
-      const finalPriceStr = `\u20B9${Math.round(data.finalContractAmount).toLocaleString("en-IN")}/-`;
-      doc.rect(40, p5Y, priceW, 36).fillAndStroke("#FFFFFF", "#CBD5E1");
-      doc.font("Helvetica-Bold").fontSize(9).fillColor(bodyDark);
-      doc.text(`${data.systemCapacityKw}KW On-grid Solar System`, 45, p5Y + 13, { width: 145, align: "center" });
-      doc.font("Helvetica-Bold").fontSize(12).fillColor(headingNavy);
-      doc.text(finalPriceStr, 195, p5Y + 11, { width: 165, align: "center" });
-      if (hasSubsidy) {
-        const netCost = data.indicativeNetCustomerCost || data.finalContractAmount - data.subsidyAmount;
-        doc.font("Helvetica-Bold").fontSize(8).fillColor(greenAccent).text(`Subsidy: \u20B9${Math.round(data.subsidyAmount).toLocaleString("en-IN")}`, 365, p5Y + 7, { width: 185, align: "center" });
-        doc.font("Helvetica-Bold").fontSize(9.5).fillColor(headingNavy).text(`Net Cost: \u20B9${Math.round(netCost).toLocaleString("en-IN")}/-`, 365, p5Y + 20, { width: 185, align: "center" });
-      } else {
-        doc.font("Helvetica-Bold").fontSize(9.5).fillColor(headingNavy).text("3.5 - 4.0 Years", 365, p5Y + 12, { width: 185, align: "center" });
-      }
-      p5Y += 46;
-      doc.font("Helvetica-Bold").fontSize(11).fillColor(headingNavy).text("Payment Terms", 40, p5Y);
-      p5Y += 16;
-      doc.rect(40, p5Y, priceW, 38).fillAndStroke(bgLight, borderSlate);
-      doc.font("Helvetica-Bold").fontSize(9).fillColor(headingNavy).text("\u2022   90% Advance Payment with Purchase Order / Agreement", 55, p5Y + 9);
-      doc.font("Helvetica-Bold").fontSize(9).fillColor(headingNavy).text("\u2022   10% After Successful Commissioning & Grid Synchronization", 55, p5Y + 23);
-      doc.addPage();
-      drawHeaderBanner("Terms & Conditions & Official Authorization");
-      let p6Y = 60;
-      doc.font("Helvetica-Bold").fontSize(11).fillColor(headingNavy).text("Terms & Conditions", 40, p6Y);
-      p6Y += 18;
-      const termsList = [
-        "Quotation Validity: 7 Days from issue date.",
-        "GST is included in the above quoted price.",
-        "Additional civil work will be charged extra 800/kW.",
-        "Net Meter approval is subject to TANGEDCO / DISCOM regulations.",
-        "Delivery is subject to material readiness and site access.",
-        "Any additional civil or electrical work outside the quoted scope will be charged extra.",
-        "Elevated above 4 Feet mounting structures will be charged extra 2500 per kW.",
-        "Force majeure conditions and DISCOM grid outages are excluded."
-      ];
-      termsList.forEach((tm) => {
-        doc.font("Helvetica-Bold").fontSize(8.5).fillColor(greenAccent).text("\u2022", 48, p6Y);
-        doc.font("Helvetica").fontSize(8.5).fillColor(bodyDark).text(`   ${tm}`, 58, p6Y);
-        p6Y += 16;
-      });
-      p6Y += 18;
-      doc.rect(40, p6Y, 515, 36).fillAndStroke(greenLight, "#A7F3D0");
-      doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#065F46").text(
-        "Thank you for your valuable opportunity. We look forward to delivering a reliable solar solution and building a long-term partnership with you.",
-        55,
-        p6Y + 11,
-        { width: 485, align: "center" }
-      );
-      p6Y += 52;
-      doc.font("Helvetica-Bold").fontSize(11).fillColor(headingNavy).text("Contact Details", 40, p6Y);
-      p6Y += 16;
-      const cardHeight = 96;
-      doc.rect(40, p6Y, 515, cardHeight).fillAndStroke("#0F172A", "#1E293B");
-      doc.font("Helvetica-Bold").fontSize(13).fillColor("#FFFFFF").text("A Boopathi BE.,", 55, p6Y + 14);
-      doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#34D399").text("CEO & Managing Director  \u2022  AB ENERGY SOLUTIONS", 55, p6Y + 31);
-      doc.font("Helvetica").fontSize(8).fillColor("#CBD5E1").text("Phone: +91 95664 99678   |   Email: abenergysolutiontn@gmail.com", 55, p6Y + 47);
-      doc.font("Helvetica").fontSize(8).fillColor("#CBD5E1").text("1/359, Maruthi Nagar, Chinnakavandanur, Namakkal, TN - 636202", 55, p6Y + 60);
-      doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#34D399").text("12+ Years Solar Experience   \u2022   TNEB C-Licence Certified Enterprise", 55, p6Y + 74);
-      doc.rect(380, p6Y + 12, 160, 72).fillAndStroke("#FFFFFF", "#CBD5E1");
-      doc.font("Helvetica-Bold").fontSize(8).fillColor(headingNavy).text("For AB ENERGY SOLUTIONS", 380, p6Y + 18, { width: 160, align: "center" });
-      doc.moveTo(395, p6Y + 60).lineTo(525, p6Y + 60).lineWidth(0.5).strokeColor("#94A3B8").stroke();
-      doc.font("Helvetica").fontSize(7.5).fillColor("#64748B").text("Authorized Signatory", 380, p6Y + 65, { width: 160, align: "center" });
-      const range = doc.bufferedPageRange();
-      for (let i = range.start; i < range.start + range.count; i++) {
-        doc.switchToPage(i);
-        drawFooter(i + 1, range.count);
-      }
-      doc.end();
-      writeStream.on("finish", () => {
-        resolve({ filePath, fileUrl });
-      });
-      writeStream.on("error", (err) => {
-        reject(err);
-      });
-    } catch (err) {
-      reject(err);
-    }
-  });
-}
-
-// server/controllers/quotations.controller.ts
-function formatQuotation(q) {
-  if (!q) return null;
-  return {
-    ...q,
-    quotationNumber: q.quotation_number,
-    leadId: q.lead_id,
-    leadName: q.lead_name,
-    customerPhone: q.customer_phone,
-    customerAddress: q.customer_address,
-    systemCapacityKw: Number(q.system_capacity_kw) || 0,
-    currentVersion: Number(q.current_version) || 1,
-    versions: typeof q.versions === "string" ? JSON.parse(q.versions) : q.versions || [],
-    status: q.status,
-    sentDate: q.sent_date,
-    validUntil: q.valid_until,
-    salespersonId: q.salesperson_id,
-    salespersonName: q.salesperson_name,
-    totalAmount: Number(q.total_amount) || 0,
-    proposalType: q.proposal_type || "Final_Technical",
-    packageTier: q.package_tier || "Standard",
-    approvalStatus: q.approval_status || "Approved",
-    discountAmount: Number(q.discount_amount) || 0,
-    discountApprovedBy: q.discount_approved_by,
-    subsidyAmount: Number(q.subsidy_amount) || 0,
-    taxableAmount: Number(q.taxable_amount) || 0,
-    gstRate: Number(q.gst_rate) || 0,
-    gstAmount: Number(q.gst_amount) || 0,
-    taxMode: q.tax_mode || "ITEMIZED",
-    totalCgst: Number(q.total_cgst) || 0,
-    totalSgst: Number(q.total_sgst) || 0,
-    totalIgst: Number(q.total_igst) || 0,
-    amountInWords: q.amount_in_words || "",
-    surveyId: q.survey_id,
-    pdfUrl: q.pdf_url,
-    convertedToProjectId: q.converted_to_project_id,
-    createdAt: q.created_at
-  };
-}
-var calculateQuotationPreview = async (req, res) => {
-  try {
-    const input = req.body;
-    const calc = calculateQuotation(input);
-    return res.json({ success: true, calculation: calc });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-};
-var getQuotations = async (req, res) => {
-  try {
-    const user = req.user;
-    let query = "SELECT * FROM quotations ORDER BY created_at DESC";
-    let params = [];
-    if (user?.role === "Customer") {
-      const custId = user.customerId || "";
-      query = `SELECT q.* FROM quotations q 
-               LEFT JOIN customers c ON (c.converted_from_lead_id = q.lead_id OR c.phone = q.customer_phone)
-               WHERE c.id = ? OR q.customer_phone = ?
-               ORDER BY q.created_at DESC`;
-      params = [custId, user?.phone || ""];
-    }
-    const [rows] = await pool.query(query, params);
-    const parsed = rows.map((q) => formatQuotation(q));
-    res.json({ success: true, quotations: parsed });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-};
-var getQuotationById = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const [rows] = await pool.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [id]);
-    if (!rows || rows.length === 0) {
-      return res.status(404).json({ success: false, error: "Quotation not found" });
-    }
-    res.json({ success: true, quotation: formatQuotation(rows[0]) });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-};
-async function createQuotationDraftInternal(connOrPool, options) {
-  const { surveyId, leadId, user, packageTier = "Premium Bifacial", discountAmount = 0, customItems } = options;
-  const [existingBySurvey] = await connOrPool.query(
-    'SELECT * FROM quotations WHERE survey_id = ? AND status != "Declined" ORDER BY created_at DESC LIMIT 1',
-    [surveyId]
-  );
-  if (existingBySurvey && existingBySurvey.length > 0) {
-    return { quotation: formatQuotation(existingBySurvey[0]), created: false };
-  }
-  if (leadId) {
-    const [existingByLead] = await connOrPool.query(
-      'SELECT * FROM quotations WHERE lead_id = ? AND status != "Declined" ORDER BY created_at DESC LIMIT 1',
-      [leadId]
-    );
-    if (existingByLead && existingByLead.length > 0) {
-      if (!existingByLead[0].survey_id) {
-        await connOrPool.query("UPDATE quotations SET survey_id = ? WHERE id = ?", [surveyId, existingByLead[0].id]);
-        existingByLead[0].survey_id = surveyId;
-      }
-      return { quotation: formatQuotation(existingByLead[0]), created: false };
-    }
-  }
-  const [surveys] = await connOrPool.query("SELECT * FROM site_surveys WHERE id = ? LIMIT 1", [surveyId]);
-  if (!surveys || surveys.length === 0) {
-    throw new Error(`Site survey ${surveyId} not found`);
-  }
-  const survey = surveys[0];
-  let lead = null;
-  const effectiveLeadId = leadId || survey.lead_id;
-  if (effectiveLeadId) {
-    const [leads] = await connOrPool.query("SELECT * FROM leads WHERE id = ? LIMIT 1", [effectiveLeadId]);
-    if (leads && leads.length > 0) {
-      lead = leads[0];
-    }
-  }
-  const capacityKw = Number(survey.recommended_kw) || Number(lead?.recommended_kw) || 5;
-  const roofType = survey.roof_type || lead?.roof_type || "RCC Flat";
-  const customerName = survey.customer_name || lead?.name || "Solar Customer";
-  const customerPhone = survey.phone || lead?.phone || "";
-  const customerAddress = survey.address || lead?.address || lead?.city || "Bengaluru, Karnataka";
-  const customerCategory = lead?.monthly_bill && Number(lead.monthly_bill) > 25e3 ? "Commercial" : "Residential";
-  const calc = calculateQuotation({
-    leadId: effectiveLeadId,
-    leadName: customerName,
-    customerPhone,
-    customerAddress,
-    customerCategory,
-    systemCapacityKw: capacityKw,
-    packageTier,
-    discountAmount,
-    surveyId,
-    isSurveyApproved: true,
-    roofType,
-    customItems
-  });
-  const [allIds] = await connOrPool.query("SELECT id FROM quotations WHERE id LIKE 'QT-2026-%'");
-  let maxNum = 20;
-  for (const row of allIds) {
-    const match = row.id.match(/QT-2026-(\d+)/);
-    if (match) {
-      const n = parseInt(match[1], 10);
-      if (n > maxNum) maxNum = n;
-    }
-  }
-  const finalId = `QT-2026-${String(maxNum + 1).padStart(5, "0")}`;
-  const versionNumber = `${finalId}-V1`;
-  const v1 = {
-    version: 1,
-    quotationNumber: versionNumber,
-    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-    items: calc.items,
-    subtotal: calc.subtotal,
-    subsidyDeduction: calc.subsidyAmount,
-    discount: calc.discountAmount,
-    taxableAmount: calc.taxableAmount,
-    gstRate: calc.gstRate,
-    gstAmount: calc.gstAmount,
-    cgstAmount: calc.cgstAmount,
-    sgstAmount: calc.sgstAmount,
-    igstAmount: calc.igstAmount,
-    taxType: calc.taxType,
-    netTotal: calc.finalContractAmount,
-    amountInWords: calc.amountInWords,
-    terms: calc.terms,
-    notes: `Techno-Commercial Proposal based on approved Technical Site Survey ${surveyId}.`
-  };
-  const validUntil = new Date(Date.now() + 864e5 * 14).toISOString().split("T")[0];
-  const salespersonId = user?.employeeId || lead?.assigned_to_id || "EMP-06";
-  const salespersonName = user?.name || lead?.assigned_to_name || "Vikram Mehta (Sales)";
-  await connOrPool.query(
-    `INSERT INTO quotations (
-      id, quotation_number, lead_id, lead_name, customer_phone, customer_address, 
-      system_capacity_kw, current_version, versions, status, sent_date, valid_until, 
-      salesperson_id, salesperson_name, total_amount, proposal_type, package_tier, 
-      subtotal, discount_amount, subsidy_amount, taxable_amount, gst_rate, gst_amount, 
-      net_total, approval_status, survey_id, tax_mode, total_cgst, total_sgst, total_igst, 
-      amount_in_words, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      finalId,
-      versionNumber,
-      effectiveLeadId || null,
-      customerName,
-      customerPhone,
-      customerAddress,
-      calc.systemCapacityKw,
-      1,
-      JSON.stringify([v1]),
-      "Draft",
-      null,
-      validUntil,
-      salespersonId,
-      salespersonName,
-      calc.finalContractAmount,
-      "Final_Technical",
-      calc.packageTier,
-      calc.subtotal,
-      calc.discountAmount,
-      calc.subsidyAmount,
-      calc.taxableAmount,
-      calc.gstRate,
-      calc.gstAmount,
-      calc.finalContractAmount,
-      calc.approvalStatus,
-      surveyId,
-      calc.taxMode,
-      calc.cgstAmount,
-      calc.sgstAmount,
-      calc.igstAmount,
-      calc.amountInWords,
-      (/* @__PURE__ */ new Date()).toISOString()
-    ]
-  );
-  await connOrPool.query("UPDATE site_surveys SET quotation_id = ? WHERE id = ?", [finalId, surveyId]);
-  let pdfUrl = `/uploads/proposals/Quotation_${versionNumber.replace(/[^a-zA-Z0-9_-]/g, "_")}.pdf`;
-  try {
-    const pdfData = {
-      quotationNumber: versionNumber,
-      versionNumber: 1,
-      createdAt: v1.createdAt,
-      validUntil,
-      leadName: customerName,
-      customerPhone,
-      customerAddress,
-      systemCapacityKw: calc.systemCapacityKw,
-      actualCapacityKwp: calc.actualCapacityKwp,
-      packageTier: calc.packageTier,
-      proposalType: "Final_Technical",
-      salespersonName,
-      taxMode: calc.taxMode,
-      taxType: calc.taxType,
-      items: calc.items,
-      subtotal: calc.subtotal,
-      discountAmount: calc.discountAmount,
-      taxableAmount: calc.taxableAmount,
-      gstRate: calc.gstRate,
-      cgstAmount: calc.cgstAmount,
-      sgstAmount: calc.sgstAmount,
-      igstAmount: calc.igstAmount,
-      gstAmount: calc.gstAmount,
-      finalContractAmount: calc.finalContractAmount,
-      amountInWords: calc.amountInWords,
-      subsidyEligible: calc.subsidyEligible,
-      subsidyAmount: calc.subsidyAmount,
-      indicativeNetCustomerCost: calc.indicativeNetCustomerCost,
-      annualGenerationKwh: calc.annualGenerationKwh,
-      annualSavingsInr: calc.annualSavingsInr,
-      lifetimeSavings25Yr: calc.lifetimeSavings25Yr,
-      simplePaybackYears: calc.simplePaybackYears,
-      terms: calc.terms
-    };
-    const resPdf = await generateProposalPdf(pdfData);
-    pdfUrl = resPdf.fileUrl;
-    await connOrPool.query("UPDATE quotations SET pdf_url = ? WHERE id = ?", [pdfUrl, finalId]);
-  } catch (pdfErr) {
-    console.warn("PDF generation in background:", pdfErr);
-  }
-  const [createdRows] = await connOrPool.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [finalId]);
-  return { quotation: formatQuotation(createdRows[0]), created: true };
-}
-var createQuotation = async (req, res) => {
-  try {
-    const body = req.body;
-    const user = req.user;
-    if (body.surveyId) {
-      const result = await createQuotationDraftInternal(pool, {
-        surveyId: body.surveyId,
-        leadId: body.leadId,
-        user,
-        packageTier: body.packageTier,
-        discountAmount: body.discountAmount,
-        customItems: body.customItems
-      });
-      return res.json({ success: true, quotation: result.quotation, alreadyExisted: !result.created });
-    }
-    let isSurveyApproved = false;
-    let surveyRef = body.surveyId;
-    if (body.leadId) {
-      const [surveys] = await pool.query(
-        "SELECT id, status, recommended_kw FROM site_surveys WHERE lead_id = ? ORDER BY created_at DESC LIMIT 1",
-        [body.leadId]
-      );
-      if (surveys && surveys.length > 0) {
-        if (surveys[0].status === "Approved" || surveys[0].status === "Completed") {
-          isSurveyApproved = true;
-          surveyRef = surveys[0].id;
-        }
-      }
-    }
-    const calc = calculateQuotation({
-      leadId: body.leadId,
-      leadName: body.leadName,
-      customerPhone: body.customerPhone,
-      customerAddress: body.customerAddress,
-      customerCategory: body.customerCategory,
-      systemCapacityKw: body.systemCapacityKw || 5,
-      packageTier: body.packageTier || "Premium Bifacial",
-      discountAmount: body.discountAmount || 0,
-      surveyId: surveyRef,
-      isSurveyApproved,
-      roofType: body.roofType,
-      customItems: body.customItems,
-      taxMode: body.taxMode,
-      taxType: body.taxType
-    });
-    const [allIds] = await pool.query("SELECT id FROM quotations WHERE id LIKE 'QT-2026-%'");
-    let maxNum = 20;
-    for (const row of allIds) {
-      const match = row.id.match(/QT-2026-(\d+)/);
-      if (match) {
-        const n = parseInt(match[1], 10);
-        if (n > maxNum) maxNum = n;
-      }
-    }
-    const finalId = `QT-2026-${String(maxNum + 1).padStart(5, "0")}`;
-    const versionNumber = `${finalId}-V1`;
-    const v1 = {
-      version: 1,
-      quotationNumber: versionNumber,
-      createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-      items: calc.items,
-      subtotal: calc.subtotal,
-      subsidyDeduction: calc.subsidyAmount,
-      discount: calc.discountAmount,
-      taxableAmount: calc.taxableAmount,
-      gstRate: calc.gstRate,
-      gstAmount: calc.gstAmount,
-      cgstAmount: calc.cgstAmount,
-      sgstAmount: calc.sgstAmount,
-      igstAmount: calc.igstAmount,
-      taxType: calc.taxType,
-      netTotal: calc.finalContractAmount,
-      amountInWords: calc.amountInWords,
-      terms: calc.terms,
-      notes: isSurveyApproved ? `Techno-Commercial Proposal based on approved Technical Site Survey ${surveyRef}.` : `Preliminary indicative solar estimate. Final capacity subject to on-site roof audit.`
-    };
-    const validUntil = new Date(Date.now() + 864e5 * 14).toISOString().split("T")[0];
-    const salespersonId = body.salespersonId || user?.employeeId || "EMP-06";
-    const salespersonName = body.salespersonName || user?.name || "Vikram Mehta (Sales)";
-    await pool.query(
-      `INSERT INTO quotations (
-        id, quotation_number, lead_id, lead_name, customer_phone, customer_address, 
-        system_capacity_kw, current_version, versions, status, sent_date, valid_until, 
-        salesperson_id, salesperson_name, total_amount, proposal_type, package_tier, 
-        subtotal, discount_amount, subsidy_amount, taxable_amount, gst_rate, gst_amount, 
-        net_total, approval_status, survey_id, tax_mode, total_cgst, total_sgst, total_igst,
-        amount_in_words, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        finalId,
-        versionNumber,
-        body.leadId || null,
-        body.leadName || "Solar Client",
-        body.customerPhone || "",
-        body.customerAddress || "",
-        calc.systemCapacityKw,
-        1,
-        JSON.stringify([v1]),
-        "Draft",
-        null,
-        validUntil,
-        salespersonId,
-        salespersonName,
-        calc.finalContractAmount,
-        calc.proposalType,
-        calc.packageTier,
-        calc.subtotal,
-        calc.discountAmount,
-        calc.subsidyAmount,
-        calc.taxableAmount,
-        calc.gstRate,
-        calc.gstAmount,
-        calc.finalContractAmount,
-        calc.approvalStatus,
-        surveyRef || null,
-        calc.taxMode,
-        calc.cgstAmount,
-        calc.sgstAmount,
-        calc.igstAmount,
-        calc.amountInWords,
-        (/* @__PURE__ */ new Date()).toISOString()
-      ]
-    );
-    if (body.leadId) {
-      await pool.query("UPDATE leads SET quotation_id = ? WHERE id = ?", [finalId, body.leadId]);
-    }
-    if (surveyRef) {
-      await pool.query("UPDATE site_surveys SET quotation_id = ? WHERE id = ?", [finalId, surveyRef]);
-    }
-    let pdfUrl = `/uploads/proposals/Quotation_${versionNumber.replace(/[^a-zA-Z0-9_-]/g, "_")}.pdf`;
-    try {
-      const pdfData = {
-        quotationNumber: versionNumber,
-        versionNumber: 1,
-        createdAt: v1.createdAt,
-        validUntil,
-        leadName: body.leadName || "Solar Client",
-        customerPhone: body.customerPhone || "",
-        customerAddress: body.customerAddress || "Bengaluru, Karnataka",
-        systemCapacityKw: calc.systemCapacityKw,
-        actualCapacityKwp: calc.actualCapacityKwp,
-        packageTier: calc.packageTier,
-        proposalType: calc.proposalType,
-        salespersonName,
-        taxMode: calc.taxMode,
-        taxType: calc.taxType,
-        items: calc.items,
-        subtotal: calc.subtotal,
-        discountAmount: calc.discountAmount,
-        taxableAmount: calc.taxableAmount,
-        gstRate: calc.gstRate,
-        cgstAmount: calc.cgstAmount,
-        sgstAmount: calc.sgstAmount,
-        igstAmount: calc.igstAmount,
-        gstAmount: calc.gstAmount,
-        finalContractAmount: calc.finalContractAmount,
-        amountInWords: calc.amountInWords,
-        subsidyEligible: calc.subsidyEligible,
-        subsidyAmount: calc.subsidyAmount,
-        indicativeNetCustomerCost: calc.indicativeNetCustomerCost,
-        annualGenerationKwh: calc.annualGenerationKwh,
-        annualSavingsInr: calc.annualSavingsInr,
-        lifetimeSavings25Yr: calc.lifetimeSavings25Yr,
-        simplePaybackYears: calc.simplePaybackYears,
-        terms: calc.terms
-      };
-      const resPdf = await generateProposalPdf(pdfData);
-      pdfUrl = resPdf.fileUrl;
-      await pool.query("UPDATE quotations SET pdf_url = ? WHERE id = ?", [pdfUrl, finalId]);
-    } catch (pdfErr) {
-      console.warn("Note: Background PDF generation queued:", pdfErr);
-    }
-    const [createdRows] = await pool.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [finalId]);
-    res.json({ success: true, quotation: formatQuotation(createdRows[0]) });
-  } catch (err) {
-    console.error("Error creating quotation:", err);
-    res.status(500).json({ success: false, error: err.message });
-  }
-};
-var createQuotationRevision = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const body = req.body;
-    const user = req.user;
-    const [rows] = await pool.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [id]);
-    if (!rows || rows.length === 0) {
-      return res.status(404).json({ success: false, error: "Quotation not found" });
-    }
-    const existing = rows[0];
-    const versions = typeof existing.versions === "string" ? JSON.parse(existing.versions) : existing.versions || [];
-    const nextVerNum = (existing.current_version || versions.length) + 1;
-    const nextVerCode = `${id}-V${nextVerNum}`;
-    const calc = calculateQuotation({
-      leadId: existing.lead_id,
-      leadName: existing.lead_name,
-      customerPhone: existing.customer_phone,
-      customerAddress: existing.customer_address,
-      systemCapacityKw: body.systemCapacityKw || existing.system_capacity_kw,
-      packageTier: body.packageTier || existing.package_tier || "Premium Bifacial",
-      discountAmount: body.discountAmount !== void 0 ? body.discountAmount : existing.discount_amount,
-      surveyId: existing.survey_id,
-      isSurveyApproved: existing.proposal_type === "Final_Technical",
-      customItems: body.customItems,
-      taxMode: body.taxMode || existing.tax_mode,
-      taxType: body.taxType
-    });
-    const newVersion = {
-      version: nextVerNum,
-      quotationNumber: nextVerCode,
-      createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-      items: calc.items,
-      subtotal: calc.subtotal,
-      subsidyDeduction: calc.subsidyAmount,
-      discount: calc.discountAmount,
-      taxableAmount: calc.taxableAmount,
-      gstRate: calc.gstRate,
-      gstAmount: calc.gstAmount,
-      cgstAmount: calc.cgstAmount,
-      sgstAmount: calc.sgstAmount,
-      igstAmount: calc.igstAmount,
-      taxType: calc.taxType,
-      netTotal: calc.finalContractAmount,
-      amountInWords: calc.amountInWords,
-      terms: calc.terms,
-      notes: body.notes || `Revision V${nextVerNum} created by ${user?.name || "Sales Rep"}.`
-    };
-    versions.push(newVersion);
-    let pdfUrl = existing.pdf_url;
-    try {
-      const pdfData = {
-        quotationNumber: nextVerCode,
-        versionNumber: nextVerNum,
-        createdAt: newVersion.createdAt,
-        validUntil: existing.valid_until,
-        leadName: existing.lead_name,
-        customerPhone: existing.customer_phone,
-        customerAddress: existing.customer_address,
-        systemCapacityKw: calc.systemCapacityKw,
-        actualCapacityKwp: calc.actualCapacityKwp,
-        packageTier: calc.packageTier,
-        proposalType: calc.proposalType,
-        salespersonName: user?.name || existing.salesperson_name,
-        taxMode: calc.taxMode,
-        taxType: calc.taxType,
-        items: calc.items,
-        subtotal: calc.subtotal,
-        discountAmount: calc.discountAmount,
-        taxableAmount: calc.taxableAmount,
-        gstRate: calc.gstRate,
-        cgstAmount: calc.cgstAmount,
-        sgstAmount: calc.sgstAmount,
-        igstAmount: calc.igstAmount,
-        gstAmount: calc.gstAmount,
-        finalContractAmount: calc.finalContractAmount,
-        amountInWords: calc.amountInWords,
-        subsidyEligible: calc.subsidyEligible,
-        subsidyAmount: calc.subsidyAmount,
-        indicativeNetCustomerCost: calc.indicativeNetCustomerCost,
-        annualGenerationKwh: calc.annualGenerationKwh,
-        annualSavingsInr: calc.annualSavingsInr,
-        lifetimeSavings25Yr: calc.lifetimeSavings25Yr,
-        simplePaybackYears: calc.simplePaybackYears,
-        terms: calc.terms
-      };
-      const resPdf = await generateProposalPdf(pdfData);
-      pdfUrl = resPdf.fileUrl;
-    } catch (e) {
-      console.warn("PDF revision generation error:", e);
-    }
-    await pool.query(
-      `UPDATE quotations SET 
-        quotation_number = ?, current_version = ?, versions = ?, total_amount = ?,
-        system_capacity_kw = ?, package_tier = ?, subtotal = ?, discount_amount = ?,
-        subsidy_amount = ?, taxable_amount = ?, gst_rate = ?, gst_amount = ?, net_total = ?,
-        approval_status = ?, tax_mode = ?, total_cgst = ?, total_sgst = ?, total_igst = ?,
-        amount_in_words = ?, pdf_url = ?
-       WHERE id = ?`,
-      [
-        nextVerCode,
-        nextVerNum,
-        JSON.stringify(versions),
-        calc.finalContractAmount,
-        calc.systemCapacityKw,
-        calc.packageTier,
-        calc.subtotal,
-        calc.discountAmount,
-        calc.subsidyAmount,
-        calc.taxableAmount,
-        calc.gstRate,
-        calc.gstAmount,
-        calc.finalContractAmount,
-        calc.approvalStatus,
-        calc.taxMode,
-        calc.cgstAmount,
-        calc.sgstAmount,
-        calc.igstAmount,
-        calc.amountInWords,
-        pdfUrl,
-        id
-      ]
-    );
-    res.json({ success: true, quotationNumber: nextVerCode, version: newVersion, pdfUrl });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-};
-var approveQuotationDiscount = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const user = req.user;
-    if (user?.role !== "Sales Manager" && user?.role !== "Super Admin") {
-      return res.status(403).json({
-        success: false,
-        error: "Only Sales Manager or Super Admin can approve commercial discounts."
-      });
-    }
-    await pool.query(
-      'UPDATE quotations SET approval_status = "Approved", discount_approved_by = ? WHERE id = ?',
-      [user.name, id]
-    );
-    res.json({ success: true, message: `Quotation ${id} approved by ${user.name}` });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-};
-var updateQuotation = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const updates = req.body;
-    const allowed = ["status", "notes", "validUntil", "sentDate", "packageTier", "versions", "totalAmount", "approvalStatus"];
-    const fields = [];
-    const values = [];
-    if (updates.status !== void 0) {
-      fields.push("status = ?");
-      values.push(updates.status);
-    }
-    if (updates.sentDate !== void 0) {
-      fields.push("sent_date = ?");
-      values.push(updates.sentDate);
-    }
-    if (updates.validUntil !== void 0) {
-      fields.push("valid_until = ?");
-      values.push(updates.validUntil);
-    }
-    if (updates.packageTier !== void 0) {
-      fields.push("package_tier = ?");
-      values.push(updates.packageTier);
-    }
-    if (updates.notes !== void 0) {
-      const [curr] = await pool.query("SELECT versions FROM quotations WHERE id = ? LIMIT 1", [id]);
-      if (curr && curr.length > 0) {
-        const v = typeof curr[0].versions === "string" ? JSON.parse(curr[0].versions) : curr[0].versions;
-        if (v && v.length > 0) {
-          v[v.length - 1].notes = updates.notes;
-          fields.push("versions = ?");
-          values.push(JSON.stringify(v));
-        }
-      }
-    }
-    if (updates.versions !== void 0) {
-      fields.push("versions = ?");
-      values.push(JSON.stringify(updates.versions));
-    }
-    if (updates.totalAmount !== void 0) {
-      fields.push("total_amount = ?");
-      values.push(updates.totalAmount);
-    }
-    if (updates.approvalStatus !== void 0) {
-      fields.push("approval_status = ?");
-      values.push(updates.approvalStatus);
-    }
-    if (fields.length > 0) {
-      values.push(id);
-      await pool.query(`UPDATE quotations SET ${fields.join(", ")} WHERE id = ?`, values);
-    }
-    res.json({ success: true, id, updates });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-};
-var editQuotation = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const body = req.body;
-    const user = req.user;
-    const [rows] = await pool.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [id]);
-    if (!rows || rows.length === 0) {
-      return res.status(404).json({ success: false, error: "Quotation not found" });
-    }
-    const existing = rows[0];
-    const systemCapacityKw = body.systemCapacityKw || existing.system_capacity_kw;
-    const packageTier = body.packageTier || existing.package_tier || "Premium Bifacial";
-    const discountAmount = body.discountAmount !== void 0 ? Number(body.discountAmount) : Number(existing.discount_amount);
-    const customItems = body.customItems;
-    const calc = calculateQuotation({
-      leadId: existing.lead_id,
-      leadName: existing.lead_name,
-      customerPhone: existing.customer_phone,
-      customerAddress: existing.customer_address,
-      customerCategory: existing.customer_category,
-      systemCapacityKw,
-      packageTier,
-      discountAmount,
-      surveyId: existing.survey_id,
-      isSurveyApproved: existing.proposal_type === "Final_Technical",
-      customItems,
-      taxMode: body.taxMode || existing.tax_mode,
-      taxType: body.taxType
-    });
-    let versions = typeof existing.versions === "string" ? JSON.parse(existing.versions) : existing.versions || [];
-    if (!versions || versions.length === 0) {
-      versions = [{
-        version: 1,
-        quotationNumber: existing.quotation_number,
-        createdAt: existing.created_at || (/* @__PURE__ */ new Date()).toISOString(),
-        items: calc.items,
-        subtotal: calc.subtotal,
-        subsidyDeduction: calc.subsidyAmount,
-        discount: calc.discountAmount,
-        taxableAmount: calc.taxableAmount,
-        gstRate: calc.gstRate,
-        gstAmount: calc.gstAmount,
-        cgstAmount: calc.cgstAmount,
-        sgstAmount: calc.sgstAmount,
-        igstAmount: calc.igstAmount,
-        taxType: calc.taxType,
-        netTotal: calc.finalContractAmount,
-        amountInWords: calc.amountInWords,
-        terms: calc.terms,
-        notes: body.notes || "Updated quotation draft with custom BOM."
-      }];
-    } else {
-      const lastIdx = versions.length - 1;
-      versions[lastIdx] = {
-        ...versions[lastIdx],
-        items: calc.items,
-        subtotal: calc.subtotal,
-        subsidyDeduction: calc.subsidyAmount,
-        discount: calc.discountAmount,
-        taxableAmount: calc.taxableAmount,
-        gstRate: calc.gstRate,
-        gstAmount: calc.gstAmount,
-        cgstAmount: calc.cgstAmount,
-        sgstAmount: calc.sgstAmount,
-        igstAmount: calc.igstAmount,
-        taxType: calc.taxType,
-        netTotal: calc.finalContractAmount,
-        amountInWords: calc.amountInWords,
-        terms: calc.terms,
-        notes: body.notes || versions[lastIdx].notes
-      };
-    }
-    let pdfUrl = existing.pdf_url;
-    try {
-      const pdfData = {
-        quotationNumber: existing.quotation_number,
-        versionNumber: existing.current_version || 1,
-        createdAt: existing.created_at,
-        validUntil: existing.valid_until,
-        leadName: existing.lead_name,
-        customerPhone: existing.customer_phone,
-        customerAddress: existing.customer_address,
-        systemCapacityKw: calc.systemCapacityKw,
-        actualCapacityKwp: calc.actualCapacityKwp,
-        packageTier: calc.packageTier,
-        proposalType: calc.proposalType,
-        salespersonName: existing.salesperson_name || user?.name || "Vikram Mehta (Sales)",
-        taxMode: calc.taxMode,
-        taxType: calc.taxType,
-        items: calc.items,
-        subtotal: calc.subtotal,
-        discountAmount: calc.discountAmount,
-        taxableAmount: calc.taxableAmount,
-        gstRate: calc.gstRate,
-        cgstAmount: calc.cgstAmount,
-        sgstAmount: calc.sgstAmount,
-        igstAmount: calc.igstAmount,
-        gstAmount: calc.gstAmount,
-        finalContractAmount: calc.finalContractAmount,
-        amountInWords: calc.amountInWords,
-        subsidyEligible: calc.subsidyEligible,
-        subsidyAmount: calc.subsidyAmount,
-        indicativeNetCustomerCost: calc.indicativeNetCustomerCost,
-        annualGenerationKwh: calc.annualGenerationKwh,
-        annualSavingsInr: calc.annualSavingsInr,
-        lifetimeSavings25Yr: calc.lifetimeSavings25Yr,
-        simplePaybackYears: calc.simplePaybackYears,
-        terms: calc.terms
-      };
-      const resPdf = await generateProposalPdf(pdfData);
-      pdfUrl = resPdf.fileUrl;
-    } catch (e) {
-      console.warn("PDF regeneration error:", e);
-    }
-    await pool.query(
-      `UPDATE quotations SET
-        system_capacity_kw = ?, package_tier = ?, discount_amount = ?,
-        subtotal = ?, taxable_amount = ?, gst_rate = ?, gst_amount = ?,
-        total_amount = ?, net_total = ?, total_cgst = ?, total_sgst = ?,
-        total_igst = ?, amount_in_words = ?, approval_status = ?,
-        versions = ?, pdf_url = ?
-       WHERE id = ?`,
-      [
-        calc.systemCapacityKw,
-        calc.packageTier,
-        calc.discountAmount,
-        calc.subtotal,
-        calc.taxableAmount,
-        calc.gstRate,
-        calc.gstAmount,
-        calc.finalContractAmount,
-        calc.finalContractAmount,
-        calc.cgstAmount,
-        calc.sgstAmount,
-        calc.igstAmount,
-        calc.amountInWords,
-        calc.approvalStatus,
-        JSON.stringify(versions),
-        pdfUrl,
-        id
-      ]
-    );
-    const [updated] = await pool.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [id]);
-    res.json({ success: true, quotation: formatQuotation(updated[0]) });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-};
-var recordCustomerAcceptance = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { acceptanceNotes, clientPoNumber } = req.body;
-    const user = req.user;
-    const [rows] = await pool.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [id]);
-    if (!rows || rows.length === 0) {
-      return res.status(404).json({ success: false, error: "Quotation not found" });
-    }
-    const quote = rows[0];
-    if (quote.approval_status === "Pending_Approval") {
-      return res.status(400).json({
-        success: false,
-        error: "Cannot record customer acceptance: Quotation discount is pending Sales Manager approval."
-      });
-    }
-    await pool.query(
-      `UPDATE quotations SET 
-        status = 'Customer_Accepted',
-        notes = CONCAT(COALESCE(notes, ''), ?),
-        sent_date = COALESCE(sent_date, NOW())
-       WHERE id = ?`,
-      [`
-[Customer Accepted: ${(/* @__PURE__ */ new Date()).toLocaleDateString("en-IN")}] Recorded by ${user?.name || "Sales"}. PO: ${clientPoNumber || "N/A"}. ${acceptanceNotes || ""}`, id]
-    );
-    const [updated] = await pool.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [id]);
-    res.json({ success: true, quotation: formatQuotation(updated[0]) });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-};
-var acceptQuotation = async (req, res) => {
-  const conn = await pool.getConnection();
-  try {
-    const { id } = req.params;
-    const user = req.user;
-    if (user && user.role !== "Project Manager" && user.role !== "Super Admin") {
-      conn.release();
-      return res.status(403).json({
-        success: false,
-        error: "Access denied: Only Project Managers and Super Admins are authorized to convert accepted quotations into live EPC projects."
-      });
-    }
-    const [rows] = await conn.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [id]);
-    if (!rows || rows.length === 0) {
-      conn.release();
-      return res.status(404).json({ success: false, error: "Quotation not found" });
-    }
-    const quote = rows[0];
-    if (quote.approval_status === "Pending_Approval") {
-      conn.release();
-      return res.status(400).json({
-        success: false,
-        error: "Cannot accept quotation: Discount exceeds authorized threshold and is pending manager approval."
-      });
-    }
-    if (quote.converted_to_project_id) {
-      const [existingProject] = await conn.query(
-        "SELECT * FROM projects WHERE id = ? LIMIT 1",
-        [quote.converted_to_project_id]
-      );
-      conn.release();
-      if (existingProject && existingProject.length > 0) {
-        return res.json({
-          success: true,
-          message: "Quotation was already accepted and converted to project.",
-          alreadyConverted: true,
-          projectId: quote.converted_to_project_id,
-          project: existingProject[0]
-        });
-      }
-    }
-    await conn.beginTransaction();
-    const quoteTotal = Number(quote.total_amount) || 0;
-    const capacityKw = Number(quote.system_capacity_kw) || 5;
-    const advanceAmount = Math.round(quoteTotal * 0.9);
-    let customerId = "";
-    let customerName = quote.lead_name;
-    let customerPhone = quote.customer_phone;
-    let customerAddress = quote.customer_address;
-    const [existingCust] = await conn.query(
-      "SELECT id, name, phone, address FROM customers WHERE converted_from_lead_id = ? OR phone = ? LIMIT 1",
-      [quote.lead_id, quote.customer_phone]
-    );
-    if (existingCust && existingCust.length > 0) {
-      customerId = existingCust[0].id;
-      customerName = existingCust[0].name;
-    } else {
-      const [allCusts] = await conn.query("SELECT id FROM customers WHERE id LIKE 'CUST-2026-%'");
-      let maxCustNum = 20;
-      for (const c of allCusts) {
-        const match = c.id.match(/CUST-2026-(\d+)/);
-        if (match) {
-          const n = parseInt(match[1], 10);
-          if (n > maxCustNum) maxCustNum = n;
-        }
-      }
-      customerId = `CUST-2026-${String(maxCustNum + 1).padStart(3, "0")}`;
-      await conn.query(
-        `INSERT INTO customers (
-          id, name, email, phone, address, city, state, pincode, 
-          consumer_number_discom, discom_name, converted_from_lead_id, 
-          total_system_kw, total_order_value, paid_amount, balance_amount, 
-          status, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          customerId,
-          customerName,
-          `${customerName.toLowerCase().replace(/\s+/g, ".")}@example.com`,
-          customerPhone,
-          customerAddress || "Site Address",
-          "Bengaluru",
-          "Karnataka",
-          "560001",
-          `DISCOM-${Math.floor(1e6 + Math.random() * 9e6)}`,
-          "BESCOM",
-          quote.lead_id,
-          capacityKw,
-          quoteTotal,
-          0,
-          quoteTotal,
-          "Under Installation",
-          (/* @__PURE__ */ new Date()).toISOString()
-        ]
-      );
-    }
-    const [allProjs] = await conn.query("SELECT id FROM projects WHERE id LIKE 'PROJECT-2026-%' OR id LIKE 'PRJ-2026-%'");
-    let maxProjNum = 20;
-    for (const p of allProjs) {
-      const match = p.id.match(/(?:PROJECT|PRJ)-2026-(\d+)/);
-      if (match) {
-        const n = parseInt(match[1], 10);
-        if (n > maxProjNum) maxProjNum = n;
-      }
-    }
-    const projectId = `PROJECT-2026-${String(maxProjNum + 1).padStart(3, "0")}`;
-    const targetDate = new Date(Date.now() + 864e5 * 25).toISOString().split("T")[0];
-    const initialTasks = [
-      { id: `PT-${Date.now()}-1`, title: "DISCOM Net-metering application & sanction", stage: "Documentation", isCompleted: false, assignedRole: "Project Manager", assignedToName: "Karthik Raja", dueDate: new Date(Date.now() + 864e5 * 3).toISOString().split("T")[0] },
-      { id: `PT-${Date.now()}-2`, title: "Warehouse material packing and dispatch check", stage: "Material Ready", isCompleted: false, assignedRole: "Project Manager", assignedToName: "Karthik Raja", dueDate: new Date(Date.now() + 864e5 * 5).toISOString().split("T")[0] },
-      { id: `PT-${Date.now()}-3`, title: "HDG structure foundation & anchor bolting", stage: "Installation Scheduled", isCompleted: false, assignedRole: "Installation Team", assignedToName: "Muthu Vel", dueDate: new Date(Date.now() + 864e5 * 8).toISOString().split("T")[0] },
-      { id: `PT-${Date.now()}-4`, title: "Module mounting & DC string conduit wiring", stage: "Installation In Progress", isCompleted: false, assignedRole: "Installation Team", assignedToName: "Muthu Vel", dueDate: new Date(Date.now() + 864e5 * 12).toISOString().split("T")[0] }
-    ];
-    const initialChecklist = {
-      structureFastening: false,
-      moduleClampingTorque: false,
-      inverterWallMounting: false,
-      dcWiringConduit: false,
-      acWiringArmoured: false,
-      chemicalEarthingPits: false,
-      lightningArrester: false,
-      dcdbProtectionFuses: false,
-      acdbMccbIsolator: false,
-      remoteMonitoringConfigured: false,
-      vocAndIscTesting: false,
-      safetySignagesAffixed: false,
-      photosUploaded: []
-    };
-    await conn.query(
-      `INSERT INTO projects (
-        id, customer_id, customer_name, customer_phone, customer_address, 
-        quotation_id, capacity_kw, total_amount, stage, start_date, 
-        target_completion_date, project_manager_id, project_manager_name, 
-        installation_lead_id, installation_lead_name, checklist, tasks, 
-        inventory_reserved, discom_sanction_number, notes, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        projectId,
-        customerId,
-        customerName,
-        customerPhone,
-        customerAddress,
-        quote.id,
-        capacityKw,
-        quoteTotal,
-        "Booking",
-        (/* @__PURE__ */ new Date()).toISOString().split("T")[0],
-        targetDate,
-        "EMP-04",
-        "Karthik Raja",
-        "EMP-05",
-        "Muthu Vel",
-        JSON.stringify(initialChecklist),
-        JSON.stringify(initialTasks),
-        1,
-        `BESCOM/SANCTION/${Date.now().toString().slice(-4)}`,
-        `Converted deal from Quotation ${quote.quotation_number}. 40% Advance invoice issued (Unpaid).`,
-        (/* @__PURE__ */ new Date()).toISOString()
-      ]
-    );
-    const [allInvs] = await conn.query("SELECT id FROM invoices WHERE id LIKE 'INV-2026-%'");
-    let maxInvNum = 20;
-    for (const inv of allInvs) {
-      const match = inv.id.match(/INV-2026-(\d+)/);
-      if (match) {
-        const n = parseInt(match[1], 10);
-        if (n > maxInvNum) maxInvNum = n;
-      }
-    }
-    const invoiceId = `INV-2026-${String(maxInvNum + 1).padStart(3, "0")}`;
-    const invoiceNumber = `INV-2026-00${String(maxInvNum + 1).padStart(3, "0")}`;
-    const subtotalInv = Math.round(advanceAmount / 1.138);
-    const gstInv = advanceAmount - subtotalInv;
-    const invoiceItems = [
-      {
-        description: `90% Milestone Advance for ${capacityKw} kW Solar EPC Plant (Booking & Procurement)`,
-        hsnCode: "995465",
-        quantity: 1,
-        rate: subtotalInv,
-        amount: subtotalInv
-      }
-    ];
-    await conn.query(
-      `INSERT INTO invoices (
-        id, invoice_number, project_id, customer_id, customer_name, customer_phone, 
-        issue_date, due_date, items, subtotal, cgst, sgst, igst, total_amount, 
-        paid_amount, balance_due, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        invoiceId,
-        invoiceNumber,
-        projectId,
-        customerId,
-        customerName,
-        customerPhone,
-        (/* @__PURE__ */ new Date()).toISOString().split("T")[0],
-        new Date(Date.now() + 864e5 * 7).toISOString().split("T")[0],
-        JSON.stringify(invoiceItems),
-        subtotalInv,
-        Math.round(gstInv / 2),
-        Math.round(gstInv / 2),
-        0,
-        advanceAmount,
-        0,
-        advanceAmount,
-        "Unpaid"
-      ]
-    );
-    await conn.query(
-      'UPDATE quotations SET status = "Converted_To_Project", converted_to_project_id = ? WHERE id = ?',
-      [projectId, id]
-    );
-    if (quote.lead_id) {
-      await conn.query('UPDATE leads SET status = "Won" WHERE id = ?', [quote.lead_id]);
-    }
-    await conn.commit();
-    conn.release();
-    const [projRows] = await pool.query("SELECT * FROM projects WHERE id = ? LIMIT 1", [projectId]);
-    res.json({
-      success: true,
-      message: `Quotation accepted! Converted to Project ${projectId} and Advance Invoice ${invoiceNumber} created.`,
-      projectId,
-      project: projRows[0],
-      invoiceId
-    });
-  } catch (err) {
-    await conn.rollback();
-    conn.release();
-    console.error("Accept quotation transaction error:", err);
-    res.status(500).json({ success: false, error: err.message });
-  }
-};
-var downloadProposalPdf = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const user = req.user;
-    const [rows] = await pool.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [id]);
-    if (!rows || rows.length === 0) {
-      return res.status(404).json({ success: false, error: "Quotation not found" });
-    }
-    const q = rows[0];
-    if (user?.role === "Customer" && user?.phone !== q.customer_phone) {
-      return res.status(403).json({ success: false, error: "Unauthorized to download this quotation." });
-    }
-    const versions = typeof q.versions === "string" ? JSON.parse(q.versions) : q.versions || [];
-    const activeVer = versions.find((v) => v.version === q.current_version) || versions[versions.length - 1] || {};
-    const calc = calculateQuotation({
-      systemCapacityKw: Number(q.system_capacity_kw) || 5,
-      packageTier: q.package_tier || "Premium Bifacial",
-      discountAmount: Number(q.discount_amount) || 0,
-      isSurveyApproved: q.proposal_type === "Final_Technical",
-      taxMode: q.tax_mode,
-      customerAddress: q.customer_address
-    });
-    const pdfData = {
-      quotationNumber: q.quotation_number || `${q.id}-V1`,
-      versionNumber: q.current_version || 1,
-      createdAt: q.created_at,
-      validUntil: q.valid_until || new Date(Date.now() + 864e5 * 14).toISOString().split("T")[0],
-      leadName: q.lead_name,
-      customerPhone: q.customer_phone,
-      customerAddress: q.customer_address || "Bengaluru, Karnataka",
-      systemCapacityKw: Number(q.system_capacity_kw) || 5,
-      actualCapacityKwp: calc.actualCapacityKwp,
-      packageTier: q.package_tier || "Premium Bifacial",
-      proposalType: q.proposal_type || "Final_Technical",
-      salespersonName: q.salesperson_name || "Vikram Mehta (Sales)",
-      taxMode: q.tax_mode || calc.taxMode,
-      taxType: activeVer.taxType || calc.taxType,
-      items: activeVer.items || calc.items,
-      subtotal: Number(q.subtotal) || calc.subtotal,
-      discountAmount: Number(q.discount_amount) || 0,
-      taxableAmount: Number(q.taxable_amount) || calc.taxableAmount,
-      gstRate: Number(q.gst_rate) || calc.gstRate,
-      cgstAmount: Number(q.total_cgst) || calc.cgstAmount,
-      sgstAmount: Number(q.total_sgst) || calc.sgstAmount,
-      igstAmount: Number(q.total_igst) || calc.igstAmount,
-      gstAmount: Number(q.gst_amount) || calc.gstAmount,
-      finalContractAmount: Number(q.total_amount) || calc.finalContractAmount,
-      amountInWords: q.amount_in_words || calc.amountInWords,
-      subsidyEligible: calc.subsidyEligible,
-      subsidyAmount: Number(q.subsidy_amount) || calc.subsidyAmount,
-      indicativeNetCustomerCost: calc.indicativeNetCustomerCost,
-      annualGenerationKwh: calc.annualGenerationKwh,
-      annualSavingsInr: calc.annualSavingsInr,
-      lifetimeSavings25Yr: calc.lifetimeSavings25Yr,
-      simplePaybackYears: calc.simplePaybackYears,
-      terms: activeVer.terms || calc.terms
-    };
-    const { filePath, fileUrl } = await generateProposalPdf(pdfData);
-    await pool.query("UPDATE quotations SET pdf_url = ? WHERE id = ?", [fileUrl, id]);
-    const isDownload = req.query.download === "true";
-    const filename = `AB_Energy_Proposal_${pdfData.quotationNumber.replace(/[^a-zA-Z0-9_-]/g, "_")}.pdf`;
-    res.setHeader("Content-Type", "application/pdf");
-    if (isDownload) {
-      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-    } else {
-      res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
-    }
-    return res.sendFile(path2.resolve(filePath));
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-};
-
-// server/controllers/surveys.controller.ts
 function formatPhoto(p) {
   return {
     id: p.id,
@@ -2071,6 +58,7 @@ function formatSurvey(s, photos = [], history = []) {
     phone: s.phone,
     address: s.address,
     scheduledDate: s.scheduled_date,
+    scheduledTime: s.scheduled_time || "10:00 AM - 12:00 PM",
     engineerId: s.engineer_id,
     engineerName: s.engineer_name,
     status: s.status,
@@ -2137,6 +125,8 @@ function formatSurvey(s, photos = [], history = []) {
     reviewComments: s.review_comments || null,
     quotationId: s.quotation_id || null,
     isDraft: Boolean(s.is_draft),
+    // Custom Fields added by Survey Engineer
+    customFields: typeof s.custom_fields === "string" ? JSON.parse(s.custom_fields) : s.custom_fields || [],
     // Attached photos and audit review history
     photos: photos.map(formatPhoto),
     reviewHistory: history.map((h) => ({
@@ -2171,12 +161,12 @@ async function generateUniqueSurveyId() {
 }
 var getSurveys = async (req, res) => {
   try {
-    const user = req.user;
+    const user2 = req.user;
     let query = "SELECT * FROM site_surveys";
     const params = [];
-    if (user && user.role === "Customer") {
+    if (user2 && user2.role === "Customer") {
       query += " WHERE lead_id IN (SELECT id FROM leads WHERE email = ? OR phone = ?) OR customer_name = ?";
-      params.push(user.email || "", user.phone || "", user.name || "");
+      params.push(user2.email || "", user2.phone || "", user2.name || "");
     }
     query += " ORDER BY scheduled_date DESC";
     const [surveys] = await pool.query(query, params);
@@ -2236,9 +226,10 @@ var createSurvey = async (req, res) => {
       }
     }
     const scheduledDate = s.scheduledDate || (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+    const scheduledTime = s.scheduledTime || "10:00 AM - 12:00 PM";
     await pool.query(
       `INSERT INTO site_surveys (
-        id, lead_id, lead_name, customer_name, phone, address, scheduled_date, 
+        id, lead_id, lead_name, customer_name, phone, address, scheduled_date, scheduled_time,
         engineer_id, engineer_name, status, roof_area_sqft, shadow_free_area_sqft, 
         roof_type, azimuth_angle, tilt_angle, existing_sanction_load_kw, grid_phase, 
         distance_to_lt_panel_meters, recommended_kw, panel_quantity, 
@@ -2256,7 +247,7 @@ var createSurvey = async (req, res) => {
         cable_specification, unresolved_technical_issues, engineer_recommendations,
         is_draft
       ) VALUES (
-        ?, ?, ?, ?, ?, ?, ?, 
+        ?, ?, ?, ?, ?, ?, ?, ?, 
         ?, ?, ?, ?, ?, 
         ?, ?, ?, ?, ?, 
         ?, ?, ?, 
@@ -2282,6 +273,7 @@ var createSurvey = async (req, res) => {
         s.phone,
         s.address,
         scheduledDate,
+        scheduledTime,
         s.engineerId || null,
         s.engineerName || "Vikram Mehta",
         s.status || "Scheduled",
@@ -2405,6 +397,7 @@ var updateSurvey = async (req, res) => {
       cable_specification: s.cableSpecification !== void 0 ? s.cableSpecification : current.cable_specification,
       unresolved_technical_issues: s.unresolvedTechnicalIssues !== void 0 ? s.unresolvedTechnicalIssues : current.unresolved_technical_issues,
       engineer_recommendations: s.engineerRecommendations !== void 0 ? s.engineerRecommendations : current.engineer_recommendations,
+      custom_fields: s.customFields !== void 0 ? typeof s.customFields === "string" ? s.customFields : JSON.stringify(s.customFields) : current.custom_fields,
       is_draft: s.isDraft !== void 0 ? s.isDraft ? 1 : 0 : 1
     };
     if (s.status !== void 0) {
@@ -2434,7 +427,7 @@ var updateSurvey = async (req, res) => {
 var uploadSurveyPhoto = async (req, res) => {
   try {
     const { id: surveyId } = req.params;
-    const user = req.user;
+    const user2 = req.user;
     const [surveys] = await pool.query("SELECT * FROM site_surveys WHERE id = ?", [surveyId]);
     if (!surveys || surveys.length === 0) {
       return res.status(404).json({ success: false, error: "Survey not found" });
@@ -2454,9 +447,9 @@ var uploadSurveyPhoto = async (req, res) => {
       return res.status(400).json({ success: false, error: "Photo category is required" });
     }
     const photoId = `PH-${Date.now()}-${Math.floor(Math.random() * 1e4)}`;
-    const uploadDir = path3.join(process.cwd(), "uploads", "surveys", surveyId);
-    if (!fs2.existsSync(uploadDir)) {
-      fs2.mkdirSync(uploadDir, { recursive: true });
+    const uploadDir = path.join(process.cwd(), "uploads", "surveys", surveyId);
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
     }
     let filePath = "";
     let fileSize = 0;
@@ -2472,8 +465,8 @@ var uploadSurveyPhoto = async (req, res) => {
         buffer = Buffer.from(base64Data, "base64");
       }
       const safeFileName = `${photoId}.${ext}`;
-      const fullDiskPath = path3.join(uploadDir, safeFileName);
-      fs2.writeFileSync(fullDiskPath, buffer);
+      const fullDiskPath = path.join(uploadDir, safeFileName);
+      fs.writeFileSync(fullDiskPath, buffer);
       filePath = `/uploads/surveys/${surveyId}/${safeFileName}`;
       fileSize = buffer.length;
     } else if (req.file) {
@@ -2501,8 +494,8 @@ var uploadSurveyPhoto = async (req, res) => {
         fileSize,
         mimeType,
         caption,
-        user?.id || "EMP-03",
-        user?.name || "Rahul Sharma",
+        user2?.id || "EMP-03",
+        user2?.name || "Rahul Sharma",
         capturedAt,
         uploadedAt,
         hasValidGps ? Number(latitude) : null,
@@ -2529,10 +522,10 @@ var deleteSurveyPhoto = async (req, res) => {
       return res.json({ success: true, message: "Photo already removed", photoId });
     }
     const photo = photos[0];
-    const fullPath = path3.join(process.cwd(), photo.file_path);
-    if (fs2.existsSync(fullPath)) {
+    const fullPath = path.join(process.cwd(), photo.file_path);
+    if (fs.existsSync(fullPath)) {
       try {
-        fs2.unlinkSync(fullPath);
+        fs.unlinkSync(fullPath);
       } catch (e) {
         console.warn("Failed to delete file from disk:", e.message);
       }
@@ -2546,12 +539,75 @@ var deleteSurveyPhoto = async (req, res) => {
 var submitSurveyForReview = async (req, res) => {
   try {
     const { id } = req.params;
-    const user = req.user;
+    const user2 = req.user;
+    const { comments, bypassWithExceptions, updates } = req.body;
     const [rows] = await pool.query("SELECT * FROM site_surveys WHERE id = ?", [id]);
     if (!rows || rows.length === 0) {
       return res.status(404).json({ success: false, error: "Survey not found" });
     }
-    const survey = rows[0];
+    const current = rows[0];
+    if (updates && typeof updates === "object") {
+      const s = updates;
+      const updateMap = {
+        roof_area_sqft: s.roofAreaSqFt !== void 0 ? s.roofAreaSqFt : current.roof_area_sqft,
+        shadow_free_area_sqft: s.shadowFreeAreaSqFt !== void 0 ? s.shadowFreeAreaSqFt : current.shadow_free_area_sqft,
+        roof_type: s.roofType !== void 0 ? s.roofType : current.roof_type,
+        azimuth_angle: s.azimuthAngle !== void 0 ? s.azimuthAngle : current.azimuth_angle,
+        tilt_angle: s.tiltAngle !== void 0 ? s.tiltAngle : current.tilt_angle,
+        existing_sanction_load_kw: s.existingSanctionLoadKw !== void 0 ? s.existingSanctionLoadKw : current.existing_sanction_load_kw,
+        grid_phase: s.gridPhase !== void 0 ? s.gridPhase : current.grid_phase,
+        distance_to_lt_panel_meters: s.distanceToLtPanelMeters !== void 0 ? s.distanceToLtPanelMeters : current.distance_to_lt_panel_meters,
+        recommended_kw: s.recommendedKw !== void 0 ? s.recommendedKw : current.recommended_kw,
+        panel_quantity: s.panelQuantity !== void 0 ? s.panelQuantity : current.panel_quantity,
+        estimated_generation_units_per_year: s.estimatedGenerationUnitsPerYear !== void 0 ? s.estimatedGenerationUnitsPerYear : current.estimated_generation_units_per_year,
+        estimated_annual_savings: s.estimatedAnnualSavings !== void 0 ? s.estimatedAnnualSavings : current.estimated_annual_savings,
+        estimated_cost: s.estimatedCost !== void 0 ? s.estimatedCost : current.estimated_cost,
+        payback_years: s.paybackYears !== void 0 ? s.paybackYears : current.payback_years,
+        co2_reduction_tons_per_year: s.co2ReductionTonsPerYear !== void 0 ? s.co2ReductionTonsPerYear : current.co2_reduction_tons_per_year,
+        notes: s.notes !== void 0 ? s.notes : current.notes,
+        roof_dimensions_shape: s.roofDimensionsShape !== void 0 ? s.roofDimensionsShape : current.roof_dimensions_shape,
+        surface_condition: s.surfaceCondition !== void 0 ? s.surfaceCondition : current.surface_condition,
+        measurement_status: s.measurementStatus !== void 0 ? s.measurementStatus : current.measurement_status,
+        obstacles_water_tank: s.obstaclesWaterTank !== void 0 ? s.obstaclesWaterTank ? 1 : 0 : current.obstacles_water_tank,
+        obstacles_mumty: s.obstaclesMumty !== void 0 ? s.obstaclesMumty ? 1 : 0 : current.obstacles_mumty,
+        obstacles_parapet: s.obstaclesParapet !== void 0 ? s.obstaclesParapet ? 1 : 0 : current.obstacles_parapet,
+        obstacles_trees_neighbors: s.obstaclesTreesNeighbors !== void 0 ? s.obstaclesTreesNeighbors ? 1 : 0 : current.obstacles_trees_neighbors,
+        obstacles_other: s.obstaclesOther !== void 0 ? s.obstaclesOther : current.obstacles_other,
+        access_pathways_clearance: s.accessPathwaysClearance !== void 0 ? s.accessPathwaysClearance : current.access_pathways_clearance,
+        main_meter_status: s.mainMeterStatus !== void 0 ? s.mainMeterStatus : current.main_meter_status,
+        main_meter_notes: s.mainMeterNotes !== void 0 ? s.mainMeterNotes : current.main_meter_notes,
+        db_condition: s.dbCondition !== void 0 ? s.dbCondition : current.db_condition,
+        earthing_status: s.earthingStatus !== void 0 ? s.earthingStatus : current.earthing_status,
+        earthing_resistance_ohms: s.earthingResistanceOhms !== void 0 ? s.earthingResistanceOhms : current.earthing_resistance_ohms,
+        proposed_inverter_location: s.proposedInverterLocation !== void 0 ? s.proposedInverterLocation : current.proposed_inverter_location,
+        electrical_constraints: s.electricalConstraints !== void 0 ? s.electricalConstraints : current.electrical_constraints,
+        electrical_upgrades_needed: s.electricalUpgradesNeeded !== void 0 ? s.electricalUpgradesNeeded : current.electrical_upgrades_needed,
+        structural_concerns: s.structuralConcerns !== void 0 ? s.structuralConcerns : current.structural_concerns,
+        visible_cracks_damage: s.visibleCracksDamage !== void 0 ? s.visibleCracksDamage ? 1 : 0 : current.visible_cracks_damage,
+        waterproofing_status: s.waterproofingStatus !== void 0 ? s.waterproofingStatus : current.waterproofing_status,
+        mounting_structure_type: s.mountingStructureType !== void 0 ? s.mountingStructureType : current.mounting_structure_type,
+        shading_sources: s.shadingSources !== void 0 ? s.shadingSources : current.shading_sources,
+        shading_affected_area_sqft: s.shadingAffectedAreaSqFt !== void 0 ? s.shadingAffectedAreaSqFt : current.shading_affected_area_sqft,
+        structural_engineer_approval_required: s.structuralEngineerApprovalRequired !== void 0 ? s.structuralEngineerApprovalRequired ? 1 : 0 : current.structural_engineer_approval_required,
+        feasibility_verdict: s.feasibilityVerdict !== void 0 ? s.feasibilityVerdict : current.feasibility_verdict,
+        proposed_panel_wattage: s.proposedPanelWattage !== void 0 ? s.proposedPanelWattage : current.proposed_panel_wattage,
+        inverter_recommendation: s.inverterRecommendation !== void 0 ? s.inverterRecommendation : current.inverter_recommendation,
+        cable_specification: s.cableSpecification !== void 0 ? s.cableSpecification : current.cable_specification,
+        unresolved_technical_issues: s.unresolvedTechnicalIssues !== void 0 ? s.unresolvedTechnicalIssues : current.unresolved_technical_issues,
+        engineer_recommendations: s.engineerRecommendations !== void 0 ? s.engineerRecommendations : current.engineer_recommendations,
+        custom_fields: s.customFields !== void 0 ? typeof s.customFields === "string" ? s.customFields : JSON.stringify(s.customFields) : current.custom_fields
+      };
+      const setClauses = [];
+      const values = [];
+      for (const [key, val] of Object.entries(updateMap)) {
+        setClauses.push(`${key} = ?`);
+        values.push(val);
+      }
+      values.push(id);
+      await pool.query(`UPDATE site_surveys SET ${setClauses.join(", ")} WHERE id = ?`, values);
+    }
+    const [freshRows] = await pool.query("SELECT * FROM site_surveys WHERE id = ?", [id]);
+    const survey = freshRows[0];
     const errors = [];
     if (!survey.roof_area_sqft || Number(survey.roof_area_sqft) <= 0) {
       errors.push("Total roof area must be greater than 0 sq.ft");
@@ -2567,7 +623,7 @@ var submitSurveyForReview = async (req, res) => {
     if (!categories.has("full_rooftop_view") && !categories.has("mounting_area")) {
       errors.push("Mandatory photograph missing: Full Rooftop View or Mounting Area");
     }
-    if (errors.length > 0 && !req.body.bypassWithExceptions) {
+    if (errors.length > 0 && !bypassWithExceptions) {
       return res.status(400).json({
         success: false,
         error: "Survey completion checklist failed",
@@ -2582,13 +638,13 @@ var submitSurveyForReview = async (req, res) => {
            submitted_by_id = ?, 
            is_draft = 0 
        WHERE id = ?`,
-      [submittedAt, user?.id || "EMP-03", id]
+      [submittedAt, user2?.id || "EMP-03", id]
     );
     const historyId = `HIST-${Date.now()}`;
     await pool.query(
       `INSERT INTO survey_review_history (id, survey_id, reviewer_id, reviewer_name, action, comments, created_at)
        VALUES (?, ?, ?, ?, 'Submitted', ?, ?)`,
-      [historyId, id, user?.id || null, user?.name || "Engineer", req.body.comments || "Survey technical audit submitted for review", submittedAt]
+      [historyId, id, user2?.id || null, user2?.name || "Engineer", comments || req.body.comments || "Survey technical audit submitted for review", submittedAt]
     );
     const [updated] = await pool.query("SELECT * FROM site_surveys WHERE id = ?", [id]);
     const [surveyPhotos] = await pool.query("SELECT * FROM survey_photos WHERE survey_id = ?", [id]);
@@ -2601,7 +657,7 @@ var submitSurveyForReview = async (req, res) => {
 var reviewSurvey = async (req, res) => {
   try {
     const { id } = req.params;
-    const user = req.user;
+    const user2 = req.user;
     const { decision, comments } = req.body;
     if (!decision || decision !== "Approved" && decision !== "Changes Required") {
       return res.status(400).json({ success: false, error: 'Valid decision ("Approved" or "Changes Required") is required' });
@@ -2622,17 +678,14 @@ var reviewSurvey = async (req, res) => {
            review_decision = ?, 
            review_comments = ?
        WHERE id = ?`,
-      [newStatus, reviewedAt, user?.id || "EMP-01", user?.name || "Reviewer", decision, comments || "", id]
+      [newStatus, reviewedAt, user2?.id || "EMP-01", user2?.name || "Reviewer", decision, comments || "", id]
     );
     const historyId = `HIST-${Date.now()}`;
     await pool.query(
       `INSERT INTO survey_review_history (id, survey_id, reviewer_id, reviewer_name, action, comments, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [historyId, id, user?.id || null, user?.name || "Reviewer", decision, comments || "", reviewedAt]
+      [historyId, id, user2?.id || null, user2?.name || "Reviewer", decision, comments || "", reviewedAt]
     );
-    let createdQuotation = null;
-    let quotationError = null;
-    let quotationCreated = false;
     if (decision === "Approved") {
       if (survey.lead_id) {
         await pool.query(
@@ -2640,29 +693,14 @@ var reviewSurvey = async (req, res) => {
           [survey.lead_id]
         );
       }
-      try {
-        const result = await createQuotationDraftInternal(pool, {
-          surveyId: id,
-          leadId: survey.lead_id,
-          user: user || { id: "EMP-01", name: "Project Manager" }
-        });
-        createdQuotation = result.quotation;
-        quotationCreated = result.created;
-      } catch (qErr) {
-        console.error("Failed to create linked quotation draft on survey approval:", qErr);
-        quotationError = `Survey approved successfully, but quotation draft creation encountered an issue: ${qErr.message}. You can generate the quotation draft from Sales Pipeline.`;
-      }
     }
     const [updated] = await pool.query("SELECT * FROM site_surveys WHERE id = ?", [id]);
     const [surveyPhotos] = await pool.query("SELECT * FROM survey_photos WHERE survey_id = ?", [id]);
     const [history] = await pool.query("SELECT * FROM survey_review_history WHERE survey_id = ? ORDER BY created_at ASC", [id]);
     res.json({
       success: true,
-      message: `Survey ${decision}`,
-      survey: formatSurvey(updated[0], surveyPhotos, history),
-      quotation: createdQuotation,
-      quotationCreated,
-      quotationError
+      message: `Survey marked as ${decision}. Ready for Field BOM material configuration.`,
+      survey: formatSurvey(updated[0], surveyPhotos, history)
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -2671,7 +709,7 @@ var reviewSurvey = async (req, res) => {
 var rescheduleSurvey = async (req, res) => {
   try {
     const { id } = req.params;
-    const { scheduledDate, engineerId, engineerName, notes } = req.body;
+    const { scheduledDate, scheduledTime, engineerId, engineerName, notes } = req.body;
     if (!scheduledDate) {
       return res.status(400).json({ success: false, error: "New scheduled date is required" });
     }
@@ -2681,6 +719,10 @@ var rescheduleSurvey = async (req, res) => {
     }
     const fields = ["scheduled_date = ?"];
     const values = [scheduledDate];
+    if (scheduledTime) {
+      fields.push("scheduled_time = ?");
+      values.push(scheduledTime);
+    }
     if (engineerId) {
       fields.push("engineer_id = ?");
       values.push(engineerId);
@@ -2697,6 +739,58 @@ var rescheduleSurvey = async (req, res) => {
     await pool.query(`UPDATE site_surveys SET ${fields.join(", ")} WHERE id = ?`, values);
     const [updated] = await pool.query("SELECT * FROM site_surveys WHERE id = ?", [id]);
     res.json({ success: true, message: "Survey rescheduled", survey: formatSurvey(updated[0]) });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var deleteSurvey = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const [rows] = await pool.query("SELECT * FROM site_surveys WHERE id = ?", [id]);
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ success: false, error: "Survey not found" });
+    }
+    const survey = rows[0];
+    if (survey.status !== "Approved") {
+      return res.status(400).json({
+        success: false,
+        error: `Survey ${id} cannot be deleted because it is '${survey.status}'. Surveys can only be deleted once they reach the 'Approved' state.`
+      });
+    }
+    try {
+      const [photos] = await pool.query("SELECT * FROM survey_photos WHERE survey_id = ?", [id]);
+      if (photos && photos.length > 0) {
+        for (const p of photos) {
+          if (p.file_path) {
+            const absPath = path.resolve(process.cwd(), p.file_path);
+            if (fs.existsSync(absPath)) {
+              try {
+                fs.unlinkSync(absPath);
+              } catch (e) {
+              }
+            }
+          }
+        }
+        await pool.query("DELETE FROM survey_photos WHERE survey_id = ?", [id]);
+      }
+    } catch (e) {
+      console.warn("Photos cleanup error:", e);
+    }
+    try {
+      await pool.query("DELETE FROM survey_review_history WHERE survey_id = ?", [id]);
+    } catch (e) {
+      console.warn("Review history cleanup error:", e);
+    }
+    try {
+      await pool.query("UPDATE project_boms SET survey_id = NULL WHERE survey_id = ?", [id]);
+    } catch (e) {
+    }
+    await pool.query("DELETE FROM site_surveys WHERE id = ?", [id]);
+    try {
+      await pool.query("UPDATE leads SET survey_id = NULL WHERE survey_id = ?", [id]);
+    } catch (e) {
+    }
+    res.json({ success: true, message: `Survey ${id} successfully deleted.` });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -3234,8 +1328,8 @@ var login = async (req, res) => {
        LIMIT 1`,
       [identifier, identifier]
     );
-    let user = rows && rows.length > 0 ? rows[0] : null;
-    if (!user) {
+    let user2 = rows && rows.length > 0 ? rows[0] : null;
+    if (!user2) {
       const [empRows] = await pool.query(
         `SELECT id, username, email, password_hash, password_salt, role, name 
          FROM employees 
@@ -3244,7 +1338,7 @@ var login = async (req, res) => {
         [identifier, identifier]
       );
       if (empRows && empRows.length > 0) {
-        user = {
+        user2 = {
           ...empRows[0],
           employee_id: empRows[0].id,
           customer_id: null,
@@ -3252,7 +1346,7 @@ var login = async (req, res) => {
         };
       }
     }
-    if (!user) {
+    if (!user2) {
       const [custRows] = await pool.query(
         `SELECT id, username, email, password_hash, password_salt, name 
          FROM customers 
@@ -3261,7 +1355,7 @@ var login = async (req, res) => {
         [identifier, identifier]
       );
       if (custRows && custRows.length > 0) {
-        user = {
+        user2 = {
           ...custRows[0],
           role: "Customer",
           employee_id: null,
@@ -3270,7 +1364,7 @@ var login = async (req, res) => {
         };
       }
     }
-    if (!user || !user.password_hash || !user.password_salt) {
+    if (!user2 || !user2.password_hash || !user2.password_salt) {
       const currentAttempts = limitRecord ? limitRecord.attempts + 1 : 1;
       loginRateLimitMap.set(ip, { attempts: currentAttempts, lastAttemptTime: now });
       return res.status(401).json({
@@ -3278,7 +1372,7 @@ var login = async (req, res) => {
         error: "Invalid credentials. Please verify your username and password."
       });
     }
-    const isValid = verifyPassword(password, user.password_hash, user.password_salt);
+    const isValid = verifyPassword(password, user2.password_hash, user2.password_salt);
     if (!isValid) {
       const currentAttempts = limitRecord ? limitRecord.attempts + 1 : 1;
       loginRateLimitMap.set(ip, { attempts: currentAttempts, lastAttemptTime: now });
@@ -3289,13 +1383,13 @@ var login = async (req, res) => {
     }
     loginRateLimitMap.delete(ip);
     const tokenPayload = {
-      userId: user.id,
-      username: user.username,
-      email: user.email,
-      name: user.name,
-      role: user.role,
-      employeeId: user.employee_id,
-      customerId: user.customer_id
+      userId: user2.id,
+      username: user2.username,
+      email: user2.email,
+      name: user2.name,
+      role: user2.role,
+      employeeId: user2.employee_id,
+      customerId: user2.customer_id
     };
     const token = signJwt(tokenPayload, 86400);
     res.json({
@@ -3513,6 +1607,33 @@ var createLead = async (req, res) => {
     }
     const customerType = l.customerType || l.customer_type || "Residential";
     const systemType = l.systemType || l.system_type || "On-Grid";
+    let finalAssignedId = l.assignedToId;
+    let finalAssignedName = l.assignedToName;
+    if (!finalAssignedId || finalAssignedId === "auto" || !finalAssignedName) {
+      try {
+        const [execs] = await pool.query(`
+          SELECT u.id, u.name, COUNT(l.id) as lead_count
+          FROM user_accounts u
+          LEFT JOIN leads l ON (l.assigned_to_id = u.id OR l.assigned_to_name = u.name) AND l.status != 'Lost'
+          WHERE u.role = 'Sales Executive' AND u.is_active = 1
+          GROUP BY u.id, u.name
+          ORDER BY lead_count ASC, u.id ASC
+          LIMIT 1
+        `);
+        if (execs && execs.length > 0) {
+          finalAssignedId = execs[0].id;
+          finalAssignedName = execs[0].name;
+        } else {
+          finalAssignedId = "EMP-06";
+          finalAssignedName = "Vikram Mehta";
+        }
+      } catch {
+        finalAssignedId = "EMP-06";
+        finalAssignedName = "Vikram Mehta";
+      }
+    }
+    l.assignedToId = finalAssignedId;
+    l.assignedToName = finalAssignedName;
     await pool.query(
       `INSERT INTO leads (id, name, email, phone, city, state, address, pincode, source, status, priority, recommended_priority, priority_override_reason, buying_intent, assigned_to_id, assigned_to_name, monthly_bill, sanction_load, roof_area_sqft, roof_type, recommended_kw, estimated_budget, notes, customer_type, system_type, created_at, updated_at, last_contacted_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -3531,8 +1652,8 @@ var createLead = async (req, res) => {
         l.recommendedPriority || null,
         l.priorityOverrideReason || null,
         l.buyingIntent || null,
-        l.assignedToId || "EMP-02",
-        l.assignedToName || "Ananya Deshmukh",
+        finalAssignedId,
+        finalAssignedName,
         l.monthlyBill || 0,
         l.sanctionLoad || 0,
         l.roofAreaSqFt || 0,
@@ -3664,9 +1785,2025 @@ surveysRouter.delete("/:id/photos/:photoId", authenticateToken, requireRole(["Su
 surveysRouter.post("/:id/submit", authenticateToken, requireRole(["Survey Engineer", "Super Admin"]), submitSurveyForReview);
 surveysRouter.post("/:id/review", authenticateToken, requireRole(["Project Manager", "Sales Manager", "Super Admin"]), reviewSurvey);
 surveysRouter.post("/:id/reschedule", authenticateToken, requireRole(["Survey Engineer", "Project Manager", "Sales Manager", "Super Admin"]), rescheduleSurvey);
+surveysRouter.delete("/:id", authenticateToken, requireRole(["Survey Engineer", "Project Manager", "Sales Manager", "Super Admin"]), deleteSurvey);
 
 // server/routes/quotations.routes.ts
 import { Router as Router4 } from "express";
+
+// server/controllers/quotations.controller.ts
+import path3 from "path";
+
+// src/utils/quotationEngine.ts
+var QUOTATION_CONFIG = {
+  // Discount threshold requiring manager approval
+  DISCOUNT_APPROVAL_THRESHOLD_INR: 15e3,
+  MAX_DISCOUNT_PERCENT: 15,
+  // max 15% discount allowed
+  // Default Company Location (Karnataka / Tamil Nadu)
+  DEFAULT_SUPPLIER_STATE: "Karnataka",
+  DEFAULT_SUPPLIER_GSTIN: "29AABCS1429B1Z8",
+  // Client-Configured Statutory Defaults:
+  // - Solar Panels & Inverters: 5% GST
+  // - Structure, Cables/BOS, Installation Services: 18% GST
+  DEFAULT_GST_RATES: {
+    PANELS: 5,
+    INVERTER: 5,
+    STRUCTURE: 18,
+    BOS: 18,
+    INSTALLATION: 18
+  },
+  // Standard HSN / SAC Codes
+  DEFAULT_HSN_CODES: {
+    PANELS: "8541",
+    INVERTER: "8504",
+    STRUCTURE: "7308",
+    BOS: "8544",
+    INSTALLATION: "9954"
+  },
+  // Legacy composite rate for backward compatibility
+  COMPOSITE_GST_RATE: 13.8,
+  // 70% goods @ 12% + 30% services @ 18%
+  // Solar irradiance & financial defaults
+  SPECIFIC_YIELD_KWH_PER_KWP: 1450,
+  DEFAULT_TARIFF_INR: 8.2,
+  // PM Surya Ghar Muft Bijli Yojana Central Subsidy Slabs (Residential Only)
+  RESIDENTIAL_SUBSIDY: {
+    SLAB_1KW_MAX: 3e4,
+    SLAB_2KW_MAX: 6e4,
+    SLAB_3KW_AND_ABOVE_MAX: 78e3
+  }
+};
+function convertNumberToWords(amount) {
+  const rounded = Math.round(Number(amount) || 0);
+  if (rounded === 0) return "Rupees Zero Only";
+  const units = [
+    "",
+    "One",
+    "Two",
+    "Three",
+    "Four",
+    "Five",
+    "Six",
+    "Seven",
+    "Eight",
+    "Nine",
+    "Ten",
+    "Eleven",
+    "Twelve",
+    "Thirteen",
+    "Fourteen",
+    "Fifteen",
+    "Sixteen",
+    "Seventeen",
+    "Eighteen",
+    "Nineteen"
+  ];
+  const tens = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
+  function convertHundreds(n) {
+    let str = "";
+    if (n >= 100) {
+      str += units[Math.floor(n / 100)] + " Hundred ";
+      n %= 100;
+    }
+    if (n >= 20) {
+      str += tens[Math.floor(n / 10)] + (n % 10 ? " " + units[n % 10] : "");
+    } else if (n > 0) {
+      str += units[n];
+    }
+    return str.trim();
+  }
+  let words = "";
+  let crore = Math.floor(rounded / 1e7);
+  let remCrore = rounded % 1e7;
+  let lakh = Math.floor(remCrore / 1e5);
+  let remLakh = remCrore % 1e5;
+  let thousand = Math.floor(remLakh / 1e3);
+  let remThousand = remLakh % 1e3;
+  if (crore > 0) words += convertHundreds(crore) + " Crore ";
+  if (lakh > 0) words += convertHundreds(lakh) + " Lakh ";
+  if (thousand > 0) words += convertHundreds(thousand) + " Thousand ";
+  if (remThousand > 0) words += convertHundreds(remThousand);
+  return `Rupees ${words.trim()} Only`;
+}
+function resolveTaxType(input) {
+  if (input.taxType) return input.taxType;
+  const supplier = (input.supplierState || QUOTATION_CONFIG.DEFAULT_SUPPLIER_STATE).toLowerCase().trim();
+  const address = (input.customerAddress || "").toLowerCase();
+  const customerState = (input.customerState || "").toLowerCase().trim();
+  if (customerState && customerState !== supplier) {
+    return "IGST";
+  }
+  if (supplier === "karnataka") {
+    if (address.includes("tamil nadu") || address.includes("kerala") || address.includes("andhra") || address.includes("telangana") || address.includes("delhi")) {
+      return "IGST";
+    }
+  } else if (supplier === "tamil nadu") {
+    if (address.includes("karnataka") || address.includes("bengaluru") || address.includes("bangalore") || address.includes("kerala")) {
+      return "IGST";
+    }
+  }
+  return "CGST_SGST";
+}
+function calculateQuotation(input) {
+  const capacityKw = Math.max(0.5, Number(input.systemCapacityKw) || 5);
+  const tier = input.packageTier || "Premium Bifacial";
+  const category = input.customerCategory || (capacityKw > 20 ? "Commercial" : "Residential");
+  const roof = input.roofType || "RCC Flat";
+  const tariff = input.customTariffPerKwh || QUOTATION_CONFIG.DEFAULT_TARIFF_INR;
+  const isApproved = Boolean(input.isSurveyApproved);
+  const taxMode = input.taxMode || "ITEMIZED";
+  const taxType = resolveTaxType(input);
+  let moduleWattageW = 550;
+  let moduleBrand = "Waaree 550W Mono PERC Half-Cut Bifacial (ALMM Approved)";
+  let modulePrice = 11500;
+  if (tier === "Premium Bifacial") {
+    moduleWattageW = 575;
+    moduleBrand = "Jinko 575W Tiger Neo N-Type TOPCon Bifacial Module";
+    modulePrice = 12800;
+  } else if (tier === "Commercial Heavy Duty") {
+    moduleWattageW = 550;
+    moduleBrand = "Waaree 550W High-Efficiency Bifacial Mono PERC";
+    modulePrice = 11200;
+  }
+  const panelCount = Math.ceil(capacityKw * 1e3 / moduleWattageW);
+  const actualCapacityKwp = Number((panelCount * moduleWattageW / 1e3).toFixed(2));
+  const panelTotal = panelCount * modulePrice;
+  let inverterDesc = "";
+  let inverterPrice = 0;
+  let inverterBrand = "";
+  if (capacityKw <= 3) {
+    inverterDesc = "3 kW Single-Phase Grid-Tied Inverter with Dual MPPT and Cloud WiFi";
+    inverterBrand = "Sungrow / Growatt 3K-1P";
+    inverterPrice = 32e3;
+  } else if (capacityKw <= 5) {
+    inverterDesc = "5 kW Single/Three-Phase Dual-MPPT Inverter with WiFi & IP65";
+    inverterBrand = "Sungrow SG5.0RT / Growatt";
+    inverterPrice = 38500;
+  } else if (capacityKw <= 10) {
+    inverterDesc = "10 kW Three-Phase 415V Grid Inverter with Dual MPPT & DC Switch";
+    inverterBrand = "Sungrow SG10RT 3-Phase";
+    inverterPrice = 68e3;
+  } else if (capacityKw <= 25) {
+    inverterDesc = `${capacityKw} kW Three-Phase Dual-MPPT Commercial Inverter with Cloud Monitoring`;
+    inverterBrand = "Sungrow SG20RT / Growatt 25K";
+    inverterPrice = 115e3;
+  } else {
+    inverterDesc = `${capacityKw} kW Commercial Multi-MPPT High Yield Solar Inverter`;
+    inverterBrand = "Growatt MAX / Sungrow Commercial";
+    inverterPrice = Math.round(capacityKw * 4300);
+  }
+  let structureRatePerKw = 2500;
+  let structureDesc = "Hot Dip Galvanized (HDG) 80-micron elevated structure (15\xB0 Tilt)";
+  if (roof === "Metal Sheet") {
+    structureRatePerKw = 1900;
+    structureDesc = "Anodized Aluminum AL6005-T5 Mini-Rail structure with EPDM rubber gaskets";
+  } else if (tier === "Premium Bifacial") {
+    structureRatePerKw = 2800;
+    structureDesc = "Heavy Duty 80-micron HDG elevated mounting structure with SS304 fasteners";
+  }
+  const structureTotal = Math.round(capacityKw * structureRatePerKw);
+  const bosRatePerKw = tier === "Premium Bifacial" ? 4800 : 4500;
+  const bosTotal = Math.round(capacityKw * bosRatePerKw);
+  const bosDesc = "ACDB & DCDB with Type-II SPDs, Polycab Solar DC/AC Cables, Chemical Earthing Pits & ESE Lightning Arrester";
+  const installRatePerKw = tier === "Premium Bifacial" ? 4200 : 4e3;
+  const installTotal = Math.round(capacityKw * installRatePerKw);
+  const installDesc = "Complete civil mounting, cable routing in conduits, safety labeling, DISCOM net-metering liaison and synchronization";
+  let rawItems = [];
+  if (input.customItems && input.customItems.length > 0) {
+    rawItems = input.customItems.map((ci, idx) => {
+      const catLower = (ci.category || ci.description || "").toLowerCase();
+      const isFivePercent = catLower.includes("solar") || catLower.includes("panel") || catLower.includes("inverter") || catLower.includes("module");
+      const defaultGst = isFivePercent ? 5 : 18;
+      const gstRate = ci.gstRate !== void 0 ? ci.gstRate : defaultGst;
+      const hsn = ci.hsnSacCode || (isFivePercent ? "8541" : catLower.includes("cable") || catLower.includes("wire") ? "8544" : "7308");
+      const qty = Number(ci.quantity) || 1;
+      const rate = Number(ci.unitPrice !== void 0 ? ci.unitPrice : ci.estimated_unit_cost) || 0;
+      const gross = Math.round(qty * rate);
+      const spec = ci.specification || ci.technical_specification || "";
+      const make = ci.make || ci.brand_make || "";
+      const makeModel = ci.makeModel || `${make} ${spec}`.trim() || "Standard";
+      return {
+        id: ci.id || `QI-${idx + 1}`,
+        category: ci.category || "General",
+        description: ci.description || ci.item_name || ci.category,
+        specification: spec,
+        make,
+        makeModel,
+        hsnSacCode: hsn,
+        quantity: qty,
+        unit: ci.unit || "Nos",
+        unitPrice: rate,
+        grossAmount: gross,
+        defaultGstRate: gstRate,
+        warrantyPeriod: ci.warrantyPeriod || (isFivePercent ? "10-Yr Replacement / 25-Yr Performance" : "5-Yr Comprehensive Warranty")
+      };
+    });
+  } else {
+    rawItems = [
+      {
+        id: "QI-1",
+        category: "Panels",
+        description: `${panelCount} \xD7 ${moduleBrand}`,
+        specification: `${moduleWattageW}W Mono PERC Bifacial`,
+        make: moduleBrand.split(" ")[0] || "Waaree",
+        makeModel: moduleBrand,
+        hsnSacCode: QUOTATION_CONFIG.DEFAULT_HSN_CODES.PANELS,
+        quantity: panelCount,
+        unit: "Nos",
+        unitPrice: modulePrice,
+        grossAmount: panelTotal,
+        defaultGstRate: QUOTATION_CONFIG.DEFAULT_GST_RATES.PANELS,
+        // 5%
+        warrantyPeriod: "12-Yr Product / 25-Yr Linear Performance"
+      },
+      {
+        id: "QI-2",
+        category: "Inverter",
+        description: inverterDesc,
+        specification: `${capacityKw} kW Grid-Tied Inverter`,
+        make: inverterBrand.split(" ")[0] || "Sungrow",
+        makeModel: inverterBrand,
+        hsnSacCode: QUOTATION_CONFIG.DEFAULT_HSN_CODES.INVERTER,
+        quantity: 1,
+        unit: "Unit",
+        unitPrice: inverterPrice,
+        grossAmount: inverterPrice,
+        defaultGstRate: QUOTATION_CONFIG.DEFAULT_GST_RATES.INVERTER,
+        // 5%
+        warrantyPeriod: "10-Yr Replacement Warranty"
+      },
+      {
+        id: "QI-3",
+        category: "Structure",
+        description: structureDesc,
+        specification: "Pre-Galvanized / Mini Rail",
+        make: "Reputed",
+        makeModel: "AB Solar HDG Custom Fabricated",
+        hsnSacCode: QUOTATION_CONFIG.DEFAULT_HSN_CODES.STRUCTURE,
+        quantity: capacityKw,
+        unit: "kW",
+        unitPrice: structureRatePerKw,
+        grossAmount: structureTotal,
+        defaultGstRate: QUOTATION_CONFIG.DEFAULT_GST_RATES.STRUCTURE,
+        // 18%
+        warrantyPeriod: "10-Yr Anti-Corrosion Warranty"
+      },
+      {
+        id: "QI-4",
+        category: "Protection & BOS",
+        description: bosDesc,
+        specification: "63A DCDB & ACDB with SPDs",
+        make: "Schneider / L&T / Polycab",
+        makeModel: "Schneider / L&T / Polycab",
+        hsnSacCode: QUOTATION_CONFIG.DEFAULT_HSN_CODES.BOS,
+        quantity: 1,
+        unit: "Set",
+        unitPrice: bosTotal,
+        grossAmount: bosTotal,
+        defaultGstRate: QUOTATION_CONFIG.DEFAULT_GST_RATES.BOS,
+        // 18%
+        warrantyPeriod: "5-Yr Comprehensive Warranty"
+      },
+      {
+        id: "QI-5",
+        category: "Installation & Commissioning",
+        description: installDesc,
+        specification: "Civil mounting & liaison",
+        make: "AB Energy Solutions",
+        makeModel: "AB Energy Solutions Certified EPC Crew",
+        hsnSacCode: QUOTATION_CONFIG.DEFAULT_HSN_CODES.INSTALLATION,
+        quantity: 1,
+        unit: "Turnkey",
+        unitPrice: installTotal,
+        grossAmount: installTotal,
+        defaultGstRate: QUOTATION_CONFIG.DEFAULT_GST_RATES.INSTALLATION,
+        // 18%
+        warrantyPeriod: "5-Yr Comprehensive Workmanship & O&M"
+      }
+    ];
+  }
+  const subtotal = rawItems.reduce((sum, item) => sum + item.grossAmount, 0);
+  let rawDiscount = Math.max(0, Number(input.discountAmount) || 0);
+  const maxAllowedDiscount = Math.round(subtotal * (QUOTATION_CONFIG.MAX_DISCOUNT_PERCENT / 100));
+  if (rawDiscount > maxAllowedDiscount) {
+    rawDiscount = maxAllowedDiscount;
+  }
+  const requiresApproval = rawDiscount > QUOTATION_CONFIG.DISCOUNT_APPROVAL_THRESHOLD_INR;
+  const approvalStatus = requiresApproval ? "Pending_Approval" : "Approved";
+  const taxableAmount = Math.max(0, subtotal - rawDiscount);
+  let allocatedDiscountTotal = 0;
+  const items = rawItems.map((raw, idx) => {
+    let lineDiscount = 0;
+    if (subtotal > 0 && rawDiscount > 0) {
+      if (idx === rawItems.length - 1) {
+        lineDiscount = rawDiscount - allocatedDiscountTotal;
+      } else {
+        lineDiscount = Math.round(raw.grossAmount / subtotal * rawDiscount);
+        allocatedDiscountTotal += lineDiscount;
+      }
+    }
+    const lineTaxable = Math.max(0, raw.grossAmount - lineDiscount);
+    const gstRate = taxMode === "COMPOSITE" ? QUOTATION_CONFIG.COMPOSITE_GST_RATE : raw.defaultGstRate;
+    const lineTax = Math.round(lineTaxable * (gstRate / 100));
+    let cgstRate = 0;
+    let sgstRate = 0;
+    let igstRate = 0;
+    let cgstAmount = 0;
+    let sgstAmount = 0;
+    let igstAmount = 0;
+    if (taxType === "IGST") {
+      igstRate = gstRate;
+      igstAmount = lineTax;
+    } else {
+      cgstRate = Number((gstRate / 2).toFixed(2));
+      sgstRate = Number((gstRate / 2).toFixed(2));
+      cgstAmount = Math.round(lineTax / 2);
+      sgstAmount = lineTax - cgstAmount;
+    }
+    return {
+      id: raw.id,
+      category: raw.category,
+      description: raw.description,
+      specification: raw.specification,
+      make: raw.make,
+      makeModel: raw.makeModel,
+      hsnSacCode: raw.hsnSacCode,
+      quantity: raw.quantity,
+      unit: raw.unit,
+      unitPrice: raw.unitPrice,
+      grossAmount: raw.grossAmount,
+      discountAmount: lineDiscount,
+      taxableAmount: lineTaxable,
+      gstRate,
+      taxType,
+      cgstRate,
+      sgstRate,
+      igstRate,
+      cgstAmount,
+      sgstAmount,
+      igstAmount,
+      taxAmount: lineTax,
+      totalPrice: lineTaxable + lineTax,
+      warrantyPeriod: raw.warrantyPeriod
+    };
+  });
+  const totalCgstAmount = items.reduce((sum, item) => sum + item.cgstAmount, 0);
+  const totalSgstAmount = items.reduce((sum, item) => sum + item.sgstAmount, 0);
+  const totalIgstAmount = items.reduce((sum, item) => sum + item.igstAmount, 0);
+  const totalGstAmount = totalCgstAmount + totalSgstAmount + totalIgstAmount;
+  const finalContractAmount = taxableAmount + totalGstAmount;
+  const effectiveGstRate = taxableAmount > 0 ? Number((totalGstAmount / taxableAmount * 100).toFixed(2)) : 0;
+  const amountInWords = convertNumberToWords(finalContractAmount);
+  let subsidyEligible = false;
+  let subsidyAmount = 0;
+  let subsidyNotes = "";
+  if (category === "Residential") {
+    subsidyEligible = true;
+    if (capacityKw <= 1) {
+      subsidyAmount = QUOTATION_CONFIG.RESIDENTIAL_SUBSIDY.SLAB_1KW_MAX;
+      subsidyNotes = "PM Surya Ghar: \u20B930,000 for 1 kW residential rooftop";
+    } else if (capacityKw <= 2) {
+      subsidyAmount = QUOTATION_CONFIG.RESIDENTIAL_SUBSIDY.SLAB_2KW_MAX;
+      subsidyNotes = "PM Surya Ghar: \u20B960,000 for 2 kW residential rooftop";
+    } else {
+      subsidyAmount = QUOTATION_CONFIG.RESIDENTIAL_SUBSIDY.SLAB_3KW_AND_ABOVE_MAX;
+      subsidyNotes = "PM Surya Ghar: \u20B978,000 maximum capped central subsidy for \u2265 3 kW";
+    }
+  } else {
+    subsidyEligible = false;
+    subsidyAmount = 0;
+    subsidyNotes = "Commercial / Industrial / Institutional installations are not eligible for PM Surya Ghar residential central subsidy.";
+  }
+  const indicativeNetCustomerCost = Math.max(0, finalContractAmount - subsidyAmount);
+  const annualGenerationKwh = Math.round(actualCapacityKwp * QUOTATION_CONFIG.SPECIFIC_YIELD_KWH_PER_KWP);
+  const annualSavingsInr = Math.round(annualGenerationKwh * tariff);
+  const lifetimeSavings25Yr = Math.round(annualSavingsInr * 25);
+  const simplePaybackYears = annualSavingsInr > 0 ? Number((indicativeNetCustomerCost / annualSavingsInr).toFixed(1)) : 0;
+  const advanceAmount = Math.round(finalContractAmount * 0.4);
+  const dispatchAmount = Math.round(finalContractAmount * 0.5);
+  const handoverAmount = finalContractAmount - advanceAmount - dispatchAmount;
+  return {
+    proposalType: isApproved ? "Final_Technical" : "Preliminary",
+    packageTier: tier,
+    systemCapacityKw: capacityKw,
+    actualCapacityKwp,
+    panelCount,
+    moduleWattageW,
+    inverterDescription: inverterDesc,
+    items,
+    subtotal,
+    discountAmount: rawDiscount,
+    requiresApproval,
+    approvalStatus,
+    taxableAmount,
+    taxMode,
+    taxType,
+    gstRate: effectiveGstRate,
+    cgstAmount: totalCgstAmount,
+    sgstAmount: totalSgstAmount,
+    igstAmount: totalIgstAmount,
+    gstAmount: totalGstAmount,
+    finalContractAmount,
+    amountInWords,
+    subsidyEligible,
+    subsidyAmount,
+    subsidyNotes,
+    indicativeNetCustomerCost,
+    annualGenerationKwh,
+    annualSavingsInr,
+    lifetimeSavings25Yr,
+    simplePaybackYears,
+    tariffAssumedPerKwh: tariff,
+    milestones: {
+      advanceBooking: {
+        percentage: 40,
+        amount: advanceAmount,
+        description: "40% Advance on project booking and detailed engineering approval"
+      },
+      materialDispatch: {
+        percentage: 50,
+        amount: dispatchAmount,
+        description: "50% on material dispatch and arrival at installation site"
+      },
+      finalHandover: {
+        percentage: 10,
+        amount: handoverAmount,
+        description: "10% upon DISCOM net-metering synchronization and commissioning handover"
+      }
+    },
+    terms: [
+      "40% Advance on project booking and detailed engineering approval.",
+      "50% upon material dispatch against warehouse delivery challan.",
+      "10% upon successful DISCOM net-metering synchronization and commissioning sign-off.",
+      "Quotation valid for 14 calendar days from date of issuance.",
+      "Central subsidy under PM Surya Ghar is credited directly by the Government to the customer bank account post DISCOM inspection via DBT.",
+      "Standard 25-Year linear performance warranty on Tier-1 ALMM solar panels."
+    ],
+    warranties: {
+      panels: "12-Year Product Workmanship / 25-Year 80% Linear Power Output",
+      inverter: "10-Year Comprehensive Replacement Warranty",
+      structure: "10-Year Corrosion-Free Galvanization Warranty",
+      workmanship: "5-Year Comprehensive EPC Workmanship & Operations & Maintenance"
+    }
+  };
+}
+
+// server/services/pdf-generator.ts
+import PDFDocument from "pdfkit";
+import fs2 from "fs";
+import path2 from "path";
+async function generateProposalPdf(data) {
+  const proposalsDir = path2.join(process.cwd(), "uploads", "proposals");
+  if (!fs2.existsSync(proposalsDir)) {
+    fs2.mkdirSync(proposalsDir, { recursive: true });
+  }
+  const sanitizedQuoteNo = data.quotationNumber.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const fileName = `Quotation_${sanitizedQuoteNo}.pdf`;
+  const filePath = path2.join(proposalsDir, fileName);
+  const fileUrl = `/uploads/proposals/${fileName}`;
+  return new Promise((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({
+        size: "A4",
+        margin: 40,
+        bufferPages: true,
+        info: {
+          Title: `AB Energy Solutions - Quotation ${data.quotationNumber}`,
+          Author: "AB Energy Solutions",
+          Subject: `${data.systemCapacityKw} kW Grid-Connected Rooftop Solar Power System`
+        }
+      });
+      const writeStream = fs2.createWriteStream(filePath);
+      doc.pipe(writeStream);
+      const logoPath = path2.join(process.cwd(), "public", "logo.png");
+      const coverPhotoPath = path2.join(process.cwd(), "public", "solar-roof-cover.jpg");
+      const hasLogo = fs2.existsSync(logoPath);
+      const hasCoverPhoto = fs2.existsSync(coverPhotoPath);
+      const headingNavy = "#0F172A";
+      const bodyDark = "#1E293B";
+      const textMuted = "#475569";
+      const greenAccent = "#059669";
+      const greenLight = "#ECFDF5";
+      const borderSlate = "#CBD5E1";
+      const bgLight = "#F8FAFC";
+      const drawHeaderBanner = (pageTitle) => {
+        if (hasLogo) {
+          doc.save();
+          doc.opacity(0.035);
+          doc.image(logoPath, 127, 260, { width: 340 });
+          doc.restore();
+        }
+        doc.font("Helvetica-Bold").fontSize(9).fillColor(headingNavy).text("AB ENERGY SOLUTIONS", 40, 26);
+        doc.font("Helvetica").fontSize(7.5).fillColor(textMuted).text("Turnkey Solar EPC & Engineering", 40, 37);
+        doc.font("Helvetica-Bold").fontSize(8).fillColor(greenAccent).text(`Quotation: ${data.quotationNumber}`, 200, 26, { width: 195, align: "center" });
+        if (pageTitle) {
+          doc.font("Helvetica-Oblique").fontSize(7).fillColor(textMuted).text(pageTitle, 200, 37, { width: 195, align: "center" });
+        }
+        doc.font("Helvetica-Bold").fontSize(8.5).fillColor(headingNavy).text("GST: 33FSQPA3244H1ZU", 40, 26, { align: "right", width: 515 });
+        doc.font("Helvetica").fontSize(7.5).fillColor(textMuted).text("CIN/MSME Registered", 40, 37, { align: "right", width: 515 });
+        doc.moveTo(40, 48).lineTo(555, 48).lineWidth(0.5).strokeColor("#E2E8F0").stroke();
+      };
+      const drawFooter = (pageNum, totalPages) => {
+        doc.moveTo(40, 785).lineTo(555, 785).lineWidth(0.5).strokeColor("#E2E8F0").stroke();
+        doc.font("Helvetica").fontSize(8).fillColor(textMuted).text(`AB Energy Solutions  \u2022  Turnkey Solar EPC & Engineering  \u2022  Page ${pageNum} of ${totalPages}`, 40, 792, { align: "center", width: 515 });
+      };
+      if (hasLogo) {
+        doc.image(logoPath, 40, 28, { width: 125, height: 70, fit: [125, 70] });
+      } else {
+        doc.font("Helvetica-Bold").fontSize(16).fillColor(headingNavy).text("AB ENERGY SOLUTIONS", 40, 35);
+      }
+      doc.font("Helvetica-Bold").fontSize(10).fillColor(headingNavy).text("GST: 33FSQPA3244H1ZU", 40, 35, { align: "right", width: 515 });
+      doc.font("Helvetica").fontSize(8.5).fillColor(textMuted).text("Solar EPC \u2022 Electrical Infrastructure \u2022 O&M", 40, 49, { align: "right", width: 515 });
+      doc.font("Helvetica-Bold").fontSize(8).fillColor(greenAccent).text("TNEB C-Licence Certified Enterprise", 40, 62, { align: "right", width: 515 });
+      doc.moveTo(40, 105).lineTo(555, 105).lineWidth(0.75).strokeColor("#E2E8F0").stroke();
+      doc.font("Helvetica-Bold").fontSize(15).fillColor(headingNavy).text(`Quotation for ${data.systemCapacityKw} kW Grid-Connected Rooftop Solar Power System`, 40, 118, { align: "center", width: 515 });
+      doc.font("Helvetica").fontSize(9).fillColor(greenAccent).text("Turnkey Engineering, Procurement, Installation & Commissioning Proposal", 40, 137, { align: "center", width: 515 });
+      const formattedDate = new Date(data.createdAt || Date.now()).toLocaleDateString("en-GB", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric"
+      });
+      doc.font("Helvetica-Bold").fontSize(9).fillColor(headingNavy).text(`Quotation No.: ${data.quotationNumber}`, 45, 154);
+      doc.font("Helvetica").fontSize(8.5).fillColor(textMuted).text(`Package Tier: ${data.packageTier || "Premium Tier-1"}`, 210, 154, { width: 175, align: "center" });
+      doc.font("Helvetica-Bold").fontSize(9).fillColor(headingNavy).text(`Date: ${formattedDate}`, 40, 154, { align: "right", width: 515 });
+      if (hasCoverPhoto) {
+        doc.image(coverPhotoPath, 40, 172, { width: 515, height: 265, fit: [515, 265], align: "center" });
+      } else {
+        doc.rect(40, 172, 515, 265).fillAndStroke(bgLight, borderSlate);
+        doc.font("Helvetica-Bold").fontSize(14).fillColor("#64748B").text("Grid-Connected Solar Rooftop EPC System", 40, 290, { align: "center", width: 515 });
+      }
+      const custBoxY = 452;
+      doc.rect(40, custBoxY, 515, 112).fillAndStroke(bgLight, borderSlate);
+      doc.rect(40, custBoxY, 515, 24).fillAndStroke("#F1F5F9", borderSlate);
+      doc.font("Helvetica-Bold").fontSize(9.5).fillColor(headingNavy).text("CUSTOMER DETAILS", 55, custBoxY + 7);
+      doc.font("Helvetica").fontSize(8.5).fillColor(bodyDark);
+      doc.text(`Client Name: `, 55, custBoxY + 32, { continued: true }).font("Helvetica-Bold").text(data.leadName);
+      doc.font("Helvetica").text(`Service Number: `, 55, custBoxY + 50, { continued: true }).font("Helvetica-Bold").text(`045310081264 / ${data.systemCapacityKw}KWp`);
+      doc.font("Helvetica").text(`Quoted Capacity: `, 55, custBoxY + 68, { continued: true }).font("Helvetica-Bold").text(`${data.systemCapacityKw} kW On-Grid Solar`);
+      doc.font("Helvetica").text(`Proposal Type: `, 55, custBoxY + 86, { continued: true }).font("Helvetica-Bold").text(`${data.proposalType || "Grid-Tied Commercial/Residential"}`);
+      doc.font("Helvetica").text(`Phone: `, 300, custBoxY + 32, { continued: true }).font("Helvetica-Bold").text(data.customerPhone || "N/A");
+      doc.font("Helvetica").text(`Site Address: `, 300, custBoxY + 50);
+      doc.font("Helvetica-Bold").text(data.customerAddress || "West Rajapalayam, P.N palayam, TN", 300, custBoxY + 62, { width: 240 });
+      const metricY = 580;
+      const metricW = 165;
+      const metrics = [
+        { label: "Plant Capacity", val: `${data.systemCapacityKw} kW On-Grid` },
+        { label: "Estimated Annual Yield", val: `~${Math.round(data.annualGenerationKwh || data.systemCapacityKw * 1500).toLocaleString("en-IN")} Units` },
+        { label: "Module Performance", val: "25-30 Years Tier-1" }
+      ];
+      metrics.forEach((m, idx) => {
+        const mX = 40 + idx * 175;
+        doc.rect(mX, metricY, metricW, 46).fillAndStroke("#FFFFFF", borderSlate);
+        doc.font("Helvetica").fontSize(7.5).fillColor(textMuted).text(m.label, mX + 8, metricY + 8);
+        doc.font("Helvetica-Bold").fontSize(10).fillColor(greenAccent).text(m.val, mX + 8, metricY + 24);
+      });
+      doc.addPage();
+      drawHeaderBanner("Corporate Profile & Executive Letter");
+      let p2Y = 60;
+      doc.font("Helvetica-Bold").fontSize(10).fillColor(headingNavy).text(`Subject: Proposal for Supply, Installation, Testing & Commissioning of ${data.systemCapacityKw} kW Grid-Connected Rooftop Solar Power System`, 40, p2Y, { width: 515, lineGap: 3 });
+      p2Y += 32;
+      doc.font("Helvetica").fontSize(9).fillColor(bodyDark).text("Dear Sir,", 40, p2Y);
+      p2Y += 16;
+      doc.font("Helvetica").fontSize(9).fillColor(bodyDark).text(
+        `Thank you for giving us the opportunity to submit our quotation for your ${data.systemCapacityKw} kW Solar Rooftop Project. We are pleased to offer our professional turnkey services as detailed below.
+
+The quotation includes the complete supply, installation, testing, and commissioning of a Grid-Connected Solar Rooftop System.`,
+        40,
+        p2Y,
+        { width: 515, lineGap: 3.5 }
+      );
+      p2Y += 56;
+      doc.font("Helvetica-Bold").fontSize(11).fillColor(headingNavy).text("ABOUT AB ENERGY SOLUTION", 40, p2Y);
+      p2Y += 20;
+      doc.font("Helvetica").fontSize(9).fillColor("#334155").text(
+        "AB Energy Solution is a trusted Solar EPC & Electrical Engineering Company specializing in Project Management Consultancy (PMC), Owner's Engineer Services, Solar EPC, Installation, Testing & Commissioning (I&C), HT/LT Electrical Works, and Solar Material Supply.\n\nWith 12+ years of industry experience, we have successfully completed 50+ Solar & Electrical Projects across Residential, Commercial, Industrial, and Agricultural sectors. Our team includes TNEB C Licence Certified Engineers and experienced professionals dedicated to delivering projects with the highest standards of Quality, Safety, and On-Time Delivery.\n\nWe provide complete end-to-end solar solutions, from Site Survey, Design, Engineering, Procurement, Installation, Testing & Commissioning to Net Metering, CEIG Documentation, and Annual Maintenance (O&M).",
+        40,
+        p2Y,
+        { width: 515, lineGap: 4, align: "justify" }
+      );
+      p2Y += 160;
+      doc.rect(40, p2Y, 515, 68).fillAndStroke(bgLight, borderSlate);
+      doc.font("Helvetica-Bold").fontSize(9).fillColor(headingNavy).text("Quality & Compliance Assurance", 55, p2Y + 12);
+      doc.font("Helvetica").fontSize(8.5).fillColor(textMuted).text(
+        "All engineering designs, structural fabrications, module installations, and electrical grid synchronizations are performed strictly complying with MNRE standards, CEA technical regulations, DISCOM grid codes, and TANGEDCO net-metering protocols.",
+        55,
+        p2Y + 28,
+        { width: 485, lineGap: 2.5 }
+      );
+      doc.addPage();
+      drawHeaderBanner("Services, Advantages & Corporate Vision");
+      let p3Y = 60;
+      doc.font("Helvetica-Bold").fontSize(11).fillColor(headingNavy).text("OUR SERVICES", 40, p3Y);
+      p3Y += 20;
+      const servicesCol1 = [
+        "Solar Rooftop EPC Projects",
+        "Ground Mounted Solar Power Plants",
+        "Project Management Consultancy (PMC)",
+        "Owner's Engineer Services",
+        "Installation, Testing & Commissioning (I&C)",
+        "Solar Water Pump Systems"
+      ];
+      const servicesCol2 = [
+        "HT & LT Electrical Works",
+        "Transmission Line & Pole Yard Works",
+        "Net Metering & CEIG Approval Support",
+        "Operation & Maintenance (O&M)",
+        "Solar Material Supply"
+      ];
+      let sY1 = p3Y;
+      servicesCol1.forEach((srv) => {
+        doc.font("Helvetica-Bold").fontSize(8.5).fillColor(greenAccent).text("\u2022", 48, sY1);
+        doc.font("Helvetica").fontSize(8.5).fillColor(bodyDark).text(`  ${srv}`, 58, sY1);
+        sY1 += 18;
+      });
+      let sY2 = p3Y;
+      servicesCol2.forEach((srv) => {
+        doc.font("Helvetica-Bold").fontSize(8.5).fillColor(greenAccent).text("\u2022", 300, sY2);
+        doc.font("Helvetica").fontSize(8.5).fillColor(bodyDark).text(`  ${srv}`, 310, sY2);
+        sY2 += 18;
+      });
+      p3Y = Math.max(sY1, sY2) + 24;
+      doc.font("Helvetica-Bold").fontSize(11).fillColor(headingNavy).text("WHY CHOOSE AB ENERGY SOLUTION?", 40, p3Y);
+      p3Y += 20;
+      const whyCol1 = [
+        "12+ Years of Industry Experience",
+        "50+ Successfully Completed Projects",
+        "TNEB C Licence Certified Engineers",
+        "Quality Workmanship & Safety Standards"
+      ];
+      const whyCol2 = [
+        "Professional Project Management",
+        "On-Time Project Delivery",
+        "Transparent Communication",
+        "Reliable After-Sales Support"
+      ];
+      let wY1 = p3Y;
+      whyCol1.forEach((item) => {
+        doc.font("Helvetica-Bold").fontSize(9).fillColor(greenAccent).text("\u2714", 48, wY1);
+        doc.font("Helvetica").fontSize(8.5).fillColor(bodyDark).text(`   ${item}`, 62, wY1);
+        wY1 += 18;
+      });
+      let wY2 = p3Y;
+      whyCol2.forEach((item) => {
+        doc.font("Helvetica-Bold").fontSize(9).fillColor(greenAccent).text("\u2714", 300, wY2);
+        doc.font("Helvetica").fontSize(8.5).fillColor(bodyDark).text(`   ${item}`, 314, wY2);
+        wY2 += 18;
+      });
+      p3Y = Math.max(wY1, wY2) + 28;
+      doc.rect(40, p3Y, 515, 80).fillAndStroke(bgLight, borderSlate);
+      doc.font("Helvetica-Bold").fontSize(9.5).fillColor(headingNavy).text("Our Commitment", 55, p3Y + 14);
+      doc.font("Helvetica").fontSize(8.5).fillColor(bodyDark).text("Quality  \u2022  Safety  \u2022  Innovation  \u2022  Integrity  \u2022  Customer Satisfaction", 55, p3Y + 28);
+      doc.font("Helvetica-Bold").fontSize(9.5).fillColor(headingNavy).text("Our Vision", 55, p3Y + 46);
+      doc.font("Helvetica-Oblique").fontSize(8).fillColor(textMuted).text(
+        '"To deliver sustainable, reliable, and high-quality solar energy solutions that create long-term value for our customers and contribute to a greener future."',
+        55,
+        p3Y + 60,
+        { width: 485 }
+      );
+      doc.addPage();
+      drawHeaderBanner("Technical Scope of Work & Bill of Materials");
+      let p4Y = 60;
+      doc.font("Helvetica-Bold").fontSize(11).fillColor(headingNavy).text("Scope of Work", 40, p4Y);
+      p4Y += 16;
+      doc.font("Helvetica").fontSize(8.5).fillColor(bodyDark).text("We will execute the complete following turnkey EPC activities:", 40, p4Y);
+      p4Y += 15;
+      const scopeCol1 = ["Site Survey", "Engineering Support", "Supply of Material"];
+      const scopeCol2 = ["Complete Installation", "Testing & Commissioning", "Service Support"];
+      let scY1 = p4Y;
+      scopeCol1.forEach((sc) => {
+        doc.font("Helvetica-Bold").fontSize(8).fillColor(greenAccent).text("\u2022", 48, scY1);
+        doc.font("Helvetica").fontSize(8.5).fillColor(bodyDark).text(`   ${sc}`, 58, scY1);
+        scY1 += 14;
+      });
+      let scY2 = p4Y;
+      scopeCol2.forEach((sc) => {
+        doc.font("Helvetica-Bold").fontSize(8).fillColor(greenAccent).text("\u2022", 300, scY2);
+        doc.font("Helvetica").fontSize(8.5).fillColor(bodyDark).text(`   ${sc}`, 310, scY2);
+        scY2 += 14;
+      });
+      p4Y = Math.max(scY1, scY2) + 20;
+      doc.font("Helvetica-Bold").fontSize(11).fillColor(headingNavy).text("Bill Of Materials", 40, p4Y);
+      p4Y += 16;
+      const colX = [40, 75, 185, 360, 455, 500];
+      const colW = [35, 110, 175, 95, 45, 55];
+      const tableW = 515;
+      const drawBOMTableHeader = (y, isContinued = false) => {
+        doc.rect(40, y, tableW, 20).fillAndStroke("#0F172A", "#0F172A");
+        doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#FFFFFF");
+        doc.text("S.NO", colX[0], y + 6, { width: colW[0], align: "center" });
+        doc.text(isContinued ? "MATERIALS (Contd.)" : "MATERIALS", colX[1], y + 6, { width: colW[1], align: "left" });
+        doc.text("SPECIFICATION", colX[2], y + 6, { width: colW[2], align: "left" });
+        doc.text("MAKE", colX[3], y + 6, { width: colW[3], align: "left" });
+        doc.text("UNITS", colX[4], y + 6, { width: colW[4], align: "center" });
+        doc.text("QUANTITY", colX[5], y + 6, { width: colW[5], align: "center" });
+      };
+      drawBOMTableHeader(p4Y);
+      p4Y += 20;
+      const bomItems = data.items && data.items.length > 0 ? data.items : [];
+      bomItems.forEach((item, idx) => {
+        const materialName = item.category || item.description || "Solar Component";
+        const spec = item.specification || item.description || item.makeModel || "Standard";
+        const make = item.make || item.makeModel?.split(" ")[0] || "Reputed Tier-1";
+        const unit = item.unit || "Nos";
+        const qty = item.quantity || 1;
+        const rowHeight = 19;
+        if (p4Y + rowHeight > 730) {
+          doc.addPage();
+          drawHeaderBanner("Bill of Materials (Continued)");
+          p4Y = 60;
+          drawBOMTableHeader(p4Y, true);
+          p4Y += 20;
+        }
+        const rowBg = idx % 2 === 0 ? "#FFFFFF" : "#F8FAFC";
+        doc.rect(40, p4Y, tableW, rowHeight).fillAndStroke(rowBg, "#CBD5E1");
+        doc.font("Helvetica").fontSize(7.5).fillColor(bodyDark);
+        doc.text(String(idx + 1), colX[0], p4Y + 5, { width: colW[0], align: "center" });
+        doc.font("Helvetica-Bold").text(materialName, colX[1], p4Y + 5, { width: colW[1], ellipsis: true });
+        doc.font("Helvetica").text(spec, colX[2], p4Y + 5, { width: colW[2], ellipsis: true });
+        doc.text(make, colX[3], p4Y + 5, { width: colW[3], ellipsis: true });
+        doc.text(unit, colX[4], p4Y + 5, { width: colW[4], align: "center" });
+        doc.font("Helvetica-Bold").text(String(qty), colX[5], p4Y + 5, { width: colW[5], align: "center" });
+        p4Y += rowHeight;
+      });
+      p4Y += 12;
+      if (p4Y + 36 > 730) {
+        doc.addPage();
+        drawHeaderBanner("Technical Compliance");
+        p4Y = 60;
+      }
+      doc.rect(40, p4Y, tableW, 28).fillAndStroke("#FEF3C7", "#F59E0B");
+      doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#92400E").text("Note: As this project is proposed under the Government Subsidy Scheme, all supplied solar modules must comply with the Domestic Content Requirement (DCR) guidelines.", 48, p4Y + 9, { width: 495 });
+      doc.addPage();
+      drawHeaderBanner("Client Scope, Features, Warranty & Commercials");
+      let p5Y = 60;
+      doc.font("Helvetica-Bold").fontSize(11).fillColor(headingNavy).text("Client Scope", 40, p5Y);
+      p5Y += 16;
+      const clientScopeCol1 = [
+        "Provide a shadow-free installation area.",
+        "Minor civil works, if required.",
+        "Statutory charges for Bi-Directional Net Meter."
+      ];
+      const clientScopeCol2 = [
+        "Non-statutory charges related to Net Metering.",
+        "Additional charges for elevated structures (if applicable).",
+        "SIM card for the Wi-Fi monitoring dongle / APFC."
+      ];
+      let csY1 = p5Y;
+      clientScopeCol1.forEach((cs) => {
+        doc.font("Helvetica-Bold").fontSize(8.5).fillColor(greenAccent).text("\u27A2", 48, csY1);
+        doc.font("Helvetica").fontSize(8.5).fillColor(bodyDark).text(`   ${cs}`, 58, csY1);
+        csY1 += 15;
+      });
+      let csY2 = p5Y;
+      clientScopeCol2.forEach((cs) => {
+        doc.font("Helvetica-Bold").fontSize(8.5).fillColor(greenAccent).text("\u27A2", 300, csY2);
+        doc.font("Helvetica").fontSize(8.5).fillColor(bodyDark).text(`   ${cs}`, 310, csY2);
+        csY2 += 15;
+      });
+      p5Y = Math.max(csY1, csY2) + 20;
+      doc.font("Helvetica-Bold").fontSize(11).fillColor(headingNavy).text("Features and Warranty", 40, p5Y);
+      p5Y += 16;
+      const dailyKwh = Math.round(data.systemCapacityKw * 5);
+      const featCol1 = [
+        "Tier-1 High-Efficiency Solar Modules",
+        "Inverter Warranty: Up to 8 Years",
+        "Solar Module Product Warranty: 12 Years",
+        "Solar Module Performance Warranty: Up to 30 Years"
+      ];
+      const featCol2 = [
+        "Workmanship Warranty: 1 Year",
+        `Estimated Energy Generation: ~${dailyKwh} kWh/day`,
+        "Non DCR / DCR Solar Panels as applicable",
+        "Compliant with MNRE and DISCOM Standards"
+      ];
+      let ftY1 = p5Y;
+      featCol1.forEach((ft) => {
+        doc.font("Helvetica-Bold").fontSize(8.5).fillColor(greenAccent).text("-", 48, ftY1);
+        doc.font("Helvetica").fontSize(8.5).fillColor(bodyDark).text(`   ${ft}`, 58, ftY1);
+        ftY1 += 15;
+      });
+      let ftY2 = p5Y;
+      featCol2.forEach((ft) => {
+        doc.font("Helvetica-Bold").fontSize(8.5).fillColor(greenAccent).text("-", 300, ftY2);
+        doc.font("Helvetica").fontSize(8.5).fillColor(bodyDark).text(`   ${ft}`, 310, ftY2);
+        ftY2 += 15;
+      });
+      p5Y = Math.max(ftY1, ftY2) + 24;
+      doc.font("Helvetica-Bold").fontSize(11).fillColor(headingNavy).text("System Capacity & Pricing", 40, p5Y);
+      p5Y += 16;
+      const priceW = 515;
+      const hasSubsidy = data.subsidyEligible && data.subsidyAmount > 0;
+      doc.rect(40, p5Y, priceW, 22).fillAndStroke("#0F172A", "#0F172A");
+      doc.font("Helvetica-Bold").fontSize(8).fillColor("#FFFFFF");
+      doc.text("System Capacity", 45, p5Y + 6, { width: 145, align: "center" });
+      doc.text("Domestic Price (Including GST)", 195, p5Y + 6, { width: 165, align: "center" });
+      doc.text(hasSubsidy ? "Govt Subsidy / Net Cost" : "Estimated ROI", 365, p5Y + 6, { width: 185, align: "center" });
+      p5Y += 22;
+      const finalPriceStr = `\u20B9${Math.round(data.finalContractAmount).toLocaleString("en-IN")}/-`;
+      doc.rect(40, p5Y, priceW, 36).fillAndStroke("#FFFFFF", "#CBD5E1");
+      doc.font("Helvetica-Bold").fontSize(9).fillColor(bodyDark);
+      doc.text(`${data.systemCapacityKw}KW On-grid Solar System`, 45, p5Y + 13, { width: 145, align: "center" });
+      doc.font("Helvetica-Bold").fontSize(12).fillColor(headingNavy);
+      doc.text(finalPriceStr, 195, p5Y + 11, { width: 165, align: "center" });
+      if (hasSubsidy) {
+        const netCost = data.indicativeNetCustomerCost || data.finalContractAmount - data.subsidyAmount;
+        doc.font("Helvetica-Bold").fontSize(8).fillColor(greenAccent).text(`Subsidy: \u20B9${Math.round(data.subsidyAmount).toLocaleString("en-IN")}`, 365, p5Y + 7, { width: 185, align: "center" });
+        doc.font("Helvetica-Bold").fontSize(9.5).fillColor(headingNavy).text(`Net Cost: \u20B9${Math.round(netCost).toLocaleString("en-IN")}/-`, 365, p5Y + 20, { width: 185, align: "center" });
+      } else {
+        doc.font("Helvetica-Bold").fontSize(9.5).fillColor(headingNavy).text("3.5 - 4.0 Years", 365, p5Y + 12, { width: 185, align: "center" });
+      }
+      p5Y += 46;
+      doc.font("Helvetica-Bold").fontSize(11).fillColor(headingNavy).text("Payment Terms", 40, p5Y);
+      p5Y += 16;
+      doc.rect(40, p5Y, priceW, 38).fillAndStroke(bgLight, borderSlate);
+      doc.font("Helvetica-Bold").fontSize(9).fillColor(headingNavy).text("\u2022   90% Advance Payment with Purchase Order / Agreement", 55, p5Y + 9);
+      doc.font("Helvetica-Bold").fontSize(9).fillColor(headingNavy).text("\u2022   10% After Successful Commissioning & Grid Synchronization", 55, p5Y + 23);
+      doc.addPage();
+      drawHeaderBanner("Terms & Conditions & Official Authorization");
+      let p6Y = 60;
+      doc.font("Helvetica-Bold").fontSize(11).fillColor(headingNavy).text("Terms & Conditions", 40, p6Y);
+      p6Y += 18;
+      const termsList = [
+        "Quotation Validity: 7 Days from issue date.",
+        "GST is included in the above quoted price.",
+        "Additional civil work will be charged extra 800/kW.",
+        "Net Meter approval is subject to TANGEDCO / DISCOM regulations.",
+        "Delivery is subject to material readiness and site access.",
+        "Any additional civil or electrical work outside the quoted scope will be charged extra.",
+        "Elevated above 4 Feet mounting structures will be charged extra 2500 per kW.",
+        "Force majeure conditions and DISCOM grid outages are excluded."
+      ];
+      termsList.forEach((tm) => {
+        doc.font("Helvetica-Bold").fontSize(8.5).fillColor(greenAccent).text("\u2022", 48, p6Y);
+        doc.font("Helvetica").fontSize(8.5).fillColor(bodyDark).text(`   ${tm}`, 58, p6Y);
+        p6Y += 16;
+      });
+      p6Y += 18;
+      doc.rect(40, p6Y, 515, 36).fillAndStroke(greenLight, "#A7F3D0");
+      doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#065F46").text(
+        "Thank you for your valuable opportunity. We look forward to delivering a reliable solar solution and building a long-term partnership with you.",
+        55,
+        p6Y + 11,
+        { width: 485, align: "center" }
+      );
+      p6Y += 52;
+      doc.font("Helvetica-Bold").fontSize(11).fillColor(headingNavy).text("Contact Details", 40, p6Y);
+      p6Y += 16;
+      const cardHeight = 96;
+      doc.rect(40, p6Y, 515, cardHeight).fillAndStroke("#0F172A", "#1E293B");
+      doc.font("Helvetica-Bold").fontSize(13).fillColor("#FFFFFF").text("A Boopathi BE.,", 55, p6Y + 14);
+      doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#34D399").text("CEO & Managing Director  \u2022  AB ENERGY SOLUTIONS", 55, p6Y + 31);
+      doc.font("Helvetica").fontSize(8).fillColor("#CBD5E1").text("Phone: +91 95664 99678   |   Email: abenergysolutiontn@gmail.com", 55, p6Y + 47);
+      doc.font("Helvetica").fontSize(8).fillColor("#CBD5E1").text("1/359, Maruthi Nagar, Chinnakavandanur, Namakkal, TN - 636202", 55, p6Y + 60);
+      doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#34D399").text("12+ Years Solar Experience   \u2022   TNEB C-Licence Certified Enterprise", 55, p6Y + 74);
+      doc.rect(380, p6Y + 12, 160, 72).fillAndStroke("#FFFFFF", "#CBD5E1");
+      doc.font("Helvetica-Bold").fontSize(8).fillColor(headingNavy).text("For AB ENERGY SOLUTIONS", 380, p6Y + 18, { width: 160, align: "center" });
+      doc.moveTo(395, p6Y + 60).lineTo(525, p6Y + 60).lineWidth(0.5).strokeColor("#94A3B8").stroke();
+      doc.font("Helvetica").fontSize(7.5).fillColor("#64748B").text("Authorized Signatory", 380, p6Y + 65, { width: 160, align: "center" });
+      const range = doc.bufferedPageRange();
+      for (let i = range.start; i < range.start + range.count; i++) {
+        doc.switchToPage(i);
+        drawFooter(i + 1, range.count);
+      }
+      doc.end();
+      writeStream.on("finish", () => {
+        resolve({ filePath, fileUrl });
+      });
+      writeStream.on("error", (err) => {
+        reject(err);
+      });
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+// server/controllers/quotations.controller.ts
+function formatQuotation(q) {
+  if (!q) return null;
+  return {
+    ...q,
+    quotationNumber: q.quotation_number,
+    leadId: q.lead_id,
+    leadName: q.lead_name,
+    customerPhone: q.customer_phone,
+    customerAddress: q.customer_address,
+    systemCapacityKw: Number(q.system_capacity_kw) || 0,
+    currentVersion: Number(q.current_version) || 1,
+    versions: typeof q.versions === "string" ? JSON.parse(q.versions) : q.versions || [],
+    status: q.status,
+    sentDate: q.sent_date,
+    validUntil: q.valid_until,
+    salespersonId: q.salesperson_id,
+    salespersonName: q.salesperson_name,
+    totalAmount: Number(q.total_amount) || 0,
+    proposalType: q.proposal_type || "Final_Technical",
+    packageTier: q.package_tier || "Standard",
+    approvalStatus: q.approval_status || "Approved",
+    discountAmount: Number(q.discount_amount) || 0,
+    discountApprovedBy: q.discount_approved_by,
+    subsidyAmount: Number(q.subsidy_amount) || 0,
+    taxableAmount: Number(q.taxable_amount) || 0,
+    gstRate: Number(q.gst_rate) || 0,
+    gstAmount: Number(q.gst_amount) || 0,
+    taxMode: q.tax_mode || "ITEMIZED",
+    totalCgst: Number(q.total_cgst) || 0,
+    totalSgst: Number(q.total_sgst) || 0,
+    totalIgst: Number(q.total_igst) || 0,
+    amountInWords: q.amount_in_words || "",
+    surveyId: q.survey_id,
+    pdfUrl: q.pdf_url,
+    convertedToProjectId: q.converted_to_project_id,
+    createdAt: q.created_at
+  };
+}
+var calculateQuotationPreview = async (req, res) => {
+  try {
+    const input = req.body;
+    const calc = calculateQuotation(input);
+    return res.json({ success: true, calculation: calc });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+var getQuotations = async (req, res) => {
+  try {
+    const user2 = req.user;
+    let query = "SELECT * FROM quotations ORDER BY created_at DESC";
+    let params = [];
+    if (user2?.role === "Customer") {
+      const custId = user2.customerId || "";
+      query = `SELECT q.* FROM quotations q 
+               LEFT JOIN customers c ON (c.converted_from_lead_id = q.lead_id OR c.phone = q.customer_phone)
+               WHERE c.id = ? OR q.customer_phone = ?
+               ORDER BY q.created_at DESC`;
+      params = [custId, user2?.phone || ""];
+    }
+    const [rows] = await pool.query(query, params);
+    const parsed = rows.map((q) => formatQuotation(q));
+    res.json({ success: true, quotations: parsed });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var getQuotationById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const [rows] = await pool.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [id]);
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ success: false, error: "Quotation not found" });
+    }
+    res.json({ success: true, quotation: formatQuotation(rows[0]) });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+async function createQuotationDraftInternal(connOrPool, options) {
+  const { surveyId, leadId, user: user2, packageTier = "Premium Bifacial", discountAmount = 0, customItems } = options;
+  const [existingBySurvey] = await connOrPool.query(
+    'SELECT * FROM quotations WHERE survey_id = ? AND status != "Declined" ORDER BY created_at DESC LIMIT 1',
+    [surveyId]
+  );
+  if (existingBySurvey && existingBySurvey.length > 0) {
+    return { quotation: formatQuotation(existingBySurvey[0]), created: false };
+  }
+  if (leadId) {
+    const [existingByLead] = await connOrPool.query(
+      'SELECT * FROM quotations WHERE lead_id = ? AND status != "Declined" ORDER BY created_at DESC LIMIT 1',
+      [leadId]
+    );
+    if (existingByLead && existingByLead.length > 0) {
+      if (!existingByLead[0].survey_id) {
+        await connOrPool.query("UPDATE quotations SET survey_id = ? WHERE id = ?", [surveyId, existingByLead[0].id]);
+        existingByLead[0].survey_id = surveyId;
+      }
+      return { quotation: formatQuotation(existingByLead[0]), created: false };
+    }
+  }
+  const [surveys] = await connOrPool.query("SELECT * FROM site_surveys WHERE id = ? LIMIT 1", [surveyId]);
+  if (!surveys || surveys.length === 0) {
+    throw new Error(`Site survey ${surveyId} not found`);
+  }
+  const survey = surveys[0];
+  let lead = null;
+  const effectiveLeadId = leadId || survey.lead_id;
+  if (effectiveLeadId) {
+    const [leads] = await connOrPool.query("SELECT * FROM leads WHERE id = ? LIMIT 1", [effectiveLeadId]);
+    if (leads && leads.length > 0) {
+      lead = leads[0];
+    }
+  }
+  const capacityKw = Number(survey.recommended_kw) || Number(lead?.recommended_kw) || 5;
+  const roofType = survey.roof_type || lead?.roof_type || "RCC Flat";
+  const customerName = survey.customer_name || lead?.name || "Solar Customer";
+  const customerPhone = survey.phone || lead?.phone || "";
+  const customerAddress = survey.address || lead?.address || lead?.city || "Bengaluru, Karnataka";
+  const customerCategory = lead?.monthly_bill && Number(lead.monthly_bill) > 25e3 ? "Commercial" : "Residential";
+  const calc = calculateQuotation({
+    leadId: effectiveLeadId,
+    leadName: customerName,
+    customerPhone,
+    customerAddress,
+    customerCategory,
+    systemCapacityKw: capacityKw,
+    packageTier,
+    discountAmount,
+    surveyId,
+    isSurveyApproved: true,
+    roofType,
+    customItems
+  });
+  const [allIds] = await connOrPool.query("SELECT id FROM quotations WHERE id LIKE 'QT-2026-%'");
+  let maxNum = 20;
+  for (const row of allIds) {
+    const match = row.id.match(/QT-2026-(\d+)/);
+    if (match) {
+      const n = parseInt(match[1], 10);
+      if (n > maxNum) maxNum = n;
+    }
+  }
+  const finalId = `QT-2026-${String(maxNum + 1).padStart(5, "0")}`;
+  const versionNumber = `${finalId}-V1`;
+  const v1 = {
+    version: 1,
+    quotationNumber: versionNumber,
+    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+    items: calc.items,
+    subtotal: calc.subtotal,
+    subsidyDeduction: calc.subsidyAmount,
+    discount: calc.discountAmount,
+    taxableAmount: calc.taxableAmount,
+    gstRate: calc.gstRate,
+    gstAmount: calc.gstAmount,
+    cgstAmount: calc.cgstAmount,
+    sgstAmount: calc.sgstAmount,
+    igstAmount: calc.igstAmount,
+    taxType: calc.taxType,
+    netTotal: calc.finalContractAmount,
+    amountInWords: calc.amountInWords,
+    terms: calc.terms,
+    notes: `Techno-Commercial Proposal based on approved Technical Site Survey ${surveyId}.`
+  };
+  const validUntil = new Date(Date.now() + 864e5 * 14).toISOString().split("T")[0];
+  const salespersonId = lead?.assigned_to_id || user2?.employeeId || "EMP-265286";
+  const salespersonName = lead?.assigned_to_name || (user2?.role === "Sales Executive" ? user2?.name : "Suresh Kumar");
+  await connOrPool.query(
+    `INSERT INTO quotations (
+      id, quotation_number, lead_id, lead_name, customer_phone, customer_address, 
+      system_capacity_kw, current_version, versions, status, sent_date, valid_until, 
+      salesperson_id, salesperson_name, total_amount, proposal_type, package_tier, 
+      subtotal, discount_amount, subsidy_amount, taxable_amount, gst_rate, gst_amount, 
+      net_total, approval_status, survey_id, tax_mode, total_cgst, total_sgst, total_igst, 
+      amount_in_words, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      finalId,
+      versionNumber,
+      effectiveLeadId || null,
+      customerName,
+      customerPhone,
+      customerAddress,
+      calc.systemCapacityKw,
+      1,
+      JSON.stringify([v1]),
+      "Draft",
+      null,
+      validUntil,
+      salespersonId,
+      salespersonName,
+      calc.finalContractAmount,
+      "Final_Technical",
+      calc.packageTier,
+      calc.subtotal,
+      calc.discountAmount,
+      calc.subsidyAmount,
+      calc.taxableAmount,
+      calc.gstRate,
+      calc.gstAmount,
+      calc.finalContractAmount,
+      calc.approvalStatus,
+      surveyId,
+      calc.taxMode,
+      calc.cgstAmount,
+      calc.sgstAmount,
+      calc.igstAmount,
+      calc.amountInWords,
+      (/* @__PURE__ */ new Date()).toISOString()
+    ]
+  );
+  await connOrPool.query("UPDATE site_surveys SET quotation_id = ? WHERE id = ?", [finalId, surveyId]);
+  let pdfUrl = `/uploads/proposals/Quotation_${versionNumber.replace(/[^a-zA-Z0-9_-]/g, "_")}.pdf`;
+  try {
+    const pdfData = {
+      quotationNumber: versionNumber,
+      versionNumber: 1,
+      createdAt: v1.createdAt,
+      validUntil,
+      leadName: customerName,
+      customerPhone,
+      customerAddress,
+      systemCapacityKw: calc.systemCapacityKw,
+      actualCapacityKwp: calc.actualCapacityKwp,
+      packageTier: calc.packageTier,
+      proposalType: "Final_Technical",
+      salespersonName,
+      taxMode: calc.taxMode,
+      taxType: calc.taxType,
+      items: calc.items,
+      subtotal: calc.subtotal,
+      discountAmount: calc.discountAmount,
+      taxableAmount: calc.taxableAmount,
+      gstRate: calc.gstRate,
+      cgstAmount: calc.cgstAmount,
+      sgstAmount: calc.sgstAmount,
+      igstAmount: calc.igstAmount,
+      gstAmount: calc.gstAmount,
+      finalContractAmount: calc.finalContractAmount,
+      amountInWords: calc.amountInWords,
+      subsidyEligible: calc.subsidyEligible,
+      subsidyAmount: calc.subsidyAmount,
+      indicativeNetCustomerCost: calc.indicativeNetCustomerCost,
+      annualGenerationKwh: calc.annualGenerationKwh,
+      annualSavingsInr: calc.annualSavingsInr,
+      lifetimeSavings25Yr: calc.lifetimeSavings25Yr,
+      simplePaybackYears: calc.simplePaybackYears,
+      terms: calc.terms
+    };
+    const resPdf = await generateProposalPdf(pdfData);
+    pdfUrl = resPdf.fileUrl;
+    await connOrPool.query("UPDATE quotations SET pdf_url = ? WHERE id = ?", [pdfUrl, finalId]);
+  } catch (pdfErr) {
+    console.warn("PDF generation in background:", pdfErr);
+  }
+  const [createdRows] = await connOrPool.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [finalId]);
+  return { quotation: formatQuotation(createdRows[0]), created: true };
+}
+var createQuotation = async (req, res) => {
+  try {
+    const body = req.body;
+    const user2 = req.user;
+    if (body.surveyId) {
+      const result = await createQuotationDraftInternal(pool, {
+        surveyId: body.surveyId,
+        leadId: body.leadId,
+        user: user2,
+        packageTier: body.packageTier,
+        discountAmount: body.discountAmount,
+        customItems: body.customItems
+      });
+      return res.json({ success: true, quotation: result.quotation, alreadyExisted: !result.created });
+    }
+    let isSurveyApproved = false;
+    let surveyRef = body.surveyId;
+    if (body.leadId) {
+      const [surveys] = await pool.query(
+        "SELECT id, status, recommended_kw FROM site_surveys WHERE lead_id = ? ORDER BY created_at DESC LIMIT 1",
+        [body.leadId]
+      );
+      if (surveys && surveys.length > 0) {
+        if (surveys[0].status === "Approved" || surveys[0].status === "Completed") {
+          isSurveyApproved = true;
+          surveyRef = surveys[0].id;
+        }
+      }
+    }
+    const calc = calculateQuotation({
+      leadId: body.leadId,
+      leadName: body.leadName,
+      customerPhone: body.customerPhone,
+      customerAddress: body.customerAddress,
+      customerCategory: body.customerCategory,
+      systemCapacityKw: body.systemCapacityKw || 5,
+      packageTier: body.packageTier || "Premium Bifacial",
+      discountAmount: body.discountAmount || 0,
+      surveyId: surveyRef,
+      isSurveyApproved,
+      roofType: body.roofType,
+      customItems: body.customItems,
+      taxMode: body.taxMode,
+      taxType: body.taxType
+    });
+    const [allIds] = await pool.query("SELECT id FROM quotations WHERE id LIKE 'QT-2026-%'");
+    let maxNum = 20;
+    for (const row of allIds) {
+      const match = row.id.match(/QT-2026-(\d+)/);
+      if (match) {
+        const n = parseInt(match[1], 10);
+        if (n > maxNum) maxNum = n;
+      }
+    }
+    const finalId = `QT-2026-${String(maxNum + 1).padStart(5, "0")}`;
+    const versionNumber = `${finalId}-V1`;
+    const v1 = {
+      version: 1,
+      quotationNumber: versionNumber,
+      createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+      items: calc.items,
+      subtotal: calc.subtotal,
+      subsidyDeduction: calc.subsidyAmount,
+      discount: calc.discountAmount,
+      taxableAmount: calc.taxableAmount,
+      gstRate: calc.gstRate,
+      gstAmount: calc.gstAmount,
+      cgstAmount: calc.cgstAmount,
+      sgstAmount: calc.sgstAmount,
+      igstAmount: calc.igstAmount,
+      taxType: calc.taxType,
+      netTotal: calc.finalContractAmount,
+      amountInWords: calc.amountInWords,
+      terms: calc.terms,
+      notes: isSurveyApproved ? `Techno-Commercial Proposal based on approved Technical Site Survey ${surveyRef}.` : `Preliminary indicative solar estimate. Final capacity subject to on-site roof audit.`
+    };
+    const validUntil = new Date(Date.now() + 864e5 * 14).toISOString().split("T")[0];
+    const salespersonId = body.salespersonId || user2?.employeeId || "EMP-06";
+    const salespersonName = body.salespersonName || user2?.name || "Vikram Mehta (Sales)";
+    await pool.query(
+      `INSERT INTO quotations (
+        id, quotation_number, lead_id, lead_name, customer_phone, customer_address, 
+        system_capacity_kw, current_version, versions, status, sent_date, valid_until, 
+        salesperson_id, salesperson_name, total_amount, proposal_type, package_tier, 
+        subtotal, discount_amount, subsidy_amount, taxable_amount, gst_rate, gst_amount, 
+        net_total, approval_status, survey_id, tax_mode, total_cgst, total_sgst, total_igst,
+        amount_in_words, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        finalId,
+        versionNumber,
+        body.leadId || null,
+        body.leadName || "Solar Client",
+        body.customerPhone || "",
+        body.customerAddress || "",
+        calc.systemCapacityKw,
+        1,
+        JSON.stringify([v1]),
+        "Draft",
+        null,
+        validUntil,
+        salespersonId,
+        salespersonName,
+        calc.finalContractAmount,
+        calc.proposalType,
+        calc.packageTier,
+        calc.subtotal,
+        calc.discountAmount,
+        calc.subsidyAmount,
+        calc.taxableAmount,
+        calc.gstRate,
+        calc.gstAmount,
+        calc.finalContractAmount,
+        calc.approvalStatus,
+        surveyRef || null,
+        calc.taxMode,
+        calc.cgstAmount,
+        calc.sgstAmount,
+        calc.igstAmount,
+        calc.amountInWords,
+        (/* @__PURE__ */ new Date()).toISOString()
+      ]
+    );
+    if (body.leadId) {
+      await pool.query("UPDATE leads SET quotation_id = ? WHERE id = ?", [finalId, body.leadId]);
+    }
+    if (surveyRef) {
+      await pool.query("UPDATE site_surveys SET quotation_id = ? WHERE id = ?", [finalId, surveyRef]);
+    }
+    let pdfUrl = `/uploads/proposals/Quotation_${versionNumber.replace(/[^a-zA-Z0-9_-]/g, "_")}.pdf`;
+    try {
+      const pdfData = {
+        quotationNumber: versionNumber,
+        versionNumber: 1,
+        createdAt: v1.createdAt,
+        validUntil,
+        leadName: body.leadName || "Solar Client",
+        customerPhone: body.customerPhone || "",
+        customerAddress: body.customerAddress || "Bengaluru, Karnataka",
+        systemCapacityKw: calc.systemCapacityKw,
+        actualCapacityKwp: calc.actualCapacityKwp,
+        packageTier: calc.packageTier,
+        proposalType: calc.proposalType,
+        salespersonName,
+        taxMode: calc.taxMode,
+        taxType: calc.taxType,
+        items: calc.items,
+        subtotal: calc.subtotal,
+        discountAmount: calc.discountAmount,
+        taxableAmount: calc.taxableAmount,
+        gstRate: calc.gstRate,
+        cgstAmount: calc.cgstAmount,
+        sgstAmount: calc.sgstAmount,
+        igstAmount: calc.igstAmount,
+        gstAmount: calc.gstAmount,
+        finalContractAmount: calc.finalContractAmount,
+        amountInWords: calc.amountInWords,
+        subsidyEligible: calc.subsidyEligible,
+        subsidyAmount: calc.subsidyAmount,
+        indicativeNetCustomerCost: calc.indicativeNetCustomerCost,
+        annualGenerationKwh: calc.annualGenerationKwh,
+        annualSavingsInr: calc.annualSavingsInr,
+        lifetimeSavings25Yr: calc.lifetimeSavings25Yr,
+        simplePaybackYears: calc.simplePaybackYears,
+        terms: calc.terms
+      };
+      const resPdf = await generateProposalPdf(pdfData);
+      pdfUrl = resPdf.fileUrl;
+      await pool.query("UPDATE quotations SET pdf_url = ? WHERE id = ?", [pdfUrl, finalId]);
+    } catch (pdfErr) {
+      console.warn("Note: Background PDF generation queued:", pdfErr);
+    }
+    const [createdRows] = await pool.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [finalId]);
+    res.json({ success: true, quotation: formatQuotation(createdRows[0]) });
+  } catch (err) {
+    console.error("Error creating quotation:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var createQuotationRevision = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const body = req.body;
+    const user2 = req.user;
+    const [rows] = await pool.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [id]);
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ success: false, error: "Quotation not found" });
+    }
+    const existing = rows[0];
+    const versions = typeof existing.versions === "string" ? JSON.parse(existing.versions) : existing.versions || [];
+    const nextVerNum = (existing.current_version || versions.length) + 1;
+    const nextVerCode = `${id}-V${nextVerNum}`;
+    const calc = calculateQuotation({
+      leadId: existing.lead_id,
+      leadName: existing.lead_name,
+      customerPhone: existing.customer_phone,
+      customerAddress: existing.customer_address,
+      systemCapacityKw: body.systemCapacityKw || existing.system_capacity_kw,
+      packageTier: body.packageTier || existing.package_tier || "Premium Bifacial",
+      discountAmount: body.discountAmount !== void 0 ? body.discountAmount : existing.discount_amount,
+      surveyId: existing.survey_id,
+      isSurveyApproved: existing.proposal_type === "Final_Technical",
+      customItems: body.customItems,
+      taxMode: body.taxMode || existing.tax_mode,
+      taxType: body.taxType
+    });
+    const newVersion = {
+      version: nextVerNum,
+      quotationNumber: nextVerCode,
+      createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+      items: calc.items,
+      subtotal: calc.subtotal,
+      subsidyDeduction: calc.subsidyAmount,
+      discount: calc.discountAmount,
+      taxableAmount: calc.taxableAmount,
+      gstRate: calc.gstRate,
+      gstAmount: calc.gstAmount,
+      cgstAmount: calc.cgstAmount,
+      sgstAmount: calc.sgstAmount,
+      igstAmount: calc.igstAmount,
+      taxType: calc.taxType,
+      netTotal: calc.finalContractAmount,
+      amountInWords: calc.amountInWords,
+      terms: calc.terms,
+      notes: body.notes || `Revision V${nextVerNum} created by ${user2?.name || "Sales Rep"}.`
+    };
+    versions.push(newVersion);
+    let pdfUrl = existing.pdf_url;
+    try {
+      const pdfData = {
+        quotationNumber: nextVerCode,
+        versionNumber: nextVerNum,
+        createdAt: newVersion.createdAt,
+        validUntil: existing.valid_until,
+        leadName: existing.lead_name,
+        customerPhone: existing.customer_phone,
+        customerAddress: existing.customer_address,
+        systemCapacityKw: calc.systemCapacityKw,
+        actualCapacityKwp: calc.actualCapacityKwp,
+        packageTier: calc.packageTier,
+        proposalType: calc.proposalType,
+        salespersonName: user2?.name || existing.salesperson_name,
+        taxMode: calc.taxMode,
+        taxType: calc.taxType,
+        items: calc.items,
+        subtotal: calc.subtotal,
+        discountAmount: calc.discountAmount,
+        taxableAmount: calc.taxableAmount,
+        gstRate: calc.gstRate,
+        cgstAmount: calc.cgstAmount,
+        sgstAmount: calc.sgstAmount,
+        igstAmount: calc.igstAmount,
+        gstAmount: calc.gstAmount,
+        finalContractAmount: calc.finalContractAmount,
+        amountInWords: calc.amountInWords,
+        subsidyEligible: calc.subsidyEligible,
+        subsidyAmount: calc.subsidyAmount,
+        indicativeNetCustomerCost: calc.indicativeNetCustomerCost,
+        annualGenerationKwh: calc.annualGenerationKwh,
+        annualSavingsInr: calc.annualSavingsInr,
+        lifetimeSavings25Yr: calc.lifetimeSavings25Yr,
+        simplePaybackYears: calc.simplePaybackYears,
+        terms: calc.terms
+      };
+      const resPdf = await generateProposalPdf(pdfData);
+      pdfUrl = resPdf.fileUrl;
+    } catch (e) {
+      console.warn("PDF revision generation error:", e);
+    }
+    await pool.query(
+      `UPDATE quotations SET 
+        quotation_number = ?, current_version = ?, versions = ?, total_amount = ?,
+        system_capacity_kw = ?, package_tier = ?, subtotal = ?, discount_amount = ?,
+        subsidy_amount = ?, taxable_amount = ?, gst_rate = ?, gst_amount = ?, net_total = ?,
+        approval_status = ?, tax_mode = ?, total_cgst = ?, total_sgst = ?, total_igst = ?,
+        amount_in_words = ?, pdf_url = ?
+       WHERE id = ?`,
+      [
+        nextVerCode,
+        nextVerNum,
+        JSON.stringify(versions),
+        calc.finalContractAmount,
+        calc.systemCapacityKw,
+        calc.packageTier,
+        calc.subtotal,
+        calc.discountAmount,
+        calc.subsidyAmount,
+        calc.taxableAmount,
+        calc.gstRate,
+        calc.gstAmount,
+        calc.finalContractAmount,
+        calc.approvalStatus,
+        calc.taxMode,
+        calc.cgstAmount,
+        calc.sgstAmount,
+        calc.igstAmount,
+        calc.amountInWords,
+        pdfUrl,
+        id
+      ]
+    );
+    res.json({ success: true, quotationNumber: nextVerCode, version: newVersion, pdfUrl });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var approveQuotationDiscount = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const user2 = req.user;
+    if (user2?.role !== "Sales Manager" && user2?.role !== "Super Admin") {
+      return res.status(403).json({
+        success: false,
+        error: "Only Sales Manager or Super Admin can approve commercial discounts."
+      });
+    }
+    await pool.query(
+      'UPDATE quotations SET approval_status = "Approved", discount_approved_by = ? WHERE id = ?',
+      [user2.name, id]
+    );
+    res.json({ success: true, message: `Quotation ${id} approved by ${user2.name}` });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var updateQuotation = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+    const allowed = ["status", "notes", "validUntil", "sentDate", "packageTier", "versions", "totalAmount", "approvalStatus"];
+    const fields = [];
+    const values = [];
+    if (updates.status !== void 0) {
+      fields.push("status = ?");
+      values.push(updates.status);
+    }
+    if (updates.sentDate !== void 0) {
+      fields.push("sent_date = ?");
+      values.push(updates.sentDate);
+    }
+    if (updates.validUntil !== void 0) {
+      fields.push("valid_until = ?");
+      values.push(updates.validUntil);
+    }
+    if (updates.packageTier !== void 0) {
+      fields.push("package_tier = ?");
+      values.push(updates.packageTier);
+    }
+    if (updates.notes !== void 0) {
+      const [curr] = await pool.query("SELECT versions FROM quotations WHERE id = ? LIMIT 1", [id]);
+      if (curr && curr.length > 0) {
+        const v = typeof curr[0].versions === "string" ? JSON.parse(curr[0].versions) : curr[0].versions;
+        if (v && v.length > 0) {
+          v[v.length - 1].notes = updates.notes;
+          fields.push("versions = ?");
+          values.push(JSON.stringify(v));
+        }
+      }
+    }
+    if (updates.approvalStatus !== void 0) {
+      fields.push("approval_status = ?");
+      values.push(updates.approvalStatus);
+    }
+    if (updates.status === "Sent" && (user?.role === "Sales Manager" || user?.role === "Super Admin")) {
+      fields.push("approval_status = ?");
+      values.push("Approved");
+      fields.push("discount_approved_by = ?");
+      values.push(user?.name || "Sales Manager");
+    }
+    if (fields.length > 0) {
+      values.push(id);
+      await pool.query(`UPDATE quotations SET ${fields.join(", ")} WHERE id = ?`, values);
+    }
+    res.json({ success: true, id, updates });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var editQuotation = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const body = req.body;
+    const user2 = req.user;
+    const [rows] = await pool.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [id]);
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ success: false, error: "Quotation not found" });
+    }
+    const existing = rows[0];
+    const systemCapacityKw = body.systemCapacityKw || existing.system_capacity_kw;
+    const packageTier = body.packageTier || existing.package_tier || "Premium Bifacial";
+    const discountAmount = body.discountAmount !== void 0 ? Number(body.discountAmount) : Number(existing.discount_amount);
+    const customItems = body.customItems;
+    const calc = calculateQuotation({
+      leadId: existing.lead_id,
+      leadName: existing.lead_name,
+      customerPhone: existing.customer_phone,
+      customerAddress: existing.customer_address,
+      customerCategory: existing.customer_category,
+      systemCapacityKw,
+      packageTier,
+      discountAmount,
+      surveyId: existing.survey_id,
+      isSurveyApproved: existing.proposal_type === "Final_Technical",
+      customItems,
+      taxMode: body.taxMode || existing.tax_mode,
+      taxType: body.taxType
+    });
+    let versions = typeof existing.versions === "string" ? JSON.parse(existing.versions) : existing.versions || [];
+    if (!versions || versions.length === 0) {
+      versions = [{
+        version: 1,
+        quotationNumber: existing.quotation_number,
+        createdAt: existing.created_at || (/* @__PURE__ */ new Date()).toISOString(),
+        items: calc.items,
+        subtotal: calc.subtotal,
+        subsidyDeduction: calc.subsidyAmount,
+        discount: calc.discountAmount,
+        taxableAmount: calc.taxableAmount,
+        gstRate: calc.gstRate,
+        gstAmount: calc.gstAmount,
+        cgstAmount: calc.cgstAmount,
+        sgstAmount: calc.sgstAmount,
+        igstAmount: calc.igstAmount,
+        taxType: calc.taxType,
+        netTotal: calc.finalContractAmount,
+        amountInWords: calc.amountInWords,
+        terms: calc.terms,
+        notes: body.notes || "Updated quotation draft with custom BOM."
+      }];
+    } else {
+      const lastIdx = versions.length - 1;
+      versions[lastIdx] = {
+        ...versions[lastIdx],
+        items: calc.items,
+        subtotal: calc.subtotal,
+        subsidyDeduction: calc.subsidyAmount,
+        discount: calc.discountAmount,
+        taxableAmount: calc.taxableAmount,
+        gstRate: calc.gstRate,
+        gstAmount: calc.gstAmount,
+        cgstAmount: calc.cgstAmount,
+        sgstAmount: calc.sgstAmount,
+        igstAmount: calc.igstAmount,
+        taxType: calc.taxType,
+        netTotal: calc.finalContractAmount,
+        amountInWords: calc.amountInWords,
+        terms: calc.terms,
+        notes: body.notes || versions[lastIdx].notes
+      };
+    }
+    let pdfUrl = existing.pdf_url;
+    try {
+      const pdfData = {
+        quotationNumber: existing.quotation_number,
+        versionNumber: existing.current_version || 1,
+        createdAt: existing.created_at,
+        validUntil: existing.valid_until,
+        leadName: existing.lead_name,
+        customerPhone: existing.customer_phone,
+        customerAddress: existing.customer_address,
+        systemCapacityKw: calc.systemCapacityKw,
+        actualCapacityKwp: calc.actualCapacityKwp,
+        packageTier: calc.packageTier,
+        proposalType: calc.proposalType,
+        salespersonName: existing.salesperson_name || user2?.name || "Vikram Mehta (Sales)",
+        taxMode: calc.taxMode,
+        taxType: calc.taxType,
+        items: calc.items,
+        subtotal: calc.subtotal,
+        discountAmount: calc.discountAmount,
+        taxableAmount: calc.taxableAmount,
+        gstRate: calc.gstRate,
+        cgstAmount: calc.cgstAmount,
+        sgstAmount: calc.sgstAmount,
+        igstAmount: calc.igstAmount,
+        gstAmount: calc.gstAmount,
+        finalContractAmount: calc.finalContractAmount,
+        amountInWords: calc.amountInWords,
+        subsidyEligible: calc.subsidyEligible,
+        subsidyAmount: calc.subsidyAmount,
+        indicativeNetCustomerCost: calc.indicativeNetCustomerCost,
+        annualGenerationKwh: calc.annualGenerationKwh,
+        annualSavingsInr: calc.annualSavingsInr,
+        lifetimeSavings25Yr: calc.lifetimeSavings25Yr,
+        simplePaybackYears: calc.simplePaybackYears,
+        terms: calc.terms
+      };
+      const resPdf = await generateProposalPdf(pdfData);
+      pdfUrl = resPdf.fileUrl;
+    } catch (e) {
+      console.warn("PDF regeneration error:", e);
+    }
+    const isManager = user2?.role === "Sales Manager" || user2?.role === "Super Admin";
+    const finalApproval = body.approvalStatus || (isManager ? "Approved" : calc.approvalStatus);
+    const approvedBy = isManager ? user2?.name || "Sales Manager" : existing.discount_approved_by;
+    await pool.query(
+      `UPDATE quotations SET
+        system_capacity_kw = ?, package_tier = ?, discount_amount = ?,
+        subtotal = ?, taxable_amount = ?, gst_rate = ?, gst_amount = ?,
+        total_amount = ?, net_total = ?, total_cgst = ?, total_sgst = ?,
+        total_igst = ?, amount_in_words = ?, approval_status = ?, discount_approved_by = ?,
+        versions = ?, pdf_url = ?
+       WHERE id = ?`,
+      [
+        calc.systemCapacityKw,
+        calc.packageTier,
+        calc.discountAmount,
+        calc.subtotal,
+        calc.taxableAmount,
+        calc.gstRate,
+        calc.gstAmount,
+        calc.finalContractAmount,
+        calc.finalContractAmount,
+        calc.cgstAmount,
+        calc.sgstAmount,
+        calc.igstAmount,
+        calc.amountInWords,
+        finalApproval,
+        approvedBy,
+        JSON.stringify(versions),
+        pdfUrl,
+        id
+      ]
+    );
+    const [updated] = await pool.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [id]);
+    res.json({ success: true, quotation: formatQuotation(updated[0]) });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var recordCustomerAcceptance = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { acceptanceNotes, clientPoNumber } = req.body;
+    const user2 = req.user;
+    const [rows] = await pool.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [id]);
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ success: false, error: "Quotation not found" });
+    }
+    const quote = rows[0];
+    if (quote.approval_status === "Pending_Approval") {
+      return res.status(400).json({
+        success: false,
+        error: "Cannot record customer acceptance: Quotation discount is pending Sales Manager approval."
+      });
+    }
+    await pool.query(
+      `UPDATE quotations SET 
+        status = 'Customer_Accepted',
+        notes = CONCAT(COALESCE(notes, ''), ?),
+        sent_date = COALESCE(sent_date, NOW())
+       WHERE id = ?`,
+      [`
+[Customer Accepted: ${(/* @__PURE__ */ new Date()).toLocaleDateString("en-IN")}] Recorded by ${user2?.name || "Sales"}. PO: ${clientPoNumber || "N/A"}. ${acceptanceNotes || ""}`, id]
+    );
+    const [updated] = await pool.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [id]);
+    res.json({ success: true, quotation: formatQuotation(updated[0]) });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var acceptQuotation = async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    const { id } = req.params;
+    const user2 = req.user;
+    if (user2 && user2.role !== "Project Manager" && user2.role !== "Super Admin") {
+      conn.release();
+      return res.status(403).json({
+        success: false,
+        error: "Access denied: Only Project Managers and Super Admins are authorized to convert accepted quotations into live EPC projects."
+      });
+    }
+    const [rows] = await conn.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [id]);
+    if (!rows || rows.length === 0) {
+      conn.release();
+      return res.status(404).json({ success: false, error: "Quotation not found" });
+    }
+    const quote = rows[0];
+    if (quote.approval_status === "Pending_Approval") {
+      conn.release();
+      return res.status(400).json({
+        success: false,
+        error: "Cannot accept quotation: Discount exceeds authorized threshold and is pending manager approval."
+      });
+    }
+    if (quote.converted_to_project_id) {
+      const [existingProject] = await conn.query(
+        "SELECT * FROM projects WHERE id = ? LIMIT 1",
+        [quote.converted_to_project_id]
+      );
+      conn.release();
+      if (existingProject && existingProject.length > 0) {
+        return res.json({
+          success: true,
+          message: "Quotation was already accepted and converted to project.",
+          alreadyConverted: true,
+          projectId: quote.converted_to_project_id,
+          project: existingProject[0]
+        });
+      }
+    }
+    await conn.beginTransaction();
+    const quoteTotal = Number(quote.total_amount) || 0;
+    const capacityKw = Number(quote.system_capacity_kw) || 5;
+    const advanceAmount = Math.round(quoteTotal * 0.9);
+    let customerId = "";
+    let customerName = quote.lead_name;
+    let customerPhone = quote.customer_phone;
+    let customerAddress = quote.customer_address;
+    const [existingCust] = await conn.query(
+      "SELECT id, name, phone, address FROM customers WHERE converted_from_lead_id = ? OR phone = ? LIMIT 1",
+      [quote.lead_id, quote.customer_phone]
+    );
+    if (existingCust && existingCust.length > 0) {
+      customerId = existingCust[0].id;
+      customerName = existingCust[0].name;
+    } else {
+      const [allCusts] = await conn.query("SELECT id FROM customers WHERE id LIKE 'CUST-2026-%'");
+      let maxCustNum = 20;
+      for (const c of allCusts) {
+        const match = c.id.match(/CUST-2026-(\d+)/);
+        if (match) {
+          const n = parseInt(match[1], 10);
+          if (n > maxCustNum) maxCustNum = n;
+        }
+      }
+      customerId = `CUST-2026-${String(maxCustNum + 1).padStart(3, "0")}`;
+      await conn.query(
+        `INSERT INTO customers (
+          id, name, email, phone, address, city, state, pincode, 
+          consumer_number_discom, discom_name, converted_from_lead_id, 
+          total_system_kw, total_order_value, paid_amount, balance_amount, 
+          status, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          customerId,
+          customerName,
+          `${customerName.toLowerCase().replace(/\s+/g, ".")}@example.com`,
+          customerPhone,
+          customerAddress || "Site Address",
+          "Bengaluru",
+          "Karnataka",
+          "560001",
+          `DISCOM-${Math.floor(1e6 + Math.random() * 9e6)}`,
+          "BESCOM",
+          quote.lead_id,
+          capacityKw,
+          quoteTotal,
+          0,
+          quoteTotal,
+          "Under Installation",
+          (/* @__PURE__ */ new Date()).toISOString()
+        ]
+      );
+    }
+    const [allProjs] = await conn.query("SELECT id FROM projects WHERE id LIKE 'PROJECT-2026-%' OR id LIKE 'PRJ-2026-%'");
+    let maxProjNum = 20;
+    for (const p of allProjs) {
+      const match = p.id.match(/(?:PROJECT|PRJ)-2026-(\d+)/);
+      if (match) {
+        const n = parseInt(match[1], 10);
+        if (n > maxProjNum) maxProjNum = n;
+      }
+    }
+    const projectId = `PROJECT-2026-${String(maxProjNum + 1).padStart(3, "0")}`;
+    const targetDate = new Date(Date.now() + 864e5 * 25).toISOString().split("T")[0];
+    const initialTasks = [
+      { id: `PT-${Date.now()}-1`, title: "DISCOM Net-metering application & sanction", stage: "Documentation", isCompleted: false, assignedRole: "Project Manager", assignedToName: "Karthik Raja", dueDate: new Date(Date.now() + 864e5 * 3).toISOString().split("T")[0] },
+      { id: `PT-${Date.now()}-2`, title: "Warehouse material packing and dispatch check", stage: "Material Ready", isCompleted: false, assignedRole: "Project Manager", assignedToName: "Karthik Raja", dueDate: new Date(Date.now() + 864e5 * 5).toISOString().split("T")[0] },
+      { id: `PT-${Date.now()}-3`, title: "HDG structure foundation & anchor bolting", stage: "Installation Scheduled", isCompleted: false, assignedRole: "Installation Team", assignedToName: "Muthu Vel", dueDate: new Date(Date.now() + 864e5 * 8).toISOString().split("T")[0] },
+      { id: `PT-${Date.now()}-4`, title: "Module mounting & DC string conduit wiring", stage: "Installation In Progress", isCompleted: false, assignedRole: "Installation Team", assignedToName: "Muthu Vel", dueDate: new Date(Date.now() + 864e5 * 12).toISOString().split("T")[0] }
+    ];
+    const initialChecklist = {
+      structureFastening: false,
+      moduleClampingTorque: false,
+      inverterWallMounting: false,
+      dcWiringConduit: false,
+      acWiringArmoured: false,
+      chemicalEarthingPits: false,
+      lightningArrester: false,
+      dcdbProtectionFuses: false,
+      acdbMccbIsolator: false,
+      remoteMonitoringConfigured: false,
+      vocAndIscTesting: false,
+      safetySignagesAffixed: false,
+      photosUploaded: []
+    };
+    await conn.query(
+      `INSERT INTO projects (
+        id, customer_id, customer_name, customer_phone, customer_address, 
+        quotation_id, capacity_kw, total_amount, stage, start_date, 
+        target_completion_date, project_manager_id, project_manager_name, 
+        installation_lead_id, installation_lead_name, checklist, tasks, 
+        inventory_reserved, discom_sanction_number, notes, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        projectId,
+        customerId,
+        customerName,
+        customerPhone,
+        customerAddress,
+        quote.id,
+        capacityKw,
+        quoteTotal,
+        "Booking",
+        (/* @__PURE__ */ new Date()).toISOString().split("T")[0],
+        targetDate,
+        "EMP-04",
+        "Karthik Raja",
+        "EMP-05",
+        "Muthu Vel",
+        JSON.stringify(initialChecklist),
+        JSON.stringify(initialTasks),
+        1,
+        `BESCOM/SANCTION/${Date.now().toString().slice(-4)}`,
+        `Converted deal from Quotation ${quote.quotation_number}. 40% Advance invoice issued (Unpaid).`,
+        (/* @__PURE__ */ new Date()).toISOString()
+      ]
+    );
+    const [allInvs] = await conn.query("SELECT id FROM invoices WHERE id LIKE 'INV-2026-%'");
+    let maxInvNum = 20;
+    for (const inv of allInvs) {
+      const match = inv.id.match(/INV-2026-(\d+)/);
+      if (match) {
+        const n = parseInt(match[1], 10);
+        if (n > maxInvNum) maxInvNum = n;
+      }
+    }
+    const invoiceId = `INV-2026-${String(maxInvNum + 1).padStart(3, "0")}`;
+    const invoiceNumber = `INV-2026-00${String(maxInvNum + 1).padStart(3, "0")}`;
+    const subtotalInv = Math.round(advanceAmount / 1.138);
+    const gstInv = advanceAmount - subtotalInv;
+    const invoiceItems = [
+      {
+        description: `90% Milestone Advance for ${capacityKw} kW Solar EPC Plant (Booking & Procurement)`,
+        hsnCode: "995465",
+        quantity: 1,
+        rate: subtotalInv,
+        amount: subtotalInv
+      }
+    ];
+    await conn.query(
+      `INSERT INTO invoices (
+        id, invoice_number, project_id, customer_id, customer_name, customer_phone, 
+        issue_date, due_date, items, subtotal, cgst, sgst, igst, total_amount, 
+        paid_amount, balance_due, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        invoiceId,
+        invoiceNumber,
+        projectId,
+        customerId,
+        customerName,
+        customerPhone,
+        (/* @__PURE__ */ new Date()).toISOString().split("T")[0],
+        new Date(Date.now() + 864e5 * 7).toISOString().split("T")[0],
+        JSON.stringify(invoiceItems),
+        subtotalInv,
+        Math.round(gstInv / 2),
+        Math.round(gstInv / 2),
+        0,
+        advanceAmount,
+        0,
+        advanceAmount,
+        "Unpaid"
+      ]
+    );
+    await conn.query(
+      'UPDATE quotations SET status = "Converted_To_Project", converted_to_project_id = ? WHERE id = ?',
+      [projectId, id]
+    );
+    if (quote.lead_id) {
+      await conn.query('UPDATE leads SET status = "Won" WHERE id = ?', [quote.lead_id]);
+    }
+    await conn.commit();
+    conn.release();
+    const [projRows] = await pool.query("SELECT * FROM projects WHERE id = ? LIMIT 1", [projectId]);
+    res.json({
+      success: true,
+      message: `Quotation accepted! Converted to Project ${projectId} and Advance Invoice ${invoiceNumber} created.`,
+      projectId,
+      project: projRows[0],
+      invoiceId
+    });
+  } catch (err) {
+    await conn.rollback();
+    conn.release();
+    console.error("Accept quotation transaction error:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var downloadProposalPdf = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const user2 = req.user;
+    const [rows] = await pool.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [id]);
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ success: false, error: "Quotation not found" });
+    }
+    const q = rows[0];
+    if (user2?.role === "Customer" && user2?.phone !== q.customer_phone) {
+      return res.status(403).json({ success: false, error: "Unauthorized to download this quotation." });
+    }
+    const versions = typeof q.versions === "string" ? JSON.parse(q.versions) : q.versions || [];
+    const activeVer = versions.find((v) => v.version === q.current_version) || versions[versions.length - 1] || {};
+    const calc = calculateQuotation({
+      systemCapacityKw: Number(q.system_capacity_kw) || 5,
+      packageTier: q.package_tier || "Premium Bifacial",
+      discountAmount: Number(q.discount_amount) || 0,
+      isSurveyApproved: q.proposal_type === "Final_Technical",
+      taxMode: q.tax_mode,
+      customerAddress: q.customer_address
+    });
+    const pdfData = {
+      quotationNumber: q.quotation_number || `${q.id}-V1`,
+      versionNumber: q.current_version || 1,
+      createdAt: q.created_at,
+      validUntil: q.valid_until || new Date(Date.now() + 864e5 * 14).toISOString().split("T")[0],
+      leadName: q.lead_name,
+      customerPhone: q.customer_phone,
+      customerAddress: q.customer_address || "Bengaluru, Karnataka",
+      systemCapacityKw: Number(q.system_capacity_kw) || 5,
+      actualCapacityKwp: calc.actualCapacityKwp,
+      packageTier: q.package_tier || "Premium Bifacial",
+      proposalType: q.proposal_type || "Final_Technical",
+      salespersonName: q.salesperson_name || "Vikram Mehta (Sales)",
+      taxMode: q.tax_mode || calc.taxMode,
+      taxType: activeVer.taxType || calc.taxType,
+      items: activeVer.items || calc.items,
+      subtotal: Number(q.subtotal) || calc.subtotal,
+      discountAmount: Number(q.discount_amount) || 0,
+      taxableAmount: Number(q.taxable_amount) || calc.taxableAmount,
+      gstRate: Number(q.gst_rate) || calc.gstRate,
+      cgstAmount: Number(q.total_cgst) || calc.cgstAmount,
+      sgstAmount: Number(q.total_sgst) || calc.sgstAmount,
+      igstAmount: Number(q.total_igst) || calc.igstAmount,
+      gstAmount: Number(q.gst_amount) || calc.gstAmount,
+      finalContractAmount: Number(q.total_amount) || calc.finalContractAmount,
+      amountInWords: q.amount_in_words || calc.amountInWords,
+      subsidyEligible: calc.subsidyEligible,
+      subsidyAmount: Number(q.subsidy_amount) || calc.subsidyAmount,
+      indicativeNetCustomerCost: calc.indicativeNetCustomerCost,
+      annualGenerationKwh: calc.annualGenerationKwh,
+      annualSavingsInr: calc.annualSavingsInr,
+      lifetimeSavings25Yr: calc.lifetimeSavings25Yr,
+      simplePaybackYears: calc.simplePaybackYears,
+      terms: activeVer.terms || calc.terms
+    };
+    const { filePath, fileUrl } = await generateProposalPdf(pdfData);
+    await pool.query("UPDATE quotations SET pdf_url = ? WHERE id = ?", [fileUrl, id]);
+    const isDownload = req.query.download === "true";
+    const filename = `AB_Energy_Proposal_${pdfData.quotationNumber.replace(/[^a-zA-Z0-9_-]/g, "_")}.pdf`;
+    res.setHeader("Content-Type", "application/pdf");
+    if (isDownload) {
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    } else {
+      res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+    }
+    return res.sendFile(path3.resolve(filePath));
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// server/routes/quotations.routes.ts
 var quotationsRouter = Router4();
 quotationsRouter.post(
   "/calculate",
@@ -4547,12 +4684,85 @@ var toggleUserStatus = async (req, res) => {
     res.status(500).json({ success: false, error: "Failed to toggle account status" });
   }
 };
+var importUsers = async (req, res) => {
+  try {
+    const currentUser = req.user;
+    if (!currentUser) {
+      return res.status(401).json({ success: false, error: "Authentication required" });
+    }
+    const { users } = req.body;
+    if (!Array.isArray(users) || users.length === 0) {
+      return res.status(400).json({ success: false, error: "No users provided for import" });
+    }
+    const imported = [];
+    const skipped = [];
+    const errors = [];
+    for (const u of users) {
+      const name = (u.Name || u.name || "").trim();
+      const username = (u.Username || u.username || "").trim();
+      const password = (u.Password || u.password || "").trim();
+      let role = (u.Role || u.role || "").trim();
+      const email = (u.Email || u.email || `${username}@abenergy.in`).trim();
+      const phone = (u.Phone || u.phone || "+91 98000-00000").trim();
+      const department = (u.Department || u.department || "").trim();
+      const location = (u.Location || u.location || "Bengaluru").trim();
+      if (!name || !username || !password) {
+        errors.push(`Row for ${name || username || "unknown"} missing mandatory Name, Username, or Password`);
+        continue;
+      }
+      if (currentUser.role === "Sales Manager") {
+        role = "Sales Executive";
+      } else if (currentUser.role === "Project Manager") {
+        role = "Installation Team";
+      } else if (!role) {
+        role = "Sales Executive";
+      }
+      const [existing] = await pool.query(
+        'SELECT id FROM user_accounts WHERE username = ? OR (email = ? AND email != "") LIMIT 1',
+        [username, email]
+      );
+      if (existing && existing.length > 0) {
+        skipped.push(username);
+        continue;
+      }
+      const { hash, salt } = hashPassword(password);
+      const userId = `USR-${Date.now().toString().slice(-6)}${Math.floor(Math.random() * 90 + 10)}`;
+      const empId = `EMP-${Date.now().toString().slice(-4)}${Math.floor(Math.random() * 90 + 10)}`;
+      await pool.query(
+        `INSERT INTO user_accounts (id, username, email, password_hash, password_salt, role, employee_id, customer_id, name, is_active)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, TRUE)`,
+        [userId, username, email, hash, salt, role, empId, name]
+      );
+      if (role !== "Customer") {
+        await pool.query(
+          `INSERT INTO employees (id, name, email, phone, role, department, location, active_leads_count, completed_projects_count, username)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
+           ON DUPLICATE KEY UPDATE name = VALUES(name), role = VALUES(role), department = VALUES(department), location = VALUES(location)`,
+          [empId, name, email, phone, role, department || "Solar Operations", location, username]
+        );
+      }
+      imported.push(username);
+    }
+    res.json({
+      success: true,
+      message: `Import complete: ${imported.length} imported, ${skipped.length} existing skipped, ${errors.length} errors`,
+      count: imported.length,
+      imported,
+      skipped,
+      errors
+    });
+  } catch (error) {
+    console.error("importUsers error:", error);
+    res.status(500).json({ success: false, error: error.message || "Bulk import failed" });
+  }
+};
 
 // server/routes/users.routes.ts
 var usersRouter = Router10();
 usersRouter.use(authenticateToken);
 usersRouter.get("/", getUsers);
 usersRouter.post("/", createUser);
+usersRouter.post("/import", importUsers);
 usersRouter.put("/:id", updateUser);
 usersRouter.post("/:id/toggle-status", toggleUserStatus);
 
@@ -4645,7 +4855,7 @@ var getAuditLogs = async (req, res) => {
 var createAuditLog = async (req, res) => {
   try {
     const { action, category, details, targetEntityId, targetEntityType, status, metadata } = req.body;
-    const user = req.user;
+    const user2 = req.user;
     const id = `AUD-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
     const ipAddress = req.ip || req.socket.remoteAddress || "127.0.0.1";
     await pool.query(
@@ -4653,9 +4863,9 @@ var createAuditLog = async (req, res) => {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
-        user?.userId || user?.id || "SYSTEM",
-        user?.name || "System User",
-        user?.role || "Super Admin",
+        user2?.userId || user2?.id || "SYSTEM",
+        user2?.name || "System User",
+        user2?.role || "Super Admin",
         action || "SYSTEM_ACTION",
         category || "Security",
         details || "",
@@ -4716,7 +4926,7 @@ function saveBase64File(base64Data, prefix) {
 }
 var uploadCustomerDocument = async (req, res) => {
   try {
-    const user = req.user;
+    const user2 = req.user;
     const {
       customerId = null,
       projectId = null,
@@ -4763,8 +4973,8 @@ var uploadCustomerDocument = async (req, res) => {
         docFrontPath,
         docBackPath,
         notes,
-        user?.userId || null,
-        user?.name || user?.username || "Survey Engineer",
+        user2?.userId || null,
+        user2?.name || user2?.username || "Survey Engineer",
         uploadedAt
       ]
     );
@@ -4898,6 +5108,7 @@ var getBom = async (req, res) => {
         projectId: bom.project_id,
         surveyId: bom.survey_id,
         version: bom.version,
+        isEdited: Boolean(bom.is_edited) || Number(bom.version) > 1,
         status: bom.status,
         preparedById: bom.prepared_by_id,
         preparedByName: bom.prepared_by_name,
@@ -4930,7 +5141,7 @@ var getBom = async (req, res) => {
 };
 var saveBom = async (req, res) => {
   try {
-    const user = req.user;
+    const user2 = req.user;
     const {
       id,
       projectId = null,
@@ -4967,15 +5178,15 @@ var saveBom = async (req, res) => {
     if (!existingBom || existingBom.length === 0) {
       await pool.query(
         `INSERT INTO project_boms 
-          (id, project_id, survey_id, version, status, prepared_by_id, prepared_by_name, total_estimated_cost, revision_comments, created_at, updated_at)
-         VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)`,
+          (id, project_id, survey_id, version, status, is_edited, prepared_by_id, prepared_by_name, total_estimated_cost, revision_comments, created_at, updated_at)
+         VALUES (?, ?, ?, 1, ?, 0, ?, ?, ?, ?, ?, ?)`,
         [
           bomId,
           projectId,
           surveyId,
           status,
-          user?.userId || null,
-          user?.name || user?.username || "Survey Engineer",
+          user2?.userId || user2?.id || null,
+          user2?.name || user2?.username || "Survey Engineer",
           totalEstimatedCost,
           revisionComments,
           now,
@@ -4983,11 +5194,13 @@ var saveBom = async (req, res) => {
         ]
       );
     } else {
+      const prev = existingBom[0];
+      const newVersion = (Number(prev.version) || 1) + 1;
       await pool.query(
         `UPDATE project_boms 
-         SET status = ?, total_estimated_cost = ?, revision_comments = ?, updated_at = ?
+         SET status = ?, version = ?, is_edited = 1, total_estimated_cost = ?, revision_comments = ?, updated_at = ?
          WHERE id = ?`,
-        [status, totalEstimatedCost, revisionComments, now, bomId]
+        [status, newVersion, totalEstimatedCost, revisionComments, now, bomId]
       );
     }
     await pool.query("DELETE FROM bom_items WHERE bom_id = ?", [bomId]);
@@ -5004,7 +5217,7 @@ var saveBom = async (req, res) => {
           bomId,
           it.productId || null,
           it.category || "General",
-          it.itemName || "Solar Component",
+          it.itemName || "Custom Item",
           it.technicalSpecification || "",
           it.brandMake || "",
           Number(it.quantity) || 1,
@@ -5018,7 +5231,7 @@ var saveBom = async (req, res) => {
     }
     if (surveyId) {
       try {
-        await pool.query('UPDATE site_surveys SET notes = CONCAT(IFNULL(notes, ""), " [BOM: ", ?) WHERE id = ?', [bomId, surveyId]);
+        await pool.query('UPDATE site_surveys SET notes = CONCAT(IFNULL(notes, ""), " [BOM: ", ?, "]") WHERE id = ?', [bomId, surveyId]);
       } catch (_) {
       }
     }
@@ -5057,14 +5270,14 @@ var reviewBom = async (req, res) => {
   try {
     const { id } = req.params;
     const { action, comments = "" } = req.body;
-    const user = req.user;
+    const user2 = req.user;
     const now = (/* @__PURE__ */ new Date()).toISOString();
     if (action === "Approve") {
       await pool.query(
         `UPDATE project_boms 
          SET status = 'Approved', approved_by_id = ?, approved_by_name = ?, revision_comments = ?, updated_at = ?
          WHERE id = ?`,
-        [user?.userId || null, user?.name || "Project Manager", comments, now, id]
+        [user2?.userId || null, user2?.name || "Project Manager", comments, now, id]
       );
       let createdQuotation = null;
       try {
@@ -5085,7 +5298,7 @@ var reviewBom = async (req, res) => {
           }));
           const resDraft = await createQuotationDraftInternal(pool, {
             surveyId: bom.survey_id,
-            user,
+            user: user2,
             customItems: mappedItems.length > 0 ? mappedItems : void 0
           });
           createdQuotation = resDraft.quotation;
@@ -5144,6 +5357,7 @@ var getAllBoms = async (req, res) => {
         capacityKw: Number(b.survey_kw || b.project_kw || 0),
         roofType: b.roof_type || "RCC Flat",
         version: b.version,
+        isEdited: Boolean(b.is_edited) || Number(b.version) > 1,
         status: b.status,
         preparedById: b.prepared_by_id,
         preparedByName: b.prepared_by_name,
@@ -5432,9 +5646,19 @@ async function getPurchaseOrders(req, res) {
     }
     sql += " ORDER BY created_at DESC";
     const [orders] = await pool.query(sql, params);
-    for (const po of orders) {
-      const [items] = await pool.query("SELECT * FROM purchase_order_items WHERE po_id = ?", [po.id]);
-      po.items = items.map((it) => ({
+    if (!orders || orders.length === 0) {
+      res.json({ success: true, purchaseOrders: [] });
+      return;
+    }
+    const poIds = orders.map((p) => p.id);
+    const [[allItems], [allGrns]] = await Promise.all([
+      pool.query("SELECT * FROM purchase_order_items WHERE po_id IN (?)", [poIds]),
+      pool.query("SELECT * FROM goods_receipt_notes WHERE po_id IN (?) ORDER BY created_at DESC", [poIds])
+    ]);
+    const itemsMap = {};
+    for (const it of allItems || []) {
+      if (!itemsMap[it.po_id]) itemsMap[it.po_id] = [];
+      itemsMap[it.po_id].push({
         id: it.id,
         sku: it.sku,
         name: it.item_name,
@@ -5444,9 +5668,16 @@ async function getPurchaseOrders(req, res) {
         unitPrice: Number(it.unit_price),
         totalAmount: Number(it.total_amount),
         receivedQuantity: Number(it.received_quantity || 0)
-      }));
-      const [grns] = await pool.query("SELECT * FROM goods_receipt_notes WHERE po_id = ? ORDER BY created_at DESC", [po.id]);
-      po.grns = grns;
+      });
+    }
+    const grnsMap = {};
+    for (const g of allGrns || []) {
+      if (!grnsMap[g.po_id]) grnsMap[g.po_id] = [];
+      grnsMap[g.po_id].push(g);
+    }
+    for (const po of orders) {
+      po.items = itemsMap[po.id] || [];
+      po.grns = grnsMap[po.id] || [];
     }
     res.json({ success: true, purchaseOrders: orders });
   } catch (error) {
@@ -5473,6 +5704,29 @@ async function createPurchaseOrder(req, res) {
     if (!supplierName || !items || !Array.isArray(items) || items.length === 0) {
       res.status(400).json({ success: false, error: "Supplier and at least one item are required" });
       return;
+    }
+    if (projectId) {
+      const [pRows] = await pool.query("SELECT stage FROM projects WHERE id = ?", [projectId]);
+      if (pRows && pRows.length > 0 && pRows[0].stage === "Completed") {
+        res.status(400).json({
+          success: false,
+          error: `Cannot issue Purchase Order: Project ${projectId} is already Completed and procurement is closed.`
+        });
+        return;
+      }
+    }
+    if (quotationId) {
+      const [qRows] = await pool.query(
+        "SELECT q.status, q.converted_to_project_id, p.stage as project_stage FROM quotations q LEFT JOIN projects p ON p.id = q.converted_to_project_id WHERE q.id = ?",
+        [quotationId]
+      );
+      if (qRows && qRows.length > 0 && (qRows[0].project_stage === "Completed" || qRows[0].status === "Completed")) {
+        res.status(400).json({
+          success: false,
+          error: "Cannot issue Purchase Order: The linked project has already reached Completed stage and procurement is finalized."
+        });
+        return;
+      }
     }
     const id = `PO-${Date.now().toString().slice(-6)}`;
     const poNumber = `PO-${(/* @__PURE__ */ new Date()).getFullYear()}-${Math.floor(1e3 + Math.random() * 9e3)}`;
@@ -5794,28 +6048,94 @@ async function getPendingIndents(req, res) {
       SELECT q.id as quotation_id, q.quotation_number, q.lead_name as customer_name,
              q.customer_phone, q.customer_address, q.system_capacity_kw, q.total_amount,
              q.status as quotation_status, q.survey_id, q.converted_to_project_id,
-             q.versions
+             q.versions,
+             p.stage as project_stage
       FROM quotations q
-      WHERE q.status IN ('Customer_Accepted', 'Accepted') 
-         OR (q.status = 'Converted_To_Project' AND q.converted_to_project_id IS NOT NULL)
+      LEFT JOIN projects p ON p.id = q.converted_to_project_id
+      WHERE (q.procurement_archived IS NULL OR q.procurement_archived = 0)
+        AND (q.status IN ('Customer_Accepted', 'Accepted') 
+         OR (q.status = 'Converted_To_Project' AND q.converted_to_project_id IS NOT NULL))
       ORDER BY q.created_at DESC
     `);
+    if (!quotations || quotations.length === 0) {
+      res.json({ success: true, indents: [] });
+      return;
+    }
+    const quotationIds = quotations.map((q) => q.quotation_id);
+    const projectIds = quotations.map((q) => q.converted_to_project_id).filter(Boolean);
+    const surveyIds = quotations.map((q) => q.survey_id).filter(Boolean);
+    const queryPromises = [
+      projectIds.length > 0 ? pool.query("SELECT * FROM purchase_orders WHERE quotation_id IN (?) OR project_id IN (?)", [quotationIds, projectIds]) : pool.query("SELECT * FROM purchase_orders WHERE quotation_id IN (?)", [quotationIds]),
+      projectIds.length > 0 ? pool.query("SELECT * FROM goods_receipt_notes WHERE quotation_id IN (?) OR project_id IN (?)", [quotationIds, projectIds]) : pool.query("SELECT * FROM goods_receipt_notes WHERE quotation_id IN (?)", [quotationIds])
+    ];
+    if (surveyIds.length > 0) {
+      queryPromises.push(pool.query("SELECT * FROM project_boms WHERE survey_id IN (?) AND status = 'Approved' ORDER BY id DESC", [surveyIds]));
+    } else {
+      queryPromises.push(Promise.resolve([[]]));
+    }
+    const [[allPos], [allGrns], [allBoms]] = await Promise.all(queryPromises);
+    const bomIds = (allBoms || []).map((b) => b.id);
+    let allBomItems = [];
+    if (bomIds.length > 0) {
+      const [items] = await pool.query("SELECT * FROM bom_items WHERE bom_id IN (?)", [bomIds]);
+      allBomItems = items || [];
+    }
+    const bomsBySurveyId = {};
+    for (const b of allBoms || []) {
+      if (!bomsBySurveyId[b.survey_id]) {
+        bomsBySurveyId[b.survey_id] = b;
+      }
+    }
+    const itemsByBomId = {};
+    for (const it of allBomItems) {
+      if (!itemsByBomId[it.bom_id]) itemsByBomId[it.bom_id] = [];
+      itemsByBomId[it.bom_id].push(it);
+    }
+    const posByQuote = {};
+    for (const p of allPos || []) {
+      if (p.quotation_id) {
+        if (!posByQuote[p.quotation_id]) posByQuote[p.quotation_id] = [];
+        posByQuote[p.quotation_id].push(p);
+      }
+      if (p.project_id) {
+        if (!posByQuote[p.project_id]) posByQuote[p.project_id] = [];
+        posByQuote[p.project_id].push(p);
+      }
+    }
+    const grnsByQuote = {};
+    for (const g of allGrns || []) {
+      if (g.quotation_id) {
+        if (!grnsByQuote[g.quotation_id]) grnsByQuote[g.quotation_id] = [];
+        grnsByQuote[g.quotation_id].push(g);
+      }
+      if (g.project_id) {
+        if (!grnsByQuote[g.project_id]) grnsByQuote[g.project_id] = [];
+        grnsByQuote[g.project_id].push(g);
+      }
+    }
     const indents = [];
     for (const q of quotations) {
-      const [pos] = await pool.query(
-        "SELECT * FROM purchase_orders WHERE quotation_id = ? OR (project_id IS NOT NULL AND project_id = ?)",
-        [q.quotation_id, q.converted_to_project_id]
-      );
-      const [grns] = await pool.query(
-        "SELECT * FROM goods_receipt_notes WHERE quotation_id = ? OR (project_id IS NOT NULL AND project_id = ?)",
-        [q.quotation_id, q.converted_to_project_id]
-      );
+      const posMap = /* @__PURE__ */ new Map();
+      (posByQuote[q.quotation_id] || []).forEach((p) => posMap.set(p.id, p));
+      if (q.converted_to_project_id) {
+        (posByQuote[q.converted_to_project_id] || []).forEach((p) => posMap.set(p.id, p));
+      }
+      const pos = Array.from(posMap.values());
+      const grnsMap = /* @__PURE__ */ new Map();
+      (grnsByQuote[q.quotation_id] || []).forEach((g) => grnsMap.set(g.id, g));
+      if (q.converted_to_project_id) {
+        (grnsByQuote[q.converted_to_project_id] || []).forEach((g) => grnsMap.set(g.id, g));
+      }
+      const grns = Array.from(grnsMap.values());
       const hasSignedGrn = grns.some((g) => g.customer_signature_data || g.customer_signature_name);
       const isDelivered = pos.some((p) => p.status === "Delivered");
       const isPartial = pos.some((p) => p.status === "Partial Delivered") || grns.some((g) => g.status === "Partial Shortage");
       const isIssued = pos.length > 0;
+      const isProjectCompleted = q.project_stage === "Completed";
       let procurementStatus = "Pending Indent";
-      if (hasSignedGrn && isDelivered && !isPartial) {
+      if (isProjectCompleted) {
+        procurementStatus = "Project Completed (Procurement Closed)";
+      } else if (hasSignedGrn && isDelivered && !isPartial) {
         procurementStatus = "Materials Delivered & Signed";
       } else if (isPartial) {
         procurementStatus = "Partial Shortage";
@@ -5824,16 +6144,9 @@ async function getPendingIndents(req, res) {
       }
       let items = [];
       let bomId = null;
-      if (q.survey_id) {
-        const [boms] = await pool.query(
-          "SELECT * FROM project_boms WHERE survey_id = ? AND status = 'Approved' ORDER BY id DESC LIMIT 1",
-          [q.survey_id]
-        );
-        if (boms && boms.length > 0) {
-          bomId = boms[0].id;
-          const [bomItems] = await pool.query("SELECT * FROM bom_items WHERE bom_id = ?", [bomId]);
-          items = bomItems;
-        }
+      if (q.survey_id && bomsBySurveyId[q.survey_id]) {
+        bomId = bomsBySurveyId[q.survey_id].id;
+        items = itemsByBomId[bomId] || [];
       }
       if (items.length === 0 && q.versions) {
         try {
@@ -5866,6 +6179,8 @@ async function getPendingIndents(req, res) {
         procurement_status: procurementStatus,
         quotation_status: q.quotation_status,
         converted_to_project_id: q.converted_to_project_id,
+        project_stage: q.project_stage || null,
+        is_completed: isProjectCompleted,
         has_signed_grn: hasSignedGrn,
         signed_grn: grns[0] || null,
         purchase_orders: pos,
@@ -5876,6 +6191,43 @@ async function getPendingIndents(req, res) {
     res.json({ success: true, indents });
   } catch (error) {
     console.error("Error fetching pending indents:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+}
+async function deletePurchaseOrder(req, res) {
+  try {
+    const { id } = req.params;
+    await pool.query("DELETE FROM purchase_order_items WHERE po_id = ?", [id]);
+    await pool.query("DELETE FROM goods_receipt_notes WHERE po_id = ?", [id]);
+    await pool.query("DELETE FROM purchase_orders WHERE id = ?", [id]);
+    res.json({ success: true, message: `Purchase order ${id} deleted successfully.` });
+  } catch (error) {
+    console.error("Error in deletePurchaseOrder:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+}
+async function deleteIndent(req, res) {
+  try {
+    const { id } = req.params;
+    const cleanId = id.replace(/^IND-/, "");
+    await pool.query("UPDATE quotations SET procurement_archived = 1 WHERE id = ?", [cleanId]);
+    res.json({ success: true, message: `Indent ${id} removed.` });
+  } catch (error) {
+    console.error("Error in deleteIndent:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+}
+async function clearClosedIndents(req, res) {
+  try {
+    await pool.query(`
+      UPDATE quotations q
+      LEFT JOIN projects p ON p.id = q.converted_to_project_id
+      SET q.procurement_archived = 1
+      WHERE p.stage = 'Completed' OR q.status = 'Converted_To_Project'
+    `);
+    res.json({ success: true, message: "All closed procurement indents cleared." });
+  } catch (error) {
+    console.error("Error in clearClosedIndents:", error);
     res.status(500).json({ success: false, error: error.message });
   }
 }
@@ -6456,12 +6808,15 @@ router.get("/sign-grn/:token", getPublicSigningGrn);
 router.post("/sign-grn/:token", submitPublicCustomerSignature);
 router.get("/orders", authenticateToken, getPurchaseOrders);
 router.post("/orders", authenticateToken, requireRole(["Purchase Team", "Project Manager", "Super Admin"]), createPurchaseOrder);
+router.delete("/orders/:id", authenticateToken, requireRole(["Purchase Team", "Project Manager", "Super Admin", "Sales Manager"]), deletePurchaseOrder);
 router.get("/grns", authenticateToken, getGoodsReceiptNotes);
 router.post("/grn", authenticateToken, requireRole(["Purchase Team", "Project Manager", "Super Admin"]), createGoodsReceiptNote);
 router.post("/grn/:id/resend-link", authenticateToken, requireRole(["Purchase Team", "Project Manager", "Super Admin"]), resendSigningLink);
 router.post("/grn/:id/revoke-link", authenticateToken, requireRole(["Purchase Team", "Project Manager", "Super Admin"]), revokeSigningLink);
 router.get("/pending-indents", authenticateToken, getPendingIndents);
 router.get("/indents", authenticateToken, getPendingIndents);
+router.delete("/indents-closed/all", authenticateToken, requireRole(["Purchase Team", "Project Manager", "Super Admin", "Sales Manager"]), clearClosedIndents);
+router.delete("/indents/:id", authenticateToken, requireRole(["Purchase Team", "Project Manager", "Super Admin", "Sales Manager"]), deleteIndent);
 router.post("/convert-to-project", authenticateToken, requireRole(["Purchase Team", "Project Manager", "Super Admin"]), convertToEpcProject);
 var procurement_routes_default = router;
 
@@ -6785,8 +7140,665 @@ var notificationsRouter = Router16();
 notificationsRouter.get("/", authenticateToken, getNotifications);
 notificationsRouter.put("/:id/read", authenticateToken, markNotificationRead);
 
+// server/routes/telephony.routes.ts
+import { Router as Router17 } from "express";
+
+// server/controllers/telephony.controller.ts
+function normalizePhone(phone) {
+  if (!phone) return "";
+  const digits = phone.replace(/\D/g, "");
+  return digits.length >= 10 ? digits.slice(-10) : digits;
+}
+var syncCallLog = async (req, res) => {
+  try {
+    const {
+      employee_id,
+      employee_phone,
+      customer_phone,
+      customer_name,
+      call_type,
+      call_status,
+      duration_seconds,
+      call_time,
+      sim_slot,
+      notes,
+      disposition
+    } = req.body;
+    if (!customer_phone || !call_type) {
+      return res.status(400).json({
+        success: false,
+        message: "customer_phone and call_type (INCOMING, OUTGOING, MISSED, REJECTED) are required."
+      });
+    }
+    const normCustomerPhone = normalizePhone(customer_phone);
+    const normEmployeePhone = normalizePhone(employee_phone || "");
+    let resolvedEmpId = employee_id || null;
+    let resolvedEmpName = null;
+    let resolvedEmpPhone = employee_phone || null;
+    if (normEmployeePhone) {
+      const [empRows] = await pool.query(
+        `SELECT id, name, phone FROM employees WHERE REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '+', '') LIKE ? LIMIT 1`,
+        [`%${normEmployeePhone}`]
+      );
+      if (empRows && empRows.length > 0) {
+        resolvedEmpId = empRows[0].id;
+        resolvedEmpName = empRows[0].name;
+        resolvedEmpPhone = empRows[0].phone;
+      }
+    } else if (resolvedEmpId) {
+      const [empRows] = await pool.query(
+        `SELECT id, name, phone FROM employees WHERE id = ? LIMIT 1`,
+        [resolvedEmpId]
+      );
+      if (empRows && empRows.length > 0) {
+        resolvedEmpName = empRows[0].name;
+        resolvedEmpPhone = empRows[0].phone;
+      }
+    }
+    if (!resolvedEmpName && req.user) {
+      resolvedEmpId = req.user.id || resolvedEmpId;
+      resolvedEmpName = req.user.name || req.user.username;
+    }
+    let resolvedLeadId = null;
+    let resolvedCustName = customer_name || null;
+    if (normCustomerPhone) {
+      const [leadRows] = await pool.query(
+        `SELECT id, name FROM leads WHERE REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '+', '') LIKE ? LIMIT 1`,
+        [`%${normCustomerPhone}`]
+      );
+      if (leadRows && leadRows.length > 0) {
+        resolvedLeadId = leadRows[0].id;
+        resolvedCustName = leadRows[0].name;
+      } else {
+        const [custRows] = await pool.query(
+          `SELECT id, name FROM customers WHERE REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '+', '') LIKE ? LIMIT 1`,
+          [`%${normCustomerPhone}`]
+        );
+        if (custRows && custRows.length > 0) {
+          resolvedCustName = custRows[0].name;
+        }
+      }
+    }
+    const formattedCallTime = call_time ? new Date(call_time) : /* @__PURE__ */ new Date();
+    const callId = `CALL-${Date.now()}-${Math.floor(Math.random() * 1e3)}`;
+    const isMissed = call_type === "MISSED" || call_status === "MISSED";
+    const isResolved = !isMissed;
+    await pool.query(
+      `INSERT INTO call_logs (
+        id, employee_id, employee_name, employee_phone,
+        customer_phone, customer_name, lead_id,
+        call_type, call_status, duration_seconds,
+        call_time, sim_slot, disposition, notes, is_resolved
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        duration_seconds = VALUES(duration_seconds),
+        call_status = VALUES(call_status),
+        disposition = COALESCE(VALUES(disposition), disposition),
+        notes = COALESCE(VALUES(notes), notes)`,
+      [
+        callId,
+        resolvedEmpId,
+        resolvedEmpName || "Sales Staff",
+        resolvedEmpPhone || employee_phone || "Device SIM",
+        customer_phone,
+        resolvedCustName || "Unknown Caller",
+        resolvedLeadId,
+        call_type,
+        call_status || (isMissed ? "MISSED" : "ANSWERED"),
+        Number(duration_seconds) || 0,
+        formattedCallTime,
+        Number(sim_slot) || 1,
+        disposition || null,
+        notes || null,
+        isResolved
+      ]
+    );
+    return res.status(201).json({
+      success: true,
+      message: "Call log synced successfully",
+      call_id: callId,
+      matched_lead: resolvedLeadId ? { id: resolvedLeadId, name: resolvedCustName } : null,
+      is_missed: isMissed
+    });
+  } catch (error) {
+    console.error("Error syncing call log:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to sync call log",
+      error: error.message
+    });
+  }
+};
+var getCallLogs = async (req, res) => {
+  try {
+    const user2 = req.user;
+    const {
+      type,
+      status,
+      unresolved_only,
+      employee_id,
+      search,
+      start_date,
+      end_date,
+      limit = 50,
+      offset = 0
+    } = req.query;
+    const userRole = (user2?.role || "").toLowerCase().replace(/[\s_-]+/g, "");
+    const isManager = Boolean(
+      !user2 || userRole === "admin" || userRole === "salesmanager" || userRole === "superadmin" || userRole === "management" || userRole === "managingdirector" || userRole === "ceo" || userRole === "manager" || user2.role === "Sales Manager" || user2.role === "Super Admin"
+    );
+    const baseConditions = ["1=1"];
+    const baseParams = [];
+    if (!isManager && user2) {
+      const empId = user2.employeeId || user2.id || user2.userId;
+      const empPhone = user2.phone || "";
+      baseConditions.push("(employee_id = ? OR employee_id = ? OR employee_phone = ?)");
+      baseParams.push(empId, user2.id, empPhone);
+    } else if (employee_id) {
+      baseConditions.push("employee_id = ?");
+      baseParams.push(employee_id);
+    }
+    const queryConditions = [...baseConditions];
+    const queryParams = [...baseParams];
+    if (type) {
+      queryConditions.push("call_type = ?");
+      queryParams.push(type);
+    }
+    if (status) {
+      queryConditions.push("call_status = ?");
+      queryParams.push(status);
+    }
+    if (unresolved_only === "true") {
+      queryConditions.push('call_type = "MISSED" AND is_resolved = FALSE');
+    }
+    if (search) {
+      queryConditions.push("(customer_phone LIKE ? OR customer_name LIKE ? OR employee_name LIKE ? OR notes LIKE ?)");
+      const searchParam = `%${search}%`;
+      queryParams.push(searchParam, searchParam, searchParam, searchParam);
+    }
+    if (start_date) {
+      queryConditions.push("call_time >= ?");
+      queryParams.push(start_date);
+    }
+    if (end_date) {
+      queryConditions.push("call_time <= ?");
+      queryParams.push(end_date);
+    }
+    const whereClause = queryConditions.join(" AND ");
+    const [calls] = await pool.query(
+      `SELECT * FROM call_logs 
+       WHERE ${whereClause} 
+       ORDER BY call_time DESC 
+       LIMIT ? OFFSET ?`,
+      [...queryParams, Number(limit), Number(offset)]
+    );
+    const baseWhereClause = baseConditions.join(" AND ");
+    const [summaryRows] = await pool.query(
+      `SELECT 
+         COUNT(*) as total_calls_today,
+         COALESCE(SUM(CASE WHEN call_type = 'OUTGOING' THEN 1 ELSE 0 END), 0) as outgoing_count,
+         COALESCE(SUM(CASE WHEN call_type = 'INCOMING' AND call_status = 'ANSWERED' THEN 1 ELSE 0 END), 0) as incoming_count,
+         COALESCE(SUM(CASE WHEN call_type = 'MISSED' THEN 1 ELSE 0 END), 0) as missed_count,
+         COALESCE(SUM(CASE WHEN call_type = 'MISSED' AND is_resolved = FALSE THEN 1 ELSE 0 END), 0) as unresolved_missed_count,
+         COALESCE(SUM(duration_seconds), 0) as total_talk_time_seconds
+       FROM call_logs 
+       WHERE ${baseWhereClause} AND (DATE(call_time) = CURDATE() OR call_time >= DATE_SUB(NOW(), INTERVAL 24 HOUR))`,
+      baseParams
+    );
+    let teamBreakdown = [];
+    if (isManager) {
+      const [teamRows] = await pool.query(
+        `SELECT 
+           COALESCE(employee_id, 'UNKNOWN') as employee_id,
+           COALESCE(employee_name, 'Unassigned') as employee_name,
+           COUNT(*) as total_calls,
+           COALESCE(SUM(CASE WHEN call_type = 'OUTGOING' THEN 1 ELSE 0 END), 0) as outgoing_calls,
+           COALESCE(SUM(CASE WHEN call_type = 'MISSED' AND is_resolved = FALSE THEN 1 ELSE 0 END), 0) as pending_missed,
+           COALESCE(SUM(duration_seconds), 0) as talk_time_seconds
+         FROM call_logs
+         WHERE (DATE(call_time) = CURDATE() OR call_time >= DATE_SUB(NOW(), INTERVAL 24 HOUR))
+         GROUP BY employee_id, employee_name
+         ORDER BY total_calls DESC`
+      );
+      teamBreakdown = teamRows;
+    }
+    return res.json({
+      success: true,
+      calls,
+      metrics: summaryRows[0] || {
+        total_calls_today: 0,
+        outgoing_count: 0,
+        incoming_count: 0,
+        missed_count: 0,
+        unresolved_missed_count: 0,
+        total_talk_time_seconds: 0
+      },
+      team_breakdown: teamBreakdown,
+      is_manager_view: isManager
+    });
+  } catch (error) {
+    console.error("Error fetching call logs:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch call logs",
+      error: error.message
+    });
+  }
+};
+var resolveMissedCall = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { notes } = req.body;
+    const user2 = req.user;
+    const resolvedBy = user2 ? user2.name || user2.username : "Sales Staff";
+    const [result] = await pool.query(
+      `UPDATE call_logs 
+       SET is_resolved = TRUE, 
+           resolved_at = NOW(), 
+           resolved_by = ?, 
+           notes = COALESCE(?, notes)
+       WHERE id = ?`,
+      [resolvedBy, notes || "Callback completed by sales staff", id]
+    );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: "Call record not found" });
+    }
+    return res.json({
+      success: true,
+      message: "Missed call marked as resolved"
+    });
+  } catch (error) {
+    console.error("Error resolving missed call:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to resolve missed call",
+      error: error.message
+    });
+  }
+};
+var updateCallDisposition = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { disposition, notes } = req.body;
+    const [result] = await pool.query(
+      `UPDATE call_logs 
+       SET disposition = ?, notes = ?
+       WHERE id = ?`,
+      [disposition, notes, id]
+    );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: "Call record not found" });
+    }
+    return res.json({
+      success: true,
+      message: "Call disposition updated successfully"
+    });
+  } catch (error) {
+    console.error("Error updating call disposition:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update call disposition",
+      error: error.message
+    });
+  }
+};
+var deleteCallLog = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const [result] = await pool.query(
+      `DELETE FROM call_logs WHERE id = ?`,
+      [id]
+    );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: "Call record not found" });
+    }
+    return res.json({
+      success: true,
+      message: "Call record deleted successfully"
+    });
+  } catch (error) {
+    console.error("Error deleting call log:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete call log",
+      error: error.message
+    });
+  }
+};
+
+// server/routes/telephony.routes.ts
+var telephonyRouter = Router17();
+telephonyRouter.post("/sync-call", syncCallLog);
+telephonyRouter.get("/calls", authenticateToken, getCallLogs);
+telephonyRouter.post("/resolve-missed/:id", authenticateToken, resolveMissedCall);
+telephonyRouter.patch("/calls/:id/disposition", authenticateToken, updateCallDisposition);
+telephonyRouter.delete("/calls/:id", authenticateToken, deleteCallLog);
+
+// server/routes/subsidies.routes.ts
+import { Router as Router18 } from "express";
+import fs5 from "fs";
+import path6 from "path";
+var subsidiesRouter = Router18();
+var initialSubsidies = [
+  {
+    id: "SUB-2026-001",
+    project_id: "PROJECT-2026-023",
+    project_number: "PRJ-2026-023",
+    customer_name: "Vikrant Deshpande",
+    customer_phone: "+91 98450 12345",
+    customer_email: "vikrant.deshpande@example.com",
+    customer_type: "residential",
+    is_eligible: true,
+    site_address: "142, Anna Nagar West, Namakkal, Tamil Nadu - 637001",
+    discom_name: "TANGEDCO",
+    discom_section_office: "Namakkal Town AEE Office",
+    consumer_number: "04-122-005-981",
+    sanctioned_load_kw: 25,
+    system_capacity_kw: 20,
+    subsidy_applicable_amount: 78e3,
+    // Capped at 78,000 max for domestic
+    dcr_modules_used: true,
+    panel_make_and_model: "Tata Power Solar 545W Mono PERC (DCR)",
+    inverter_make_and_model: "Sungrow 20kW On-Grid Inverter",
+    portal_application_no: "PMS-TN-2026-98124",
+    application_submission_date: "2026-09-15",
+    current_stage: 5,
+    current_stage_name: "DISCOM Joint Inspection Scheduled",
+    stage_status: "in_progress",
+    days_in_current_stage: 4,
+    is_delayed: false,
+    tfr_number: "TFR/NKL/2026/8421",
+    tfr_approval_date: "2026-09-28",
+    vendor_selected_date: "2026-10-02",
+    wcr_submission_date: "2026-10-18",
+    joint_inspection_date: "2026-10-29",
+    inspecting_officer_name: "Er. S. Selvakumar, AEE/TANGEDCO",
+    inspecting_officer_phone: "+91 94433 12456",
+    documents: {
+      electricity_bill: true,
+      aadhaar_card: true,
+      cancelled_cheque: true,
+      roof_photo_geotagged: true,
+      dcr_certificate: true,
+      tfr_letter: true,
+      wcr_copy: true,
+      net_meter_test_report: false,
+      commissioning_cert: false
+    },
+    notes: "Structure and inverter installed with DCR modules. TANGEDCO AEE scheduled inspection for Thursday 11 AM.",
+    last_updated: "2026-10-25"
+  },
+  {
+    id: "SUB-2026-002",
+    project_id: "PROJECT-2026-021",
+    project_number: "PRJ-2026-021",
+    customer_name: "K. Balasubramaniam",
+    customer_phone: "+91 94432 87654",
+    customer_email: "bala.kumar@example.com",
+    customer_type: "residential",
+    is_eligible: true,
+    site_address: "88, Gandhi Road, Paramathi Velur, Namakkal - 637207",
+    discom_name: "TANGEDCO",
+    discom_section_office: "Paramathi Distribution Section",
+    consumer_number: "04-188-012-340",
+    sanctioned_load_kw: 5,
+    system_capacity_kw: 3.3,
+    subsidy_applicable_amount: 78e3,
+    dcr_modules_used: true,
+    panel_make_and_model: "Waaree 550W Bi-facial DCR",
+    inverter_make_and_model: "Growatt 3.3kW Single Phase",
+    portal_application_no: "PMS-TN-2026-77319",
+    application_submission_date: "2026-08-10",
+    current_stage: 7,
+    current_stage_name: "DBT Subsidy Disbursed to Bank",
+    stage_status: "completed",
+    days_in_current_stage: 0,
+    is_delayed: false,
+    tfr_number: "TFR/PMV/2026/3310",
+    tfr_approval_date: "2026-08-22",
+    vendor_selected_date: "2026-08-25",
+    wcr_submission_date: "2026-09-08",
+    joint_inspection_date: "2026-09-14",
+    inspecting_officer_name: "Er. R. Murugesan",
+    inspecting_officer_phone: "+91 94430 98123",
+    net_meter_number: "L&T-GEN-98214-2026",
+    net_meter_install_date: "2026-09-16",
+    commissioning_certificate_date: "2026-09-18",
+    dbt_disbursal_amount: 78e3,
+    dbt_bank_utr: "PMAY20261008009214SBI",
+    dbt_credit_date: "2026-10-08",
+    documents: {
+      electricity_bill: true,
+      aadhaar_card: true,
+      cancelled_cheque: true,
+      roof_photo_geotagged: true,
+      dcr_certificate: true,
+      tfr_letter: true,
+      wcr_copy: true,
+      net_meter_test_report: true,
+      commissioning_cert: true
+    },
+    notes: "Subsidy of \u20B978,000 credited to customer State Bank of India account. Project fully closed.",
+    last_updated: "2026-10-08"
+  },
+  {
+    id: "SUB-2026-003",
+    project_id: "PROJECT-2026-024",
+    project_number: "PRJ-2026-024",
+    customer_name: "S. Jayachandran",
+    customer_phone: "+91 97890 55432",
+    customer_email: "jayachandran.s@example.com",
+    customer_type: "residential",
+    is_eligible: true,
+    site_address: "12, Periyar Street, Rasipuram, Namakkal - 637408",
+    discom_name: "TANGEDCO",
+    discom_section_office: "Rasipuram East AEE",
+    consumer_number: "04-099-001-442",
+    sanctioned_load_kw: 6,
+    system_capacity_kw: 5,
+    subsidy_applicable_amount: 78e3,
+    dcr_modules_used: true,
+    panel_make_and_model: "Adani Solar 540W Mono DCR",
+    inverter_make_and_model: "Solis 5kW Dual MPPT",
+    portal_application_no: "PMS-TN-2026-102941",
+    application_submission_date: "2026-10-05",
+    current_stage: 2,
+    current_stage_name: "DISCOM Feasibility (TFR) Pending",
+    stage_status: "in_progress",
+    days_in_current_stage: 22,
+    is_delayed: true,
+    // Over 15 days threshold!
+    documents: {
+      electricity_bill: true,
+      aadhaar_card: true,
+      cancelled_cheque: true,
+      roof_photo_geotagged: true,
+      dcr_certificate: false,
+      tfr_letter: false,
+      wcr_copy: false,
+      net_meter_test_report: false,
+      commissioning_cert: false
+    },
+    notes: "ALERT: TFR pending for 22 days at Rasipuram section office due to transformer load inspection delay. Need urgent follow-up.",
+    last_updated: "2026-10-26"
+  },
+  {
+    id: "SUB-2026-004",
+    project_id: "PROJECT-2026-025",
+    project_number: "PRJ-2026-025",
+    customer_name: "R. Kaliappan Poultry Farm",
+    customer_phone: "+91 98427 66110",
+    customer_type: "commercial",
+    is_eligible: false,
+    ineligibility_reason: "Commercial / Industrial connection (HT/LT Tariff IIIB). Central PM Surya Ghar subsidy applies strictly to Domestic (Tariff IA) connections.",
+    site_address: "SF No. 240, Mohanur Road, Valayappatti, Namakkal - 637020",
+    discom_name: "TANGEDCO",
+    discom_section_office: "Mohanur Rural",
+    consumer_number: "04-045-008-112",
+    sanctioned_load_kw: 60,
+    system_capacity_kw: 50,
+    subsidy_applicable_amount: 0,
+    dcr_modules_used: false,
+    panel_make_and_model: "Jinko Solar 580W TOPCon (Non-DCR Tier 1)",
+    inverter_make_and_model: "Sungrow 50kW Commercial",
+    portal_application_no: "N/A (Commercial Solar Project)",
+    application_submission_date: "2026-10-12",
+    current_stage: 0,
+    current_stage_name: "Not Eligible (Commercial Project)",
+    stage_status: "completed",
+    days_in_current_stage: 0,
+    is_delayed: false,
+    documents: {
+      electricity_bill: true,
+      aadhaar_card: false,
+      cancelled_cheque: false,
+      roof_photo_geotagged: true,
+      dcr_certificate: false,
+      tfr_letter: true,
+      wcr_copy: false,
+      net_meter_test_report: false,
+      commissioning_cert: false
+    },
+    notes: "Zero government subsidy applicable. Customer claimed 40% Accelerated Depreciation tax deduction under Section 32 of Income Tax Act.",
+    last_updated: "2026-10-20"
+  }
+];
+var DATA_FILE = path6.resolve(process.cwd(), "data", "subsidies.json");
+function loadSubsidies() {
+  try {
+    if (fs5.existsSync(DATA_FILE)) {
+      const raw = fs5.readFileSync(DATA_FILE, "utf-8");
+      return JSON.parse(raw);
+    }
+  } catch (err) {
+    console.warn("Error reading subsidies.json, using fallback initial data:", err);
+  }
+  return initialSubsidies;
+}
+function saveSubsidies(records) {
+  try {
+    const dir = path6.dirname(DATA_FILE);
+    if (!fs5.existsSync(dir)) fs5.mkdirSync(dir, { recursive: true });
+    fs5.writeFileSync(DATA_FILE, JSON.stringify(records, null, 2), "utf-8");
+  } catch (err) {
+    console.error("Error writing subsidies.json:", err);
+  }
+}
+subsidiesRouter.get("/", (_req, res) => {
+  const data = loadSubsidies();
+  const activeEligible = data.filter((d) => d.is_eligible);
+  const totalPipelineSubsidy = activeEligible.reduce((acc, curr) => acc + (curr.subsidy_applicable_amount || 0), 0);
+  const totalDisbursed = data.filter((d) => d.current_stage === 7).reduce((acc, curr) => acc + (curr.dbt_disbursal_amount || curr.subsidy_applicable_amount || 0), 0);
+  const pendingTfrCount = data.filter((d) => d.current_stage === 2 && d.is_eligible).length;
+  const pendingMeterCount = data.filter((d) => (d.current_stage === 5 || d.current_stage === 6) && d.is_eligible).length;
+  const delayedCount = data.filter((d) => d.is_delayed && d.is_eligible).length;
+  return res.json({
+    success: true,
+    subsidies: data,
+    summary: {
+      total_records: data.length,
+      eligible_records: activeEligible.length,
+      total_pipeline_subsidy: totalPipelineSubsidy,
+      total_disbursed_subsidy: totalDisbursed,
+      pending_tfr_count: pendingTfrCount,
+      pending_net_meter_count: pendingMeterCount,
+      delayed_bottlenecks_count: delayedCount
+    }
+  });
+});
+subsidiesRouter.get("/project/:projectId", (req, res) => {
+  const { projectId } = req.params;
+  const data = loadSubsidies();
+  const record = data.find((d) => d.project_id === projectId || d.id === projectId);
+  if (!record) {
+    return res.status(404).json({ success: false, message: "Subsidy record not found for this project" });
+  }
+  return res.json({ success: true, subsidy: record });
+});
+subsidiesRouter.put("/:id", (req, res) => {
+  const { id } = req.params;
+  const updates = req.body;
+  const data = loadSubsidies();
+  const index = data.findIndex((d) => d.id === id || d.project_id === id);
+  if (index === -1) {
+    return res.status(404).json({ success: false, message: "Subsidy record not found" });
+  }
+  const updatedRecord = {
+    ...data[index],
+    ...updates,
+    last_updated: (/* @__PURE__ */ new Date()).toISOString().split("T")[0]
+  };
+  data[index] = updatedRecord;
+  saveSubsidies(data);
+  return res.json({
+    success: true,
+    message: "Subsidy record updated successfully",
+    subsidy: updatedRecord
+  });
+});
+subsidiesRouter.post("/", (req, res) => {
+  const payload = req.body;
+  const data = loadSubsidies();
+  const capacityKw = Number(payload.system_capacity_kw) || 3;
+  const isResidential = payload.customer_type === "residential";
+  let subsidyAmount = 0;
+  if (isResidential) {
+    if (capacityKw <= 1) subsidyAmount = 3e4;
+    else if (capacityKw <= 2) subsidyAmount = 6e4;
+    else subsidyAmount = 78e3;
+  }
+  const newRecord = {
+    id: `SUB-${(/* @__PURE__ */ new Date()).getFullYear()}-${String(data.length + 1).padStart(3, "0")}`,
+    project_id: payload.project_id || `PROJECT-${Date.now()}`,
+    project_number: payload.project_number || "PRJ-NEW",
+    customer_name: payload.customer_name || "Customer Name",
+    customer_phone: payload.customer_phone || "",
+    customer_email: payload.customer_email || "",
+    customer_type: payload.customer_type || "residential",
+    is_eligible: isResidential,
+    ineligibility_reason: isResidential ? void 0 : "Commercial/Industrial tariff not eligible for central residential subsidy.",
+    site_address: payload.site_address || "",
+    discom_name: payload.discom_name || "TANGEDCO",
+    discom_section_office: payload.discom_section_office || "",
+    consumer_number: payload.consumer_number || "",
+    sanctioned_load_kw: Number(payload.sanctioned_load_kw) || capacityKw,
+    system_capacity_kw: capacityKw,
+    subsidy_applicable_amount: subsidyAmount,
+    dcr_modules_used: payload.dcr_modules_used ?? true,
+    panel_make_and_model: payload.panel_make_and_model || "",
+    inverter_make_and_model: payload.inverter_make_and_model || "",
+    portal_application_no: payload.portal_application_no || `PMS-TN-${(/* @__PURE__ */ new Date()).getFullYear()}-${Math.floor(1e4 + Math.random() * 9e4)}`,
+    application_submission_date: payload.application_submission_date || (/* @__PURE__ */ new Date()).toISOString().split("T")[0],
+    current_stage: isResidential ? 1 : 0,
+    current_stage_name: isResidential ? "National Portal Registration Submitted" : "Not Eligible (Commercial)",
+    stage_status: "in_progress",
+    days_in_current_stage: 1,
+    is_delayed: false,
+    documents: payload.documents || {
+      electricity_bill: true,
+      aadhaar_card: true,
+      cancelled_cheque: false,
+      roof_photo_geotagged: false,
+      dcr_certificate: false,
+      tfr_letter: false,
+      wcr_copy: false,
+      net_meter_test_report: false,
+      commissioning_cert: false
+    },
+    notes: payload.notes || "Application created.",
+    last_updated: (/* @__PURE__ */ new Date()).toISOString().split("T")[0]
+  };
+  data.unshift(newRecord);
+  saveSubsidies(data);
+  return res.status(201).json({
+    success: true,
+    message: "Subsidy tracking record created successfully",
+    subsidy: newRecord
+  });
+});
+
 // server/routes/index.ts
-var apiRouter = Router17();
+var apiRouter = Router19();
 apiRouter.use("/auth", authRouter);
 apiRouter.get("/bootstrap", authenticateToken, getBootstrapData);
 apiRouter.use("/leads", leadsRouter);
@@ -6805,26 +7817,27 @@ apiRouter.use("/boms", bomRouter);
 apiRouter.use("/procurement", procurement_routes_default);
 apiRouter.use("/installation", installation_routes_default);
 apiRouter.use("/notifications", notificationsRouter);
+apiRouter.use("/telephony", telephonyRouter);
+apiRouter.use("/subsidies", subsidiesRouter);
 
 // server.ts
 dotenv3.config();
 var __filename = fileURLToPath(import.meta.url);
-var __dirname = path6.dirname(__filename);
-var uploadsDir = path6.join(process.cwd(), "uploads", "surveys");
-if (!fs5.existsSync(uploadsDir)) {
-  fs5.mkdirSync(uploadsDir, { recursive: true });
+var __dirname = path7.dirname(__filename);
+var uploadsDir = path7.join(process.cwd(), "uploads", "surveys");
+if (!fs6.existsSync(uploadsDir)) {
+  fs6.mkdirSync(uploadsDir, { recursive: true });
 }
 var app = express();
 var PORT = process.env.PORT || 3e3;
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
-app.use(["/uploads", "*/uploads"], express.static(path6.join(process.cwd(), "uploads")));
-app.use(["/documents", "*/documents"], express.static(path6.join(process.cwd(), "public", "documents")));
+app.use(["/uploads", "*/uploads"], express.static(path7.join(process.cwd(), "uploads")));
+app.use(["/documents", "*/documents"], express.static(path7.join(process.cwd(), "public", "documents")));
 app.use(["/api", "*/api"], apiRouter);
 async function startServer() {
-  const distPath = fs5.existsSync(path6.resolve(__dirname, "dist", "index.html")) ? path6.resolve(__dirname, "dist") : path6.resolve(process.cwd(), "dist");
-  const distExists = fs5.existsSync(path6.resolve(distPath, "index.html"));
-  const isProd = process.env.NODE_ENV === "production" || distExists;
+  const distPath = fs6.existsSync(path7.resolve(__dirname, "dist", "index.html")) ? path7.resolve(__dirname, "dist") : path7.resolve(process.cwd(), "dist");
+  const isProd = process.env.NODE_ENV === "production";
   if (!isProd) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -6834,19 +7847,19 @@ async function startServer() {
   } else {
     console.log(`Serving static production build from ${distPath}`);
     app.use(express.static(distPath));
-    app.use("/assets", express.static(path6.resolve(distPath, "assets")));
-    app.use("*/assets", express.static(path6.resolve(distPath, "assets")));
+    app.use("/assets", express.static(path7.resolve(distPath, "assets")));
+    app.use("*/assets", express.static(path7.resolve(distPath, "assets")));
     app.get(["/logo.png", "*/logo.png"], (_req, res) => {
-      res.sendFile(path6.resolve(distPath, "logo.png"));
+      res.sendFile(path7.resolve(distPath, "logo.png"));
     });
     app.get(["/logo.jpg", "*/logo.jpg"], (_req, res) => {
-      res.sendFile(path6.resolve(distPath, "logo.jpg"));
+      res.sendFile(path7.resolve(distPath, "logo.jpg"));
     });
     app.get(["/favicon.ico", "*/favicon.ico"], (_req, res) => {
-      res.sendFile(path6.resolve(distPath, "logo.png"));
+      res.sendFile(path7.resolve(distPath, "logo.png"));
     });
     app.get("*", (_req, res) => {
-      res.sendFile(path6.resolve(distPath, "index.html"));
+      res.sendFile(path7.resolve(distPath, "index.html"));
     });
   }
   app.listen(PORT, "0.0.0.0", () => {

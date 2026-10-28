@@ -4,8 +4,10 @@ import {
   MapPin, Award, CheckCircle2, ArrowRight, Plus, 
   Search, Filter, Shield, KeyRound, UserX, UserPlus,
   Building2, Lock, Eye, Edit3, RefreshCw, AlertCircle, 
-  ChevronRight, CheckSquare, Layers, Receipt, LifeBuoy, Clock
+  ChevronRight, CheckSquare, Layers, Receipt, LifeBuoy, Clock,
+  X, Upload, Download, FileSpreadsheet
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { useCrm } from '../../context/CrmContext';
 import { Role } from '../../types';
 
@@ -25,7 +27,21 @@ interface ManagedUser {
 }
 
 export const TeamView: React.FC = () => {
-  const { employees, activeRole, setActiveRole, currentUser, authFetch, projects } = useCrm();
+  const { 
+    employees, 
+    activeRole, 
+    setActiveRole, 
+    currentUser, 
+    authFetch, 
+    projects, 
+    leads, 
+    updateLead, 
+    autoAssignAllLeads, 
+    updateProject, 
+    assignProject, 
+    autoAssignAllProjects,
+    refreshData 
+  } = useCrm();
 
   // Active Sub-tab in User Management
   const [activeTab, setActiveTab] = useState<'directory' | 'perspectives' | 'matrix' | 'departments'>('directory');
@@ -37,8 +53,19 @@ export const TeamView: React.FC = () => {
   const [roleFilter, setRoleFilter] = useState<string>('All');
   const [statusFilter, setStatusFilter] = useState<string>('All');
 
+  // Lead & Project Direct Assignment Modals state
+  const [assignLeadModalUser, setAssignLeadModalUser] = useState<ManagedUser | null>(null);
+  const [assignProjectModalUser, setAssignProjectModalUser] = useState<ManagedUser | null>(null);
+  const [assignmentSearchTerm, setAssignmentSearchTerm] = useState<string>('');
+  const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
+  const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
+
   // Modals state
   const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
+  const [showImportModal, setShowImportModal] = useState<boolean>(false);
+  const [importRows, setImportRows] = useState<any[]>([]);
+  const [importFileName, setImportFileName] = useState<string>('');
+  const [isImporting, setIsImporting] = useState<boolean>(false);
   const [editingUser, setEditingUser] = useState<ManagedUser | null>(null);
   const [selectedMemberProfile, setSelectedMemberProfile] = useState<ManagedUser | null>(null);
   const [memberAttendance, setMemberAttendance] = useState<any[]>([]);
@@ -258,8 +285,80 @@ export const TeamView: React.FC = () => {
         location: 'Bengaluru',
       });
       fetchUsers();
+      refreshData();
     } catch (err: any) {
       setActionError(err.message);
+    }
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportFileName(file.name);
+    setActionError(null);
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const buffer = evt.target?.result;
+        const workbook = XLSX.read(buffer, { type: 'binary' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const rawJson: any[] = XLSX.utils.sheet_to_json(worksheet);
+
+        if (!rawJson || rawJson.length === 0) {
+          setActionError('Uploaded file contains no rows or valid sheet data.');
+          setImportRows([]);
+          return;
+        }
+
+        const normalized = rawJson.map((row, idx) => ({
+          _id: `row-${idx}`,
+          name: row['Name'] || row['name'] || row['Full Name'] || '',
+          username: row['Username'] || row['username'] || '',
+          password: row['Password'] || row['password'] || '',
+          role: row['Role'] || row['role'] || (isSalesManager ? 'Sales Executive' : isProjectManager ? 'Installation Team' : 'Sales Executive'),
+          email: row['Email'] || row['email'] || '',
+          phone: row['Phone'] || row['phone'] || '',
+          department: row['Department'] || row['department'] || (isSalesManager ? 'Solar Residential Sales' : 'Field Mounting & Electrical'),
+          location: row['Location'] || row['location'] || 'Bengaluru',
+        }));
+
+        setImportRows(normalized);
+      } catch (err: any) {
+        setActionError(`Failed to parse file: ${err.message}`);
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
+
+  const handleBulkImportSubmit = async () => {
+    if (importRows.length === 0) return;
+    setIsImporting(true);
+    setActionError(null);
+    setActionSuccess(null);
+
+    try {
+      const res = await authFetch('/api/users/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ users: importRows }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to import employees');
+      }
+
+      setActionSuccess(data.message || `Successfully imported ${data.count} employees!`);
+      setShowImportModal(false);
+      setImportRows([]);
+      setImportFileName('');
+      fetchUsers();
+      refreshData();
+    } catch (err: any) {
+      setActionError(err.message || 'Bulk import failed');
+    } finally {
+      setIsImporting(false);
     }
   };
 
@@ -416,22 +515,22 @@ export const TeamView: React.FC = () => {
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
       {/* Top Banner */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="p-1.5 bg-emerald-600 text-white rounded-lg">
+      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2.5 mb-1 flex-wrap sm:flex-nowrap">
+            <span className="p-1.5 bg-emerald-600 text-white rounded-lg shrink-0">
               <Users2 className="w-5 h-5" />
             </span>
-            <h1 className="text-xl font-bold text-slate-900 tracking-tight">
+            <h1 className="text-base sm:text-lg lg:text-xl font-bold text-slate-900 tracking-tight whitespace-nowrap">
               {isSuperAdmin
-                ? 'Centralized User Management & Role-Based Governance'
+                ? 'Centralized User Management & Role Governance'
                 : isSalesManager
-                ? 'Sales Executives & Representative Management'
+                ? 'Sales Executives & Team Management'
                 : isProjectManager
                 ? 'Installation Crew & Field Team Management'
                 : 'Team & User Directory'}
             </h1>
-            <span className="px-2.5 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-bold rounded-full">
+            <span className="inline-flex items-center px-2.5 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-bold rounded-full whitespace-nowrap shrink-0 leading-tight">
               {isSuperAdmin
                 ? 'Enterprise Access Control'
                 : isSalesManager
@@ -452,40 +551,91 @@ export const TeamView: React.FC = () => {
           </p>
         </div>
 
-        {canManageUsers && (
-          <button
-            onClick={() => {
-              setFormData({
-                name: '',
-                username: '',
-                password: '',
-                role: creatableRoles[0] || 'Sales Executive',
-                email: '',
-                phone: '',
-                department: isSalesManager 
-                  ? 'Solar Residential Sales' 
-                  : isProjectManager 
-                  ? 'Field Mounting & Electrical Installation' 
-                  : 'Solar Operations',
-                location: 'Bengaluru',
-              });
-              setActionError(null);
-              setShowCreateModal(true);
-            }}
-            className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors cursor-pointer shrink-0"
-          >
-            <UserPlus className="w-4 h-4" />
-            <span>
-              {isSuperAdmin
-                ? '+ Create User Account'
-                : isSalesManager
-                ? '+ Create Sales Executive'
-                : isProjectManager
-                ? '+ Create Crew Member'
-                : '+ Create Account'}
-            </span>
-          </button>
-        )}
+        {/* Action Buttons Toolbar */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 shrink-0">
+          {(isSalesManager || isSuperAdmin) && (
+            <button
+              type="button"
+              onClick={() => {
+                const res = autoAssignAllLeads();
+                setActionSuccess(`Auto-Assignment Complete: Evenly distributed ${res.assignedCount} leads across ${res.repsCount} active Sales Executives!`);
+              }}
+              className="flex items-center justify-center gap-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl text-xs font-bold shadow-xs transition-all cursor-pointer whitespace-nowrap shrink-0"
+              title="Evenly distribute company leads across active Sales Executives"
+            >
+              <Layers className="w-4 h-4 text-blue-200 shrink-0" />
+              <span>Auto-Distribute Leads</span>
+            </button>
+          )}
+
+          {isProjectManager && (
+            <button
+              type="button"
+              onClick={() => {
+                const res = autoAssignAllProjects();
+                setActionSuccess(`Auto-Assignment Complete: Evenly distributed ${res.assignedCount} projects across ${res.crewCount} crew technicians!`);
+              }}
+              className="flex items-center justify-center gap-1.5 px-3 py-2 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white rounded-xl text-xs font-bold shadow-xs transition-all cursor-pointer whitespace-nowrap shrink-0"
+              title="Evenly distribute installation projects across crew technicians"
+            >
+              <Layers className="w-4 h-4 text-indigo-200 shrink-0" />
+              <span>Auto-Distribute Projects</span>
+            </button>
+          )}
+
+          {canManageUsers && (
+            <button
+              type="button"
+              onClick={() => {
+                setShowImportModal(true);
+                setImportRows([]);
+                setImportFileName('');
+                setActionError(null);
+              }}
+              className="flex items-center justify-center gap-1.5 px-3 py-2 bg-slate-900 hover:bg-slate-800 active:bg-slate-950 text-white rounded-xl text-xs font-bold shadow-xs transition-all cursor-pointer whitespace-nowrap shrink-0"
+              title="Bulk import staff accounts from Excel (.xlsx) or CSV"
+            >
+              <Upload className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>Import Staff (Excel/CSV)</span>
+            </button>
+          )}
+
+          {canManageUsers && (
+            <button
+              type="button"
+              onClick={() => {
+                setFormData({
+                  name: '',
+                  username: '',
+                  password: '',
+                  role: creatableRoles[0] || 'Sales Executive',
+                  email: '',
+                  phone: '',
+                  department: isSalesManager 
+                    ? 'Solar Residential Sales' 
+                    : isProjectManager 
+                    ? 'Field Mounting & Electrical Installation' 
+                    : 'Solar Operations',
+                  location: 'Bengaluru',
+                });
+                setActionError(null);
+                setShowCreateModal(true);
+              }}
+              className="flex items-center justify-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl text-xs font-bold shadow-xs transition-all cursor-pointer whitespace-nowrap shrink-0"
+            >
+              <UserPlus className="w-4 h-4 shrink-0" />
+              <span>
+                {isSuperAdmin
+                  ? '+ Create User Account'
+                  : isSalesManager
+                  ? '+ Create Sales Executive'
+                  : isProjectManager
+                  ? '+ Create Crew Member'
+                  : '+ Create Account'}
+              </span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Action Alerts */}
@@ -655,18 +805,24 @@ export const TeamView: React.FC = () => {
               <table className="w-full text-left text-xs text-slate-600">
                 <thead className="bg-slate-50/80 text-slate-500 font-bold uppercase tracking-wider text-[10px] border-b border-slate-200">
                   <tr>
-                    <th className="py-3 px-4">User / Employee</th>
-                    <th className="py-3 px-4">Role &amp; Entitlement</th>
-                    <th className="py-3 px-4">Department &amp; Team</th>
-                    <th className="py-3 px-4">Contact Credentials</th>
-                    <th className="py-3 px-4 text-center">Account Status</th>
-                    <th className="py-3 px-4 text-right">Actions</th>
+                    <th className="py-2.5 px-2.5 sm:px-3 text-left">User / Employee</th>
+                    <th className="py-2.5 px-2 text-left whitespace-nowrap">Role</th>
+                    <th className="py-2.5 px-2 text-left">Department &amp; Hub</th>
+                    <th className="py-2.5 px-2 text-left">Contact</th>
+                    {(isSalesManager || isSuperAdmin) && (
+                      <th className="py-2.5 px-1.5 text-center whitespace-nowrap">Assigned Leads</th>
+                    )}
+                    {isProjectManager && (
+                      <th className="py-2.5 px-1.5 text-center whitespace-nowrap">Assigned Projects</th>
+                    )}
+                    <th className="py-2.5 px-1.5 text-center whitespace-nowrap">Status</th>
+                    <th className="py-2.5 px-2.5 text-right whitespace-nowrap">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-medium">
                   {filteredUsers.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="py-12 text-center text-slate-400">
+                      <td colSpan={(isSalesManager || isSuperAdmin || isProjectManager) ? 7 : 6} className="py-12 text-center text-slate-400">
                         {isLoading 
                           ? 'Loading user accounts...' 
                           : isSalesManager
@@ -683,36 +839,110 @@ export const TeamView: React.FC = () => {
                         onClick={() => setSelectedMemberProfile(user)}
                         className="hover:bg-emerald-50/40 transition-colors cursor-pointer group"
                       >
-                        <td className="py-3.5 px-4">
-                          <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-lg bg-slate-900 group-hover:bg-emerald-700 text-emerald-400 group-hover:text-white font-bold text-xs flex items-center justify-center shrink-0 transition-colors">
+                        <td className="py-2.5 px-2.5 sm:px-3 min-w-0">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div className="w-7 h-7 rounded-lg bg-slate-900 group-hover:bg-emerald-700 text-emerald-400 group-hover:text-white font-bold text-[10px] flex items-center justify-center shrink-0 transition-colors">
                               {user.name.split(' ').map(n => n[0]).slice(0, 2).join('')}
                             </div>
-                            <div>
-                              <div className="font-bold text-slate-900 group-hover:text-emerald-700 transition-colors">{user.name}</div>
-                              <div className="text-[11px] text-slate-400 font-mono">@{user.username} • {user.id}</div>
+                            <div className="min-w-0 max-w-[110px] sm:max-w-[130px] xl:max-w-[160px]">
+                              <div className="font-bold text-slate-900 group-hover:text-emerald-700 transition-colors text-xs truncate" title={user.name}>{user.name}</div>
+                              <div className="text-[10px] text-slate-400 font-mono truncate">@{user.username}</div>
                             </div>
                           </div>
                         </td>
 
-                        <td className="py-3.5 px-4">
-                          <span className="inline-block px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-800 border border-emerald-200">
+                        <td className="py-2.5 px-2 whitespace-nowrap">
+                          <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-800 border border-emerald-200">
                             {user.role}
                           </span>
                         </td>
 
-                        <td className="py-3.5 px-4">
-                          <div className="font-semibold text-slate-800">{user.department}</div>
-                          <div className="text-[11px] text-slate-400">{user.location}</div>
+                        <td className="py-2.5 px-2 min-w-0">
+                          <div className="min-w-0 max-w-[100px] sm:max-w-[120px] xl:max-w-[150px]">
+                            <div className="font-semibold text-slate-800 text-xs truncate" title={user.department}>{user.department}</div>
+                            <div className="text-[10px] text-slate-400 truncate">{user.location}</div>
+                          </div>
                         </td>
 
-                        <td className="py-3.5 px-4">
-                          <div className="text-slate-700">{user.email || '—'}</div>
-                          <div className="text-[11px] text-slate-400">{user.phone || '—'}</div>
+                        <td className="py-2.5 px-2 min-w-0">
+                          <div className="min-w-0 max-w-[110px] sm:max-w-[130px] xl:max-w-[160px]">
+                            <div className="text-slate-700 text-[11px] truncate" title={user.email}>{user.email || '—'}</div>
+                            <div className="text-[10px] text-slate-400 font-mono">{user.phone || '—'}</div>
+                          </div>
                         </td>
 
-                        <td className="py-3.5 px-4 text-center">
-                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold ${
+                        {(isSalesManager || isSuperAdmin) && (
+                          <td className="py-2.5 px-1.5 text-center whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                            {(() => {
+                              if (user.role !== 'Sales Executive') {
+                                return <span className="text-slate-300 text-[11px]">—</span>;
+                              }
+                              const repLeads = leads.filter(l => 
+                                l.assignedToId === user.id || 
+                                l.assignedToId === user.username || 
+                                l.assignedToName?.toLowerCase() === user.name.toLowerCase()
+                              );
+                              return (
+                                <div className="inline-flex items-center justify-center gap-1">
+                                  <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                                    repLeads.length > 0 
+                                      ? 'bg-blue-100 text-blue-800 border border-blue-200' 
+                                      : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                  }`}>
+                                    {repLeads.length} {repLeads.length === 1 ? 'Lead' : 'Leads'}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setAssignLeadModalUser(user);
+                                      setSelectedLeadIds([]);
+                                      setAssignmentSearchTerm('');
+                                    }}
+                                    className="text-[10px] text-emerald-700 hover:underline font-bold cursor-pointer"
+                                  >
+                                    Assign
+                                  </button>
+                                </div>
+                              );
+                            })()}
+                          </td>
+                        )}
+
+                        {isProjectManager && (
+                          <td className="py-2.5 px-1.5 text-center whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                            {(() => {
+                              const memberProjects = projects.filter(p => 
+                                p.installationLeadId === user.id || 
+                                p.installationLeadName?.toLowerCase() === user.name.toLowerCase()
+                              );
+                              return (
+                                <div className="inline-flex items-center justify-center gap-1">
+                                  <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                                    memberProjects.length > 0 
+                                      ? 'bg-indigo-100 text-indigo-800 border border-indigo-200' 
+                                      : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                  }`}>
+                                    {memberProjects.length} {memberProjects.length === 1 ? 'Project' : 'Projects'}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setAssignProjectModalUser(user);
+                                      setSelectedProjectIds([]);
+                                      setAssignmentSearchTerm('');
+                                    }}
+                                    className="text-[10px] text-indigo-700 hover:underline font-bold cursor-pointer"
+                                  >
+                                    Assign
+                                  </button>
+                                </div>
+                              );
+                            })()}
+                          </td>
+                        )}
+
+                        <td className="py-2.5 px-1.5 text-center whitespace-nowrap">
+                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
                             user.isActive 
                               ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' 
                               : 'bg-slate-100 text-slate-500 border border-slate-200'
@@ -722,30 +952,30 @@ export const TeamView: React.FC = () => {
                           </span>
                         </td>
 
-                        <td className="py-3.5 px-4 text-right">
-                          <div className="flex items-center justify-end gap-1.5">
+                        <td className="py-2.5 px-2.5 text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                          <div className="inline-flex items-center justify-end gap-1 shrink-0">
                             <button
-                              onClick={(e) => { e.stopPropagation(); setSelectedMemberProfile(user); }}
-                              className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold rounded-lg text-xs transition-colors cursor-pointer flex items-center gap-1"
+                              onClick={() => setSelectedMemberProfile(user)}
+                              className="p-1.5 xl:px-2 xl:py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold rounded-lg text-[10px] transition-colors cursor-pointer flex items-center gap-1 shrink-0"
                               title="View Field Operations Profile"
                             >
-                              <Eye className="w-3.5 h-3.5 text-emerald-600" />
-                              <span>Profile</span>
+                              <Eye className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                              <span className="hidden xl:inline">Profile</span>
                             </button>
 
                             {canManageUsers && (
                               <>
                                 <button
-                                  onClick={(e) => { e.stopPropagation(); openEditModal(user); }}
-                                  className="p-1.5 hover:bg-slate-100 text-slate-600 hover:text-emerald-700 rounded-lg transition-colors cursor-pointer"
+                                  onClick={() => openEditModal(user)}
+                                  className="p-1.5 hover:bg-slate-100 text-slate-600 hover:text-emerald-700 rounded-lg transition-colors cursor-pointer shrink-0"
                                   title="Edit user details"
                                 >
-                                  <Edit3 className="w-3.5 h-3.5" />
+                                  <Edit3 className="w-3.5 h-3.5 shrink-0" />
                                 </button>
 
                                 <button
-                                  onClick={(e) => { e.stopPropagation(); handleToggleStatus(user); }}
-                                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                                  onClick={() => handleToggleStatus(user)}
+                                  className={`px-1.5 py-1 rounded-lg text-[10px] font-bold transition-colors cursor-pointer shrink-0 ${
                                     user.isActive 
                                       ? 'text-slate-600 hover:text-rose-700 hover:bg-rose-50' 
                                       : 'text-emerald-700 hover:bg-emerald-50'
@@ -759,9 +989,9 @@ export const TeamView: React.FC = () => {
 
                             {isSuperAdmin && (
                               <button
-                                onClick={(e) => { e.stopPropagation(); setActiveRole(user.role); }}
-                                className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-xs transition-colors cursor-pointer ml-1"
-                                title="Switch perspective to this role"
+                                onClick={() => setActiveRole(user.role)}
+                                className="px-2 py-1 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-[10px] transition-colors cursor-pointer shrink-0"
+                                title={`Switch perspective to ${user.role}`}
                               >
                                 View As
                               </button>
@@ -1461,6 +1691,611 @@ export const TeamView: React.FC = () => {
           </div>
         );
       })()}
+
+      {/* MODAL: DIRECT LEAD ASSIGNMENT TO SALES EXECUTIVE */}
+      {assignLeadModalUser && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white rounded-2xl max-w-3xl w-full shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-150 font-sans">
+            <div className="px-6 py-4 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white flex items-center justify-between border-b border-slate-700/60">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400">
+                  <UserCheck className="w-4 h-4" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold">Assign Solar Leads to {assignLeadModalUser.name}</h2>
+                  <p className="text-[11px] text-slate-300">
+                    Allocate incoming in-market leads or rebalance team pipeline to @{assignLeadModalUser.username}
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setAssignLeadModalUser(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-4 border-b border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="relative flex-1 min-w-[200px]">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  placeholder="Search leads by name, phone, city, or lead ID..."
+                  value={assignmentSearchTerm}
+                  onChange={e => setAssignmentSearchTerm(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const filtered = leads.filter(l => {
+                      const term = assignmentSearchTerm.toLowerCase();
+                      return l.name.toLowerCase().includes(term) || l.phone.includes(term) || l.id.toLowerCase().includes(term);
+                    });
+                    const allIds = filtered.map(l => l.id);
+                    setSelectedLeadIds(prev => prev.length === allIds.length ? [] : allIds);
+                  }}
+                  className="px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-100 rounded-lg text-[11px] font-bold text-slate-700 transition-colors cursor-pointer"
+                >
+                  {selectedLeadIds.length > 0 ? 'Deselect All' : 'Select All Filtered'}
+                </button>
+              </div>
+            </div>
+
+            <div className="p-4 overflow-y-auto max-h-[55vh] divide-y divide-slate-100 space-y-2">
+              {(() => {
+                const filtered = leads.filter(l => {
+                  const term = assignmentSearchTerm.toLowerCase();
+                  return l.name.toLowerCase().includes(term) || l.phone.includes(term) || l.id.toLowerCase().includes(term) || (l.city && l.city.toLowerCase().includes(term));
+                });
+
+                if (filtered.length === 0) {
+                  return (
+                    <div className="py-12 text-center text-slate-400 text-xs">
+                      No leads found matching "{assignmentSearchTerm}".
+                    </div>
+                  );
+                }
+
+                return filtered.map(lead => {
+                  const isAssignedToThisUser = lead.assignedToId === assignLeadModalUser.id || lead.assignedToName?.toLowerCase() === assignLeadModalUser.name.toLowerCase();
+                  const isSelected = selectedLeadIds.includes(lead.id);
+
+                  return (
+                    <div 
+                      key={lead.id}
+                      className={`p-3 rounded-xl border transition-all flex items-center justify-between gap-3 text-xs ${
+                        isSelected 
+                          ? 'bg-emerald-50/80 border-emerald-300 shadow-2xs' 
+                          : isAssignedToThisUser
+                          ? 'bg-slate-50 border-slate-200 opacity-90'
+                          : 'bg-white border-slate-200 hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedLeadIds(prev => [...prev, lead.id]);
+                            } else {
+                              setSelectedLeadIds(prev => prev.filter(id => id !== lead.id));
+                            }
+                          }}
+                          className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                        />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
+                              {lead.id}
+                            </span>
+                            <span className="font-bold text-slate-900 truncate">{lead.name}</span>
+                            <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-slate-100 text-slate-700">
+                              {lead.status}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-slate-500 flex items-center gap-2 mt-0.5 flex-wrap">
+                            <span>📞 {lead.phone}</span>
+                            {lead.city && <span>• 📍 {lead.city}</span>}
+                            <span>• ⚡ {lead.recommendedKw || 3} kW System</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3 shrink-0">
+                        <div className="text-right">
+                          <div className="text-[10px] text-slate-400 font-semibold uppercase">Currently Assigned</div>
+                          <div className={`text-xs font-bold ${isAssignedToThisUser ? 'text-emerald-700' : 'text-slate-800'}`}>
+                            {isAssignedToThisUser ? '✓ Assigned to ' + assignLeadModalUser.name : lead.assignedToName || 'Unassigned'}
+                          </div>
+                        </div>
+
+                        {!isAssignedToThisUser && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              updateLead(lead.id, {
+                                assignedToId: assignLeadModalUser.id,
+                                assignedToName: assignLeadModalUser.name,
+                              });
+                              setActionSuccess(`Lead ${lead.id} (${lead.name}) assigned to ${assignLeadModalUser.name}`);
+                            }}
+                            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer shadow-2xs"
+                          >
+                            Assign
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3">
+              <span className="text-xs text-slate-500">
+                {selectedLeadIds.length} lead(s) selected
+              </span>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setAssignLeadModalUser(null)}
+                  className="px-4 py-2 bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 text-xs font-bold rounded-xl transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={selectedLeadIds.length === 0}
+                  onClick={() => {
+                    selectedLeadIds.forEach(id => {
+                      updateLead(id, {
+                        assignedToId: assignLeadModalUser.id,
+                        assignedToName: assignLeadModalUser.name,
+                      });
+                    });
+                    setActionSuccess(`Successfully allocated ${selectedLeadIds.length} leads to ${assignLeadModalUser.name}!`);
+                    setSelectedLeadIds([]);
+                    setAssignLeadModalUser(null);
+                  }}
+                  className={`px-5 py-2 text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer ${
+                    selectedLeadIds.length === 0
+                      ? 'bg-slate-400 cursor-not-allowed'
+                      : 'bg-emerald-600 hover:bg-emerald-700'
+                  }`}
+                >
+                  <UserCheck className="w-4 h-4" />
+                  <span>Assign {selectedLeadIds.length} Leads to {assignLeadModalUser.name}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: DIRECT PROJECT ASSIGNMENT TO INSTALLATION CREW */}
+      {assignProjectModalUser && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white rounded-2xl max-w-3xl w-full shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-150 font-sans">
+            <div className="px-6 py-4 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white flex items-center justify-between border-b border-slate-700/60">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400">
+                  <UserCheck className="w-4 h-4" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold">Assign Installation Projects to {assignProjectModalUser.name}</h2>
+                  <p className="text-[11px] text-slate-300">
+                    Direct rooftop mounting and EPC execution assignment for field technician
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setAssignProjectModalUser(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between gap-3 text-xs">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  placeholder="Search projects by customer name, address, or project ID..."
+                  value={assignmentSearchTerm}
+                  onChange={e => setAssignmentSearchTerm(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+                />
+              </div>
+            </div>
+
+            <div className="p-4 overflow-y-auto max-h-[55vh] divide-y divide-slate-100 space-y-2">
+              {(() => {
+                const filtered = projects.filter(p => {
+                  const term = assignmentSearchTerm.toLowerCase();
+                  return p.customerName.toLowerCase().includes(term) || p.id.toLowerCase().includes(term) || p.customerAddress.toLowerCase().includes(term);
+                });
+
+                if (filtered.length === 0) {
+                  return (
+                    <div className="py-12 text-center text-slate-400 text-xs">
+                      No solar projects match the search filter.
+                    </div>
+                  );
+                }
+
+                return filtered.map(proj => {
+                  const isCompleted = proj.stage === 'Completed';
+                  const isAssigned = proj.installationLeadId === assignProjectModalUser.id || proj.installationLeadName?.toLowerCase() === assignProjectModalUser.name.toLowerCase();
+                  const isSelected = selectedProjectIds.includes(proj.id);
+
+                  return (
+                    <div 
+                      key={proj.id}
+                      className={`p-3 rounded-xl border transition-all flex items-center justify-between gap-3 text-xs ${
+                        isCompleted
+                          ? 'bg-slate-50/70 border-slate-200 opacity-75'
+                          : isSelected 
+                          ? 'bg-indigo-50/80 border-indigo-300 shadow-2xs' 
+                          : isAssigned
+                          ? 'bg-slate-50 border-slate-200 opacity-90'
+                          : 'bg-white border-slate-200 hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <input
+                          type="checkbox"
+                          disabled={isCompleted}
+                          checked={isSelected}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedProjectIds(prev => [...prev, proj.id]);
+                            } else {
+                              setSelectedProjectIds(prev => prev.filter(id => id !== proj.id));
+                            }
+                          }}
+                          className={`w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 ${isCompleted ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'}`}
+                        />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
+                              {proj.id}
+                            </span>
+                            <span className="font-bold text-slate-900 truncate">{proj.customerName}</span>
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                              isCompleted 
+                                ? 'bg-emerald-100 text-emerald-800' 
+                                : 'bg-indigo-100 text-indigo-800'
+                            }`}>
+                              {isCompleted ? '✓ Completed (Locked)' : proj.stage}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-slate-500 flex items-center gap-2 mt-0.5 flex-wrap">
+                            <span>⚡ {proj.capacityKw} kW</span>
+                            <span>• 📍 {proj.customerAddress}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3 shrink-0">
+                        <div className="text-right">
+                          <div className="text-[10px] text-slate-400 font-semibold uppercase">Current Crew Lead</div>
+                          <div className={`text-xs font-bold ${isAssigned ? 'text-indigo-700' : 'text-slate-800'}`}>
+                            {isAssigned ? '✓ ' + assignProjectModalUser.name : proj.installationLeadName || 'Unassigned'}
+                          </div>
+                        </div>
+
+                        {isCompleted ? (
+                          <span className="px-2 py-1 bg-slate-100 text-slate-500 rounded-lg text-[11px] font-semibold">
+                            Locked
+                          </span>
+                        ) : !isAssigned ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              assignProject(proj.id, assignProjectModalUser.id, assignProjectModalUser.name);
+                              setActionSuccess(`Project ${proj.id} assigned to crew lead ${assignProjectModalUser.name}`);
+                            }}
+                            className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer shadow-2xs"
+                          >
+                            Assign
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3">
+              <span className="text-xs text-slate-500">
+                {selectedProjectIds.length} project(s) selected
+              </span>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setAssignProjectModalUser(null)}
+                  className="px-4 py-2 bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 text-xs font-bold rounded-xl transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={selectedProjectIds.length === 0}
+                  onClick={() => {
+                    selectedProjectIds.forEach(id => {
+                      assignProject(id, assignProjectModalUser.id, assignProjectModalUser.name);
+                    });
+                    setActionSuccess(`Successfully assigned ${selectedProjectIds.length} projects to ${assignProjectModalUser.name}!`);
+                    setSelectedProjectIds([]);
+                    setAssignProjectModalUser(null);
+                  }}
+                  className={`px-5 py-2 text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer ${
+                    selectedProjectIds.length === 0
+                      ? 'bg-slate-400 cursor-not-allowed'
+                      : 'bg-indigo-600 hover:bg-indigo-700'
+                  }`}
+                >
+                  <UserCheck className="w-4 h-4" />
+                  <span>Assign {selectedProjectIds.length} Projects to {assignProjectModalUser.name}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* MODAL: BULK IMPORT STAFF ACCOUNTS (EXCEL / CSV) */}
+      {showImportModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white rounded-2xl max-w-4xl w-full shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh] animate-in fade-in zoom-in-95 duration-150 font-sans">
+            {/* Modal Header */}
+            <div className="px-6 py-4 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white flex items-center justify-between border-b border-slate-700/60">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400">
+                  <FileSpreadsheet className="w-4 h-4" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold">
+                    {isSalesManager
+                      ? 'Bulk Import Sales Executives (Excel / CSV)'
+                      : isProjectManager
+                      ? 'Bulk Import Installation Crew (Excel / CSV)'
+                      : 'Bulk Import Staff & Employees (Excel / CSV)'}
+                  </h2>
+                  <p className="text-[11px] text-slate-300">
+                    Upload an Excel (.xlsx) or CSV file. Usernames ending in <code className="font-mono text-emerald-300 font-bold">_ab</code> and passwords ending in <code className="font-mono text-emerald-300 font-bold">@ab2026</code>.
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => {
+                  setShowImportModal(false);
+                  setImportRows([]);
+                  setImportFileName('');
+                }}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 overflow-y-auto space-y-4 text-xs">
+              {/* Ready-to-use Template Download Section */}
+              <div className="space-y-2">
+                <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block">
+                  1. Download Ready-To-Import Template Files
+                </span>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Sales Executives Template */}
+                  {(!isProjectManager || isSuperAdmin) && (
+                    <div className="p-3.5 bg-emerald-50/80 border border-emerald-200 rounded-xl space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-emerald-950 text-xs">Sales Executives Template</span>
+                        <span className="px-2 py-0.5 bg-emerald-600 text-white text-[10px] font-bold rounded">
+                          5 Reps Pre-configured
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-emerald-800">
+                        Contains <code className="font-mono font-bold">kavitha_ab</code>, <code className="font-mono font-bold">arun_ab</code>, <code className="font-mono font-bold">deepak_ab</code>, <code className="font-mono font-bold">pooja_ab</code> with <code className="font-mono font-bold">@ab2026</code> passwords.
+                      </p>
+                      <div className="flex items-center gap-2 pt-1">
+                        <a
+                          href="/templates/sales_executives_import.xlsx"
+                          download="sales_executives_import.xlsx"
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-[11px] font-bold shadow-2xs transition-colors"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Download .xlsx</span>
+                        </a>
+                        <a
+                          href="/templates/sales_executives_import.csv"
+                          download="sales_executives_import.csv"
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-emerald-300 hover:bg-emerald-100 text-emerald-900 rounded-lg text-[11px] font-bold transition-colors"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Download .csv</span>
+                        </a>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Installation Crew Template */}
+                  {(!isSalesManager || isSuperAdmin) && (
+                    <div className="p-3.5 bg-indigo-50/80 border border-indigo-200 rounded-xl space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-indigo-950 text-xs">Installation Crew Template</span>
+                        <span className="px-2 py-0.5 bg-indigo-600 text-white text-[10px] font-bold rounded">
+                          5 Technicians Pre-configured
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-indigo-800">
+                        Contains <code className="font-mono font-bold">muthu_ab</code>, <code className="font-mono font-bold">karthik_ab</code>, <code className="font-mono font-bold">rajesh_ab</code> with <code className="font-mono font-bold">@ab2026</code> passwords.
+                      </p>
+                      <div className="flex items-center gap-2 pt-1">
+                        <a
+                          href="/templates/installation_crew_import.xlsx"
+                          download="installation_crew_import.xlsx"
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-700 hover:bg-indigo-800 text-white rounded-lg text-[11px] font-bold shadow-2xs transition-colors"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Download .xlsx</span>
+                        </a>
+                        <a
+                          href="/templates/installation_crew_import.csv"
+                          download="installation_crew_import.csv"
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-indigo-300 hover:bg-indigo-100 text-indigo-900 rounded-lg text-[11px] font-bold transition-colors"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Download .csv</span>
+                        </a>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Upload Dropzone */}
+              <div className="space-y-1.5">
+                <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block">
+                  2. Select or Drag Excel / CSV File to Upload
+                </span>
+                <label className="border-2 border-dashed border-slate-300 hover:border-emerald-500 bg-slate-50 hover:bg-emerald-50/30 rounded-2xl p-5 flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors text-center">
+                  <div className="w-10 h-10 rounded-xl bg-white border border-slate-200 shadow-2xs flex items-center justify-center text-slate-600">
+                    <Upload className="w-5 h-5 text-emerald-600" />
+                  </div>
+                  <div>
+                    <span className="font-bold text-slate-800">Click to upload Excel (.xlsx) or CSV file</span>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      {importFileName ? `Selected: ${importFileName}` : 'Supports Microsoft Excel (.xlsx, .xls) and CSV (.csv)'}
+                    </p>
+                  </div>
+                  <input
+                    type="file"
+                    accept=".xlsx,.xls,.csv"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+
+              {/* Parsed Rows Preview */}
+              {importRows.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">
+                      3. Preview Records Found in File ({importRows.length} Rows)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => { setImportRows([]); setImportFileName(''); }}
+                      className="text-[11px] text-rose-600 hover:text-rose-800 font-semibold cursor-pointer"
+                    >
+                      Clear File
+                    </button>
+                  </div>
+
+                  <div className="border border-slate-200 rounded-xl overflow-hidden max-h-56 overflow-y-auto">
+                    <table className="w-full text-left text-xs text-slate-600">
+                      <thead className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider text-[10px] border-b border-slate-200">
+                        <tr>
+                          <th className="py-2.5 px-3">#</th>
+                          <th className="py-2.5 px-3">Full Name</th>
+                          <th className="py-2.5 px-3">Username</th>
+                          <th className="py-2.5 px-3">Password</th>
+                          <th className="py-2.5 px-3">Role</th>
+                          <th className="py-2.5 px-3">Phone</th>
+                          <th className="py-2.5 px-3">Location</th>
+                          <th className="py-2.5 px-3 text-center">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 font-medium">
+                        {importRows.map((row, idx) => {
+                          const isExisting = users.some(u => u.username.toLowerCase() === (row.username || '').toLowerCase());
+                          return (
+                            <tr key={row._id} className="hover:bg-slate-50">
+                              <td className="py-2 px-3 text-slate-400 font-mono text-[10px]">{idx + 1}</td>
+                              <td className="py-2 px-3 font-bold text-slate-900">{row.name}</td>
+                              <td className="py-2 px-3 font-mono text-slate-700">@{row.username}</td>
+                              <td className="py-2 px-3 font-mono text-slate-400">••••••••</td>
+                              <td className="py-2 px-3">
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700">
+                                  {row.role}
+                                </span>
+                              </td>
+                              <td className="py-2 px-3 text-slate-600">{row.phone}</td>
+                              <td className="py-2 px-3 text-slate-500">{row.location}</td>
+                              <td className="py-2 px-3 text-center">
+                                {isExisting ? (
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+                                    Already Exists
+                                  </span>
+                                ) : (
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                                    Ready
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3">
+              <span className="text-xs text-slate-500">
+                {importRows.length === 0 ? 'No file parsed yet' : `${importRows.length} employee records ready for import`}
+              </span>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowImportModal(false);
+                    setImportRows([]);
+                    setImportFileName('');
+                  }}
+                  className="px-4 py-2 bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 text-xs font-bold rounded-xl transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={importRows.length === 0 || isImporting}
+                  onClick={handleBulkImportSubmit}
+                  className={`px-5 py-2 text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer ${
+                    importRows.length === 0 || isImporting
+                      ? 'bg-slate-400 cursor-not-allowed'
+                      : 'bg-emerald-600 hover:bg-emerald-700'
+                  }`}
+                >
+                  <Upload className="w-4 h-4" />
+                  <span>
+                    {isImporting
+                      ? 'Importing...'
+                      : `Confirm & Import (${importRows.length}) Employees`}
+                  </span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

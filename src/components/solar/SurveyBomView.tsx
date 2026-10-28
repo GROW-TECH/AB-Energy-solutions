@@ -28,6 +28,7 @@ export const SurveyBomView: React.FC<SurveyBomViewProps> = ({
   const [activeBomItems, setActiveBomItems] = useState<BomItem[]>([]);
   const [activeBomStatus, setActiveBomStatus] = useState<string>('Draft');
   const [activeBomComments, setActiveBomComments] = useState<string>('');
+  const [isEditingUnlocked, setIsEditingUnlocked] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
@@ -359,20 +360,22 @@ export const SurveyBomView: React.FC<SurveyBomViewProps> = ({
 
   // Add custom line item
   const handleAddCustomItem = () => {
+    const newItemId = `BI-${Date.now()}-${activeBomItems.length + 1}`;
     const newItem: BomItem = {
-      id: `BI-${Date.now()}-${activeBomItems.length + 1}`,
+      id: newItemId,
       bomId: '',
-      category: 'BOS & Accessories',
-      itemName: 'Custom Solar Material',
-      technicalSpecification: 'Site-specific technical specification',
-      brandMake: 'Reputed',
+      category: '',
+      itemName: '',
+      technicalSpecification: '',
+      brandMake: '',
       quantity: 1,
       unit: 'Nos',
-      estimatedUnitCost: 1500,
-      estimatedTotalCost: 1500,
-      remarks: 'Added by Survey Engineer',
+      estimatedUnitCost: 0,
+      estimatedTotalCost: 0,
+      remarks: '',
     };
-    setActiveBomItems([...activeBomItems, newItem]);
+    setActiveBomItems(prev => [...prev, newItem]);
+    setCustomCategoryRows(prev => ({ ...prev, [newItemId]: true }));
   };
 
   // Save BOM draft
@@ -437,7 +440,7 @@ export const SurveyBomView: React.FC<SurveyBomViewProps> = ({
 
   const selectedSurvey = surveys.find(s => s.id === selectedSurveyId);
   const totalBomValue = activeBomItems.reduce((sum, it) => sum + (Number(it.estimatedTotalCost) || 0), 0);
-  const isLocked = activeBomStatus === 'Submitted' || activeBomStatus === 'Approved';
+  const isLocked = (activeBomStatus === 'Submitted' || activeBomStatus === 'Approved') && !isEditingUnlocked;
 
   return (
     <div className="space-y-6">
@@ -566,10 +569,22 @@ export const SurveyBomView: React.FC<SurveyBomViewProps> = ({
                           </td>
 
                           <td className="p-4">
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-[10px] font-bold">
-                              <CheckCircle2 className="w-3 h-3" />
-                              <span>Survey Completed</span>
-                            </span>
+                            {srv.status === 'Approved' ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-full text-[10px] font-bold">
+                                <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                                <span>Approved by PM</span>
+                              </span>
+                            ) : srv.status === 'Submitted for Review' ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-50 text-blue-800 border border-blue-200 rounded-full text-[10px] font-bold">
+                                <Clock className="w-3 h-3 text-blue-600" />
+                                <span>Pending PM Review</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-[10px] font-bold">
+                                <CheckCircle2 className="w-3 h-3" />
+                                <span>Survey Completed</span>
+                              </span>
+                            )}
                           </td>
 
                           <td className="p-4">
@@ -654,9 +669,21 @@ export const SurveyBomView: React.FC<SurveyBomViewProps> = ({
                 </span>
 
                 {isLocked ? (
-                  <span className="px-3.5 py-2 bg-slate-100 text-slate-700 font-bold rounded-xl text-xs border border-slate-200 flex items-center gap-1.5">
-                    🔒 Read-Only Inspection Mode
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="px-3.5 py-2 bg-slate-100 text-slate-700 font-bold rounded-xl text-xs border border-slate-200 flex items-center gap-1.5">
+                      🔒 Read-Only Inspection Mode
+                    </span>
+                    <button
+                      onClick={() => {
+                        setIsEditingUnlocked(true);
+                        showToast('BOM editing unlocked! Saving changes will increment version and mark it as Edited for PM review.', 'info' as any);
+                      }}
+                      className="px-3.5 py-2 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                    >
+                      <Edit3 className="w-4 h-4" />
+                      <span>Edit BOM Materials</span>
+                    </button>
+                  </div>
                 ) : (
                   <>
                     <button
@@ -832,7 +859,7 @@ export const SurveyBomView: React.FC<SurveyBomViewProps> = ({
                             <div className="flex items-center gap-1">
                               <input
                                 type="text"
-                                value={item.category}
+                                value={item.category || ''}
                                 onChange={e => {
                                   const val = e.target.value;
                                   const next = [...activeBomItems];
@@ -840,7 +867,7 @@ export const SurveyBomView: React.FC<SurveyBomViewProps> = ({
                                   next[idx].itemName = val;
                                   setActiveBomItems(next);
                                 }}
-                                placeholder="Type material name..."
+                                placeholder="add item"
                                 className="w-full p-2 bg-white border-2 border-emerald-500 rounded-xl text-xs font-semibold focus:outline-hidden text-slate-900"
                                 autoFocus
                                 onKeyDown={e => {
@@ -869,7 +896,7 @@ export const SurveyBomView: React.FC<SurveyBomViewProps> = ({
                           ) : (
                             <div className="flex items-center gap-1.5">
                               <select
-                                value={item.category}
+                                value={item.category || ''}
                                 onChange={e => {
                                   if (e.target.value === '__CUSTOM__') {
                                     setCustomCategoryRows(prev => ({ ...prev, [item.id]: true }));
@@ -882,6 +909,7 @@ export const SurveyBomView: React.FC<SurveyBomViewProps> = ({
                                 }}
                                 className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-hidden focus:border-emerald-500 font-semibold text-slate-800"
                               >
+                                {!item.category && <option value="" disabled>-- add item --</option>}
                                 {categoriesList.map(cat => (
                                   <option key={cat} value={cat}>{cat}</option>
                                 ))}
@@ -1033,6 +1061,32 @@ export const SurveyBomView: React.FC<SurveyBomViewProps> = ({
                     ))}
                   </tbody>
                   <tfoot className="bg-slate-50 border-t border-slate-200 font-bold text-xs">
+                    {!isLocked && (
+                      <tr className="bg-white border-t border-slate-200">
+                        <td colSpan={7} className="p-3.5">
+                          <div className="flex items-center gap-2.5">
+                            <button
+                              type="button"
+                              onClick={handleAddCustomItem}
+                              className="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                              title="Add custom line item with empty fields"
+                            >
+                              <Plus className="w-4 h-4 text-emerald-600" />
+                              <span>+ Add Custom Item</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setShowNewCategoryModal(true)}
+                              className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                              title="Create and add a new material category"
+                            >
+                              <Layers className="w-4 h-4 text-slate-600" />
+                              <span>+ New Category</span>
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
                     <tr>
                       <td colSpan={5} className="p-4 text-right uppercase tracking-wider text-slate-600 text-xs">
                         Total Estimated BOM Equipment Cost:
