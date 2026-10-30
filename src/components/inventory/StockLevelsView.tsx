@@ -233,8 +233,89 @@ export const StockLevelsView: React.FC<StockLevelsViewProps> = ({ onNavigateToPo
         </div>
       </div>
 
-      {/* Stock Levels Table */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+      {/* Stock Levels Mobile Cards (< lg) */}
+      <div className="lg:hidden divide-y divide-slate-100 bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+        {filteredProducts.length === 0 ? (
+          <div className="py-12 text-center text-slate-400">
+            <BarChart3 className="w-10 h-10 mx-auto text-slate-300 mb-2" />
+            <p className="font-medium text-slate-600">No inventory products match criteria</p>
+          </div>
+        ) : (
+          filteredProducts.map(prod => {
+            const health = getStockHealth(prod);
+            const isOrdered = quickOrderSuccessSku === prod.sku;
+
+            return (
+              <div key={prod.id} className="p-4 hover:bg-slate-50/80 transition-colors space-y-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono text-[10px] text-slate-400 font-semibold">{prod.sku}</span>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                        health === 'healthy' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                        health === 'warning' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                        'bg-red-50 text-red-700 border-red-200'
+                      }`}>
+                        {health === 'healthy' ? 'Adequate' : health === 'warning' ? 'Low Stock' : 'Critical'}
+                      </span>
+                    </div>
+                    <h4 className="font-bold text-slate-900 text-sm mt-1 truncate">{prod.name}</h4>
+                    <p className="text-[11px] text-emerald-700 font-medium mt-0.5">
+                      {prod.category} • <span className="text-slate-600">{prod.brand}</span>
+                    </p>
+                  </div>
+
+                  <div className="text-right shrink-0">
+                    <span className="text-[10px] text-slate-400 block">Available</span>
+                    <span className={`font-bold text-base ${health === 'critical' ? 'text-red-600' : health === 'warning' ? 'text-amber-600' : 'text-emerald-600'}`}>
+                      {prod.availableStock}
+                    </span>
+                    <span className="text-[10px] text-slate-400 ml-1">{prod.unit}</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 text-[11px] bg-slate-50 p-2.5 rounded-lg border border-slate-100 text-center">
+                  <div>
+                    <span className="text-slate-400 block text-[10px]">Total Stock</span>
+                    <span className="font-bold text-slate-800">{prod.currentStock} {prod.unit}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[10px]">Reserved</span>
+                    <span className="font-bold text-amber-600">{prod.reservedStock} {prod.unit}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[10px]">Threshold</span>
+                    <span className="font-medium text-slate-700">{prod.minThreshold} {prod.unit}</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-[11px] text-slate-500 truncate max-w-[170px]">
+                    Vendor: <strong className="text-slate-700">{prod.supplierName}</strong>
+                  </span>
+
+                  {isOrdered ? (
+                    <span className="text-xs font-bold text-emerald-600 flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> PO Issued!
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => handleQuickRestock(prod)}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg border border-emerald-200 transition-colors cursor-pointer"
+                    >
+                      <ShoppingCart className="w-3.5 h-3.5" />
+                      <span>Restock</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* Stock Levels Table (Desktop >= lg) */}
+      <div className="hidden lg:block bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs text-slate-600">
             <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200 uppercase text-[11px] tracking-wider">

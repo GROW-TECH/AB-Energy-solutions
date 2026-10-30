@@ -161,50 +161,91 @@ export const PurchaseDashboard: React.FC<PurchaseDashboardProps> = ({
               </button>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="border-b border-slate-100 text-slate-400 font-semibold uppercase text-[10px]">
-                    <th className="pb-2">PO #</th>
-                    <th className="pb-2">Supplier</th>
-                    <th className="pb-2">Warehouse</th>
-                    <th className="pb-2">Grand Total</th>
-                    <th className="pb-2">Status</th>
-                    <th className="pb-2 text-right">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {purchaseOrders.slice(0, 6).map(po => (
-                    <tr key={po.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="py-2.5 font-bold font-mono text-slate-900">{po.poNumber}</td>
-                      <td className="py-2.5 font-medium text-slate-800">{po.supplierName}</td>
-                      <td className="py-2.5 text-slate-600 truncate max-w-[140px]">{po.deliveryWarehouse || 'Central Warehouse'}</td>
-                      <td className="py-2.5 font-bold font-mono text-slate-900">
-                        ₹{(po.grandTotal || 0).toLocaleString('en-IN')}
-                      </td>
-                      <td className="py-2.5">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          po.status === 'Received' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
-                          po.status === 'In-Transit' ? 'bg-blue-50 text-blue-700 border border-blue-200' :
-                          po.status === 'Issued' ? 'bg-amber-50 text-amber-700 border border-amber-200' :
-                          'bg-slate-100 text-slate-600 border border-slate-200'
-                        }`}>
-                          {po.status}
+            <>
+              {/* Mobile Recent PO Cards (< lg) */}
+              <div className="lg:hidden divide-y divide-slate-100">
+                {purchaseOrders.slice(0, 6).map(po => (
+                  <div key={po.id} className="py-3 space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <span className="font-mono font-bold text-slate-900 text-xs bg-slate-100 px-2 py-0.5 rounded">
+                          {po.poNumber}
                         </span>
-                      </td>
-                      <td className="py-2.5 text-right">
-                        <button
-                          onClick={() => onNavigateToTab('purchase-orders')}
-                          className="px-2 py-1 bg-slate-100 hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 rounded text-[11px] font-semibold transition-colors cursor-pointer"
-                        >
-                          Details →
-                        </button>
-                      </td>
+                        <h4 className="font-bold text-slate-900 text-xs sm:text-sm mt-1">{po.supplierName}</h4>
+                      </div>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
+                        po.status === 'Received' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
+                        po.status === 'In-Transit' ? 'bg-blue-50 text-blue-700 border border-blue-200' :
+                        po.status === 'Issued' ? 'bg-amber-50 text-amber-700 border border-amber-200' :
+                        'bg-slate-100 text-slate-600 border border-slate-200'
+                      }`}>
+                        {po.status}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between text-xs p-2 bg-slate-50 rounded-xl">
+                      <span className="text-slate-500 text-[11px] truncate max-w-[150px]">{po.deliveryWarehouse || 'Central Warehouse'}</span>
+                      <span className="font-mono font-bold text-slate-900 text-xs">₹{(po.grandTotal || 0).toLocaleString('en-IN')}</span>
+                    </div>
+
+                    <div className="flex justify-end pt-0.5">
+                      <button
+                        onClick={() => onNavigateToTab('purchase-orders')}
+                        className="w-full py-1.5 bg-slate-100 hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 rounded-lg text-xs font-semibold transition-colors cursor-pointer text-center"
+                      >
+                        View PO Details &rarr;
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Desktop Recent PO Table (>= lg) */}
+              <div className="hidden lg:block overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-100 text-slate-400 font-semibold uppercase text-[10px]">
+                      <th className="pb-2">PO #</th>
+                      <th className="pb-2">Supplier</th>
+                      <th className="pb-2">Warehouse</th>
+                      <th className="pb-2">Grand Total</th>
+                      <th className="pb-2">Status</th>
+                      <th className="pb-2 text-right">Action</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {purchaseOrders.slice(0, 6).map(po => (
+                      <tr key={po.id} className="hover:bg-slate-50 transition-colors">
+                        <td className="py-2.5 font-bold font-mono text-slate-900">{po.poNumber}</td>
+                        <td className="py-2.5 font-medium text-slate-800">{po.supplierName}</td>
+                        <td className="py-2.5 text-slate-600 truncate max-w-[140px]">{po.deliveryWarehouse || 'Central Warehouse'}</td>
+                        <td className="py-2.5 font-bold font-mono text-slate-900">
+                          ₹{(po.grandTotal || 0).toLocaleString('en-IN')}
+                        </td>
+                        <td className="py-2.5">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            po.status === 'Received' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
+                            po.status === 'In-Transit' ? 'bg-blue-50 text-blue-700 border border-blue-200' :
+                            po.status === 'Issued' ? 'bg-amber-50 text-amber-700 border border-amber-200' :
+                            'bg-slate-100 text-slate-600 border border-slate-200'
+                          }`}>
+                            {po.status}
+                          </span>
+                        </td>
+                        <td className="py-2.5 text-right">
+                          <button
+                            onClick={() => onNavigateToTab('purchase-orders')}
+                            className="px-2 py-1 bg-slate-100 hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 rounded text-[11px] font-semibold transition-colors cursor-pointer"
+                          >
+                            Details →
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </div>
 

@@ -42,6 +42,12 @@ export const InvoicesView: React.FC = () => {
     setPayAmount(inv.balanceDue);
   };
 
+  const handleOpenRecordPayment = (inv: Invoice) => {
+    setSelectedInvoice(inv);
+    setPayAmount(inv.balanceDue);
+    setShowPaymentModal(true);
+  };
+
   const handleRecordPayment = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedInvoice) return;
@@ -405,8 +411,99 @@ export const InvoicesView: React.FC = () => {
               </div>
             </div>
 
-            {/* High-Density Data Table */}
-            <div className="overflow-x-auto">
+            {/* Mobile Card List (< lg) */}
+            <div className="lg:hidden divide-y divide-slate-100">
+              {filteredInvoices.length === 0 ? (
+                <div className="py-12 text-center text-slate-400 p-4 text-xs">
+                  No invoices match your current search or status filter.
+                </div>
+              ) : (
+                filteredInvoices.map(inv => {
+                  const gstTotal = inv.cgst + inv.sgst + inv.igst;
+                  const milestoneDesc = inv.items[0]?.description || 'EPC Milestone';
+
+                  return (
+                    <div
+                      key={inv.id}
+                      onClick={() => {
+                        handleSelectInvoice(inv);
+                        setActiveViewMode('document');
+                      }}
+                      className="p-4 hover:bg-slate-50 transition-colors cursor-pointer space-y-3"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <span className="font-mono font-bold text-xs text-slate-900 block truncate">
+                            {inv.invoiceNumber}
+                          </span>
+                          <h4 className="font-bold text-slate-900 text-sm truncate mt-0.5">{inv.customerName}</h4>
+                          <span className="text-[11px] text-slate-400 block truncate">
+                            Project: {inv.projectId} &bull; {inv.customerPhone}
+                          </span>
+                        </div>
+
+                        <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider shrink-0 ${
+                          inv.status === 'Paid' ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' :
+                          inv.status === 'Partially Paid' ? 'bg-blue-100 text-blue-800 border border-blue-200' :
+                          'bg-amber-100 text-amber-800 border border-amber-200'
+                        }`}>
+                          {inv.status}
+                        </span>
+                      </div>
+
+                      <div className="text-xs text-slate-700 bg-slate-50 p-2 rounded-lg font-medium">
+                        {milestoneDesc}
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 p-2.5 bg-slate-50 rounded-xl text-xs">
+                        <div>
+                          <span className="text-[10px] text-slate-400 block font-semibold">Total Amount</span>
+                          <span className="font-bold text-slate-900 font-mono text-sm block">
+                            ₹{inv.totalAmount.toLocaleString('en-IN')}
+                          </span>
+                          <span className="text-[10px] text-slate-500 block font-mono">
+                            Taxable: ₹{inv.subtotal.toLocaleString('en-IN')}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-slate-400 block font-semibold">Balance Due</span>
+                          <span className="font-extrabold text-amber-700 font-mono text-sm block">
+                            ₹{inv.balanceDue.toLocaleString('en-IN')}
+                          </span>
+                          <span className="text-[10px] text-slate-500 block font-mono">
+                            GST: ₹{gstTotal.toLocaleString('en-IN')}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2 pt-1" onClick={e => e.stopPropagation()}>
+                        {inv.balanceDue > 0 && (
+                          <button
+                            onClick={() => handleOpenRecordPayment(inv)}
+                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs"
+                          >
+                            Record Payment
+                          </button>
+                        )}
+                        <button
+                          onClick={() => {
+                            handleSelectInvoice(inv);
+                            setActiveViewMode('document');
+                          }}
+                          className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs ml-auto"
+                        >
+                          View Invoice
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Desktop High-Density Data Table (>= md) */}
+            {/* Desktop Table (>= lg) */}
+            <div className="hidden lg:block overflow-x-auto">
               <table className="w-full text-left text-xs text-slate-600">
                 <thead className="bg-slate-50/80 text-slate-500 font-bold uppercase tracking-wider text-[10px] border-b border-slate-200">
                   <tr>

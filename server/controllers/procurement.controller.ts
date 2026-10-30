@@ -747,7 +747,7 @@ export async function clearClosedIndents(req: Request, res: Response): Promise<v
  * Links quotation, procurement, GRN, and signature records to the EPC project.
  * Prevents duplicate conversion.
  */
-export async function convertToEpcProject(req: Request, res: Response): Promise<void> {
+export async function convertToEpcProject(req: Request, res: Response) {
   const conn = await pool.getConnection();
   try {
     const { quotationId, projectManagerName, installationLeadName } = req.body;

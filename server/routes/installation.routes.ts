@@ -3,11 +3,15 @@ import {
   recordAttendance, 
   getProjectAttendance, 
   logProgress, 
-  getProjectCommandCentre 
+  getProjectCommandCentre,
+  scheduleInstallation 
 } from '../controllers/installation.controller.js';
 import { authenticateToken } from '../middleware/auth.js';
 
 const router = Router();
+
+// Installation Scheduling & Crew Assignment (Step 4 of EPC Lifecycle)
+router.post('/schedule', authenticateToken, scheduleInstallation);
 
 // Field team attendance
 router.post('/attendance', authenticateToken, recordAttendance);

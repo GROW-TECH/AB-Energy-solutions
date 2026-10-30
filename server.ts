@@ -28,10 +28,23 @@ app.use(['/api', '*/api'], apiRouter);
 
 // Vite integration
 async function startServer() {
-  const distPath = fs.existsSync(path.resolve(__dirname, 'dist', 'index.html'))
-    ? path.resolve(__dirname, 'dist')
-    : path.resolve(process.cwd(), 'dist');
-  const isProd = process.env.NODE_ENV === 'production';
+  const distCandidate1 = path.resolve(__dirname, 'dist');
+  const distCandidate2 = path.resolve(process.cwd(), 'dist');
+  const rootCandidate = process.cwd();
+
+  let distPath = distCandidate1;
+  let hasDist = fs.existsSync(path.resolve(distCandidate1, 'index.html'));
+
+  if (!hasDist && fs.existsSync(path.resolve(distCandidate2, 'index.html'))) {
+    distPath = distCandidate2;
+    hasDist = true;
+  } else if (!hasDist && fs.existsSync(path.resolve(rootCandidate, 'assets'))) {
+    distPath = rootCandidate;
+    hasDist = true;
+  }
+
+  // In production (or whenever compiled build exists), serve compiled static assets
+  const isProd = process.env.NODE_ENV === 'production' || hasDist;
 
   if (!isProd) {
     const vite = await createViteServer({

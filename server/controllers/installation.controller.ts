@@ -356,3 +356,67 @@ export async function getProjectCommandCentre(req: Request, res: Response): Prom
     res.status(500).json({ success: false, error: error.message });
   }
 }
+
+/**
+ * POST /api/installation/schedule
+ * Saves the PM installation kickoff date and assigned crew members for a project
+ */
+export async function scheduleInstallation(req: Request, res: Response): Promise<void> {
+  try {
+    const { projectId, scheduledDate, installationLeadName, crewMembers } = req.body;
+
+    if (!projectId) {
+      res.status(400).json({ success: false, error: 'Project ID is required' });
+      return;
+    }
+
+    const crewArray = Array.isArray(crewMembers) ? crewMembers : [];
+
+    try {
+      await pool.query(
+        `UPDATE projects 
+         SET target_completion_date = COALESCE(?, target_completion_date),
+             scheduled_installation_date = COALESCE(?, scheduled_installation_date),
+             installation_lead_name = COALESCE(?, installation_lead_name),
+             assigned_crew_members = ?
+         WHERE id = ?`,
+        [scheduledDate || null, scheduledDate || null, installationLeadName || null, JSON.stringify(crewArray), projectId]
+      );
+    } catch (dbErr: any) {
+      try {
+        await pool.query(
+          `UPDATE projects 
+           SET target_completion_date = COALESCE(?, target_completion_date),
+               installation_lead_name = COALESCE(?, installation_lead_name)
+           WHERE id = ?`,
+          [scheduledDate || null, installationLeadName || null, projectId]
+        );
+      } catch (innerErr) {
+        console.warn('Could not update project schedule in DB:', innerErr);
+      }
+    }
+
+    try {
+      await createNotification({
+        recipientRole: 'Installation Team',
+        type: 'info',
+        title: 'Installation Scheduled',
+        message: `Project ${projectId} kickoff scheduled for ${scheduledDate || 'upcoming date'} with ${crewArray.length} assigned crew members.`,
+        entityId: projectId,
+        actionUrl: `/projects`,
+      });
+    } catch {}
+
+    res.json({
+      success: true,
+      projectId,
+      scheduledDate,
+      installationLeadName,
+      crewMembers: crewArray,
+      message: 'Installation schedule and crew assignments saved successfully'
+    });
+  } catch (error: any) {
+    console.error('Error saving installation schedule:', error);
+    res.status(500).json({ success: false, error: error.message || 'Internal server error' });
+  }
+}

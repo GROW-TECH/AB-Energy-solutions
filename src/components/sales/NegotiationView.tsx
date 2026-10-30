@@ -305,115 +305,216 @@ export const NegotiationView: React.FC<NegotiationViewProps> = ({
             )}
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs divide-y divide-slate-200">
-              <thead className="bg-slate-50 text-slate-700 font-bold text-[11px] uppercase tracking-wider">
-                <tr>
-                  <th className="p-4">Customer &amp; Quote Ref</th>
-                  <th className="p-4 text-center">System Capacity</th>
-                  <th className="p-4 text-right">Gross Subtotal</th>
-                  <th className="p-4 text-right">Discount</th>
-                  <th className="p-4 text-right">Final Contract (₹)</th>
-                  <th className="p-4">90% Advance Requirement</th>
-                  <th className="p-4">Process Status</th>
-                  <th className="p-4 text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {displayedQuotes.map(q => {
-                  const advance90 = Math.round(q.totalAmount * 0.90);
-                  const isAccepted = q.status === 'Customer_Accepted';
+          <>
+            {/* Negotiation Mobile Cards (< lg) */}
+            <div className="lg:hidden divide-y divide-slate-100">
+              {displayedQuotes.map(q => {
+                const advance90 = Math.round(q.totalAmount * 0.90);
+                const isAccepted = q.status === 'Customer_Accepted';
 
-                  return (
-                    <tr key={q.id} className="hover:bg-slate-50/70 transition-colors">
-                      <td className="p-4">
-                        <div className="font-bold text-slate-900">{q.leadName}</div>
-                        <div className="text-[11px] text-slate-500 flex items-center gap-1.5 mt-0.5">
-                          <span className="font-mono text-emerald-700 font-bold">{q.quotationNumber}</span>
-                          <span>•</span>
-                          <span>{q.customerPhone}</span>
+                return (
+                  <div key={q.id} className="p-4 hover:bg-slate-50/70 transition-colors space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono text-emerald-700 font-bold text-xs bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                            {q.quotationNumber}
+                          </span>
+                          {isAccepted ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-full text-[10px] font-bold">
+                              <Truck className="w-3 h-3 text-emerald-600" />
+                              <span>Accepted</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-800 border border-amber-300 rounded-full text-[10px] font-bold">
+                              <Clock className="w-3 h-3 text-amber-600" />
+                              <span>Negotiating</span>
+                            </span>
+                          )}
                         </div>
-                        <div className="text-[10px] text-slate-400 truncate max-w-[200px] mt-0.5">{q.customerAddress}</div>
-                      </td>
+                        <h4 className="font-bold text-slate-900 text-sm mt-1 truncate">{q.leadName}</h4>
+                        <p className="text-[11px] text-slate-500 font-mono mt-0.5">{q.customerPhone}</p>
+                      </div>
 
-                      <td className="p-4 text-center">
-                        <span className="px-2.5 py-1 bg-slate-100 text-slate-900 font-mono font-bold rounded-lg text-xs">
+                      <div className="text-right shrink-0">
+                        <span className="px-2.5 py-1 bg-slate-100 text-slate-900 font-mono font-bold rounded-lg text-xs inline-block">
                           {q.systemCapacityKw} kWp
                         </span>
                         <div className="text-[10px] text-slate-400 mt-0.5 font-medium">{q.packageTier || 'Premium'}</div>
-                      </td>
+                      </div>
+                    </div>
 
-                      <td className="p-4 text-right font-mono text-slate-600">
-                        ₹{(q.subtotal || q.totalAmount).toLocaleString('en-IN')}
-                      </td>
+                    {q.customerAddress && (
+                      <div className="text-[11px] text-slate-500 truncate" title={q.customerAddress}>
+                        {q.customerAddress}
+                      </div>
+                    )}
 
-                      <td className="p-4 text-right font-mono font-bold text-emerald-700">
-                        {q.discountAmount ? `-₹${q.discountAmount.toLocaleString('en-IN')}` : '₹0'}
-                      </td>
+                    <div className="grid grid-cols-2 gap-2 text-xs p-2.5 bg-slate-50/80 rounded-xl border border-slate-100">
+                      <div>
+                        <span className="text-[10px] text-slate-400 block font-semibold">Subtotal</span>
+                        <span className="font-mono text-slate-600">₹{(q.subtotal || q.totalAmount).toLocaleString('en-IN')}</span>
+                        {q.discountAmount ? (
+                          <span className="text-[10px] text-emerald-700 block font-bold">-₹{q.discountAmount.toLocaleString('en-IN')} disc</span>
+                        ) : null}
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-400 block font-semibold">Final Contract</span>
+                        <span className="font-mono font-black text-slate-900 text-sm">₹{q.totalAmount.toLocaleString('en-IN')}</span>
+                      </div>
+                      <div className="col-span-2 pt-1 border-t border-slate-200/60 flex items-center justify-between">
+                        <span className="text-[10px] text-slate-500 font-medium">90% Advance Required:</span>
+                        <span className="font-mono font-bold text-emerald-800 text-xs">₹{advance90.toLocaleString('en-IN')}</span>
+                      </div>
+                    </div>
 
-                      <td className="p-4 text-right font-mono font-black text-slate-900 text-sm">
-                        ₹{q.totalAmount.toLocaleString('en-IN')}
-                      </td>
-
-                      <td className="p-4">
-                        <div className="font-mono font-bold text-emerald-800 text-xs">
-                          ₹{advance90.toLocaleString('en-IN')}
-                        </div>
-                        <div className="text-[10px] text-slate-500 font-medium">90% on PO / Booking</div>
-                      </td>
-
-                      <td className="p-4">
-                        {isAccepted ? (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-full text-[10px] font-bold">
-                            <Truck className="w-3.5 h-3.5 text-emerald-600" />
-                            <span>In Purchase &bull; Procurement Initiated</span>
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-50 text-amber-800 border border-amber-300 rounded-full text-[10px] font-bold">
-                            <Clock className="w-3 h-3 text-amber-600" />
-                            <span>In Client Negotiation</span>
-                          </span>
-                        )}
-                      </td>
-
-                      <td className="p-4 text-right">
-                        {isAccepted ? (
-                          <div className="flex items-center justify-end gap-2">
-                            <button
-                              onClick={() => {
-                                if (onNavigateToTab) {
-                                  onNavigateToTab('purchase-orders');
-                                }
-                              }}
-                              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs transition-colors cursor-pointer inline-flex items-center gap-1.5 shadow-xs"
-                            >
-                              <Truck className="w-3.5 h-3.5 text-emerald-100" />
-                              <span>Purchase Panel &rarr;</span>
-                            </button>
-                            <button
-                              onClick={() => handleOpenNegotiation(q)}
-                              className="px-2.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors cursor-pointer"
-                              title="View Details"
-                            >
-                              Details
-                            </button>
-                          </div>
-                        ) : (
+                    <div className="flex items-center justify-end gap-2 pt-1">
+                      {isAccepted ? (
+                        <>
+                          <button
+                            onClick={() => {
+                              if (onNavigateToTab) {
+                                onNavigateToTab('purchase-orders');
+                              }
+                            }}
+                            className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs transition-colors cursor-pointer inline-flex items-center justify-center gap-1.5 shadow-xs"
+                          >
+                            <Truck className="w-3.5 h-3.5 text-emerald-100" />
+                            <span>Purchase Panel &rarr;</span>
+                          </button>
                           <button
                             onClick={() => handleOpenNegotiation(q)}
-                            className="px-4 py-2 bg-slate-900 hover:bg-amber-600 text-white font-bold rounded-xl text-xs transition-colors cursor-pointer inline-flex items-center gap-1.5 shadow-xs"
+                            className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors cursor-pointer"
                           >
-                            <span>Negotiate Deal</span>
-                            <ArrowRight className="w-3.5 h-3.5" />
+                            Details
                           </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                        </>
+                      ) : (
+                        <button
+                          onClick={() => handleOpenNegotiation(q)}
+                          className="w-full py-2 bg-slate-900 hover:bg-amber-600 text-white font-bold rounded-xl text-xs transition-colors cursor-pointer inline-flex items-center justify-center gap-1.5 shadow-xs"
+                        >
+                          <span>Negotiate Deal</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Desktop Table View (>= lg) */}
+            <div className="hidden lg:block overflow-x-auto">
+              <table className="w-full text-left text-xs divide-y divide-slate-200">
+                <thead className="bg-slate-50 text-slate-700 font-bold text-[11px] uppercase tracking-wider">
+                  <tr>
+                    <th className="p-4">Customer &amp; Quote Ref</th>
+                    <th className="p-4 text-center">System Capacity</th>
+                    <th className="p-4 text-right">Gross Subtotal</th>
+                    <th className="p-4 text-right">Discount</th>
+                    <th className="p-4 text-right">Final Contract (₹)</th>
+                    <th className="p-4">90% Advance Requirement</th>
+                    <th className="p-4">Process Status</th>
+                    <th className="p-4 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {displayedQuotes.map(q => {
+                    const advance90 = Math.round(q.totalAmount * 0.90);
+                    const isAccepted = q.status === 'Customer_Accepted';
+
+                    return (
+                      <tr key={q.id} className="hover:bg-slate-50/70 transition-colors">
+                        <td className="p-4">
+                          <div className="font-bold text-slate-900">{q.leadName}</div>
+                          <div className="text-[11px] text-slate-500 flex items-center gap-1.5 mt-0.5">
+                            <span className="font-mono text-emerald-700 font-bold">{q.quotationNumber}</span>
+                            <span>•</span>
+                            <span>{q.customerPhone}</span>
+                          </div>
+                          <div className="text-[10px] text-slate-400 truncate max-w-[200px] mt-0.5">{q.customerAddress}</div>
+                        </td>
+
+                        <td className="p-4 text-center">
+                          <span className="px-2.5 py-1 bg-slate-100 text-slate-900 font-mono font-bold rounded-lg text-xs">
+                            {q.systemCapacityKw} kWp
+                          </span>
+                          <div className="text-[10px] text-slate-400 mt-0.5 font-medium">{q.packageTier || 'Premium'}</div>
+                        </td>
+
+                        <td className="p-4 text-right font-mono text-slate-600">
+                          ₹{(q.subtotal || q.totalAmount).toLocaleString('en-IN')}
+                        </td>
+
+                        <td className="p-4 text-right font-mono font-bold text-emerald-700">
+                          {q.discountAmount ? `-₹${q.discountAmount.toLocaleString('en-IN')}` : '₹0'}
+                        </td>
+
+                        <td className="p-4 text-right font-mono font-black text-slate-900 text-sm">
+                          ₹{q.totalAmount.toLocaleString('en-IN')}
+                        </td>
+
+                        <td className="p-4">
+                          <div className="font-mono font-bold text-emerald-800 text-xs">
+                            ₹{advance90.toLocaleString('en-IN')}
+                          </div>
+                          <div className="text-[10px] text-slate-500 font-medium">90% on PO / Booking</div>
+                        </td>
+
+                        <td className="p-4">
+                          {isAccepted ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-full text-[10px] font-bold">
+                              <Truck className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>In Purchase &bull; Procurement Initiated</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-50 text-amber-800 border border-amber-300 rounded-full text-[10px] font-bold">
+                              <Clock className="w-3 h-3 text-amber-600" />
+                              <span>In Client Negotiation</span>
+                            </span>
+                          )}
+                        </td>
+
+                        <td className="p-4 text-right">
+                          {isAccepted ? (
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                onClick={() => {
+                                  if (onNavigateToTab) {
+                                    onNavigateToTab('purchase-orders');
+                                  }
+                                }}
+                                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs transition-colors cursor-pointer inline-flex items-center gap-1.5 shadow-xs"
+                              >
+                                <Truck className="w-3.5 h-3.5 text-emerald-100" />
+                                <span>Purchase Panel &rarr;</span>
+                              </button>
+                              <button
+                                onClick={() => handleOpenNegotiation(q)}
+                                className="px-2.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                                title="View Details"
+                              >
+                                Details
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => handleOpenNegotiation(q)}
+                              className="px-4 py-2 bg-slate-900 hover:bg-amber-600 text-white font-bold rounded-xl text-xs transition-colors cursor-pointer inline-flex items-center gap-1.5 shadow-xs"
+                            >
+                              <span>Negotiate Deal</span>
+                              <ArrowRight className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
 

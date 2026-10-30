@@ -161,6 +161,12 @@ export const getSurveys = async (req: Request, res: Response) => {
     if (user && user.role === 'Customer') {
       query += ' WHERE lead_id IN (SELECT id FROM leads WHERE email = ? OR phone = ?) OR customer_name = ?';
       params.push(user.email || '', user.phone || '', user.name || '');
+    } else if (user && user.role === 'Survey Engineer') {
+      const empId = user.employeeId || user.id || user.userId;
+      const userName = (user.name || user.username || '').trim();
+      const firstPart = userName.split(' ')[0] || userName;
+      query += ' WHERE (engineer_id = ? OR engineer_id = ? OR engineer_name = ? OR engineer_name LIKE ?)';
+      params.push(empId, user.userId || user.id, userName, `%${firstPart}%`);
     }
 
     query += ' ORDER BY scheduled_date DESC';
@@ -238,6 +244,37 @@ export const createSurvey = async (req: Request, res: Response) => {
 
     const scheduledDate = s.scheduledDate || new Date().toISOString().split('T')[0];
     const scheduledTime = s.scheduledTime || '10:00 AM - 12:00 PM';
+    const engineerId = s.engineerId || null;
+    let engineerName = s.engineerName || null;
+
+    if (engineerId && !engineerName) {
+      const [empRows]: any = await pool.query('SELECT name FROM employees WHERE id = ? LIMIT 1', [engineerId]);
+      if (empRows && empRows.length > 0) engineerName = empRows[0].name;
+    }
+    if (!engineerName && !engineerId) {
+      engineerName = 'Field Engineer';
+    }
+
+    // Check for Slot Conflict for this engineer on this date and time
+    if ((engineerId || engineerName) && scheduledDate && scheduledTime) {
+      const [conflicts]: any = await pool.query(
+        `SELECT id, customer_name, scheduled_date, scheduled_time, engineer_name 
+         FROM site_surveys 
+         WHERE (engineer_id = ? OR (engineer_name IS NOT NULL AND engineer_name = ?))
+           AND scheduled_date = ? 
+           AND scheduled_time = ? 
+           AND status NOT IN ('Cancelled', 'Rejected')
+         LIMIT 1`,
+        [engineerId || '', engineerName || '', scheduledDate, scheduledTime]
+      );
+      if (conflicts && conflicts.length > 0) {
+        return res.status(409).json({
+          success: false,
+          error: `Slot Conflict: ${conflicts[0].engineer_name || engineerName} is already scheduled for ${conflicts[0].customer_name} (${conflicts[0].id}) on ${scheduledDate} during ${scheduledTime}.`,
+          conflict: conflicts[0]
+        });
+      }
+    }
 
     await pool.query(
       `INSERT INTO site_surveys (
@@ -279,7 +316,7 @@ export const createSurvey = async (req: Request, res: Response) => {
       )`,
       [
         surveyId, s.leadId || null, s.leadName || s.customerName, s.customerName, s.phone, s.address, scheduledDate, scheduledTime,
-        s.engineerId || null, s.engineerName || 'Vikram Mehta', s.status || 'Scheduled', s.roofAreaSqFt || 0, s.shadowFreeAreaSqFt || 0,
+        engineerId, engineerName || 'Field Engineer', s.status || 'Scheduled', s.roofAreaSqFt || 0, s.shadowFreeAreaSqFt || 0,
         s.roofType || 'RCC Flat', s.azimuthAngle || 180, s.tiltAngle || 15, s.existingSanctionLoadKw || 0, s.gridPhase || 'Three Phase',
         s.distanceToLtPanelMeters || 20, s.recommendedKw || 0, s.panelQuantity || 0,
         s.estimatedGenerationUnitsPerYear || 0, s.estimatedAnnualSavings || 0, s.estimatedCost || 0,
@@ -756,6 +793,39 @@ export const rescheduleSurvey = async (req: Request, res: Response) => {
     const [rows]: any = await pool.query('SELECT * FROM site_surveys WHERE id = ?', [id]);
     if (!rows || rows.length === 0) {
       return res.status(404).json({ success: false, error: 'Survey not found' });
+    }
+
+    const currentSurvey = rows[0];
+    const targetDate = scheduledDate;
+    const targetTime = scheduledTime || currentSurvey.scheduled_time || '10:00 AM - 12:00 PM';
+    const targetEngId = engineerId !== undefined ? engineerId : currentSurvey.engineer_id;
+    let targetEngName = engineerName !== undefined ? engineerName : currentSurvey.engineer_name;
+
+    if (targetEngId && !targetEngName) {
+      const [empRows]: any = await pool.query('SELECT name FROM employees WHERE id = ? LIMIT 1', [targetEngId]);
+      if (empRows && empRows.length > 0) targetEngName = empRows[0].name;
+    }
+
+    // Check for slot conflict on the target engineer/date/time, excluding current survey
+    if ((targetEngId || targetEngName) && targetDate && targetTime) {
+      const [conflicts]: any = await pool.query(
+        `SELECT id, customer_name, scheduled_date, scheduled_time, engineer_name 
+         FROM site_surveys 
+         WHERE id != ?
+           AND (engineer_id = ? OR (engineer_name IS NOT NULL AND engineer_name = ?))
+           AND scheduled_date = ? 
+           AND scheduled_time = ? 
+           AND status NOT IN ('Cancelled', 'Rejected')
+         LIMIT 1`,
+        [id, targetEngId || '', targetEngName || '', targetDate, targetTime]
+      );
+      if (conflicts && conflicts.length > 0) {
+        return res.status(409).json({
+          success: false,
+          error: `Slot Conflict: ${conflicts[0].engineer_name || targetEngName} is already scheduled for ${conflicts[0].customer_name} (${conflicts[0].id}) on ${targetDate} during ${targetTime}.`,
+          conflict: conflicts[0]
+        });
+      }
     }
 
     const fields: string[] = ['scheduled_date = ?'];

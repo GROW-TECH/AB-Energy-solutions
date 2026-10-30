@@ -8,7 +8,8 @@ import {
   Info, ExternalLink, HelpCircle, Edit3, Lock, Zap, ShieldCheck
 } from 'lucide-react';
 import { useCrm } from '../../context/CrmContext';
-import { SiteSurvey, SurveyPhoto, SurveyPhotoCategory, SurveyStatus, BomItem } from '../../types';
+import { SiteSurvey, SurveyPhoto, SurveyPhotoCategory, SurveyStatus, BomItem, Quotation } from '../../types';
+import { QuotationProposalModal } from '../common/QuotationProposalModal';
 
 interface SiteSurveysViewProps {
   onNavigateToQuotation: (leadId: string) => void;
@@ -375,6 +376,7 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
   const { 
     surveys, 
     leads, 
+    quotations,
     currentUser,
     activeRole,
     previewRole,
@@ -405,8 +407,50 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
   const [isDeletingSurvey, setIsDeletingSurvey] = useState<boolean>(false);
   const [deleteSurveyError, setDeleteSurveyError] = useState<string | null>(null);
 
+  // Modal to directly view quotation proposal
+  const [viewingQuotation, setViewingQuotation] = useState<Quotation | null>(null);
+
+  const handleOpenQuotation = (survey: SiteSurvey) => {
+    const quote = quotations.find(q => 
+      (survey.quotationId && q.id === survey.quotationId) ||
+      (survey.id && q.surveyId === survey.id) ||
+      (survey.leadId && q.leadId === survey.leadId)
+    );
+    if (quote) {
+      setViewingQuotation(quote);
+    } else if (survey.leadId && onNavigateToQuotation) {
+      onNavigateToQuotation(survey.leadId);
+    } else {
+      showToast('Quotation document not found for this survey.', 'error');
+    }
+  };
+
+  // Helper to determine if survey is assigned to current engineer
+  const isSurveyAssignedToMe = (survey: SiteSurvey) => {
+    if (!currentUser) return false;
+    const myId = currentUser.employeeId || currentUser.id;
+    const myName = (currentUser.name || currentUser.username || '').toLowerCase().trim();
+    if (survey.engineerId && myId && (survey.engineerId === myId || survey.engineerId === currentUser.id)) {
+      return true;
+    }
+    if (survey.engineerName && myName) {
+      const eng = survey.engineerName.toLowerCase().trim();
+      if (eng === myName || eng.includes(myName) || myName.includes(eng)) {
+        return true;
+      }
+      const first = myName.split(' ')[0];
+      if (first && first.length > 2 && eng.includes(first)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  const mySurveys = surveys.filter(isSurveyAssignedToMe);
+  const isEngineerUser = (currentRole === 'Survey Engineer');
+
   // Active Survey loaded dynamically from context to prevent cross-customer data leakage
-  const activeSurvey = surveys.find(s => s.id === selectedSurveyId) || surveys[0] || null;
+  const activeSurvey = surveys.find(s => s.id === selectedSurveyId) || (isEngineerUser ? mySurveys[0] : surveys[0]) || null;
 
   // Working form state for currently active survey
   const [roofArea, setRoofArea] = useState<number>(0);
@@ -473,6 +517,11 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
   const [reviewComments, setReviewComments] = useState('');
   const [rescheduleModalOpen, setRescheduleModalOpen] = useState(false);
   const [rescheduleDate, setRescheduleDate] = useState('');
+  const [rescheduleTime, setRescheduleTime] = useState('10:00 AM - 12:00 PM');
+  const [rescheduleEngineerId, setRescheduleEngineerId] = useState('');
+  const [surveyScopeFilter, setSurveyScopeFilter] = useState<'my' | 'all'>(() => {
+    return (currentUser?.role === 'Survey Engineer' || previewRole === 'Survey Engineer' || activeRole === 'Survey Engineer') ? 'my' : 'all';
+  });
   const [previewPhoto, setPreviewPhoto] = useState<SurveyPhoto | null>(null);
   const [uploadingCategory, setUploadingCategory] = useState<SurveyPhotoCategory | null>(null);
   const [uploadError, setUploadError] = useState('');
@@ -1206,6 +1255,10 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
 
   // Filtered surveys list
   const filteredSurveys = surveys.filter(s => {
+    if (currentRole === 'Survey Engineer' && surveyScopeFilter === 'my') {
+      if (!isSurveyAssignedToMe(s)) return false;
+    }
+
     const matchesSearch = 
       s.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
       s.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -1360,7 +1413,7 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
                         </button>
                       ) : activeSurvey.quotationId ? (
                         <button
-                          onClick={() => activeSurvey.leadId && onNavigateToQuotation(activeSurvey.leadId)}
+                          onClick={() => handleOpenQuotation(activeSurvey)}
                           className="flex items-center justify-center gap-1.5 px-3 py-1.5 sm:px-4 sm:py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-lg sm:rounded-xl text-xs shadow-xs transition-colors cursor-pointer shrink-0"
                           title={`Open Linked Quotation ${activeSurvey.quotationId}`}
                         >
@@ -1421,7 +1474,7 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
                         </button>
                       ) : activeSurvey.quotationId ? (
                         <button
-                          onClick={() => activeSurvey.leadId && onNavigateToQuotation(activeSurvey.leadId)}
+                          onClick={() => handleOpenQuotation(activeSurvey)}
                           className="flex items-center justify-center gap-1.5 px-3 py-1.5 sm:px-4 sm:py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-lg sm:rounded-xl text-xs shadow-xs transition-colors cursor-pointer shrink-0"
                           title={`Open Linked Quotation ${activeSurvey.quotationId}`}
                         >
@@ -2088,6 +2141,8 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
                   <button
                     onClick={() => {
                       setRescheduleDate(activeSurvey.scheduledDate);
+                      setRescheduleTime(activeSurvey.scheduledTime || '10:00 AM - 12:00 PM');
+                      setRescheduleEngineerId(activeSurvey.engineerId || '');
                       setRescheduleModalOpen(true);
                     }}
                     className="text-[11px] text-teal-700 hover:text-teal-800 font-bold underline cursor-pointer mt-1 inline-block"
@@ -3493,6 +3548,30 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
           <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
             {/* Filter Bar with Quick Status Tabs */}
             <div className="p-3 sm:p-4 border-b border-slate-100 space-y-3">
+              {currentRole === 'Survey Engineer' && (
+                <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl w-fit">
+                  <button
+                    onClick={() => setSurveyScopeFilter('my')}
+                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                      surveyScopeFilter === 'my'
+                        ? 'bg-teal-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    My Audits ({surveys.filter(isSurveyAssignedToMe).length})
+                  </button>
+                  <button
+                    onClick={() => setSurveyScopeFilter('all')}
+                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                      surveyScopeFilter === 'all'
+                        ? 'bg-teal-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    All Audits ({surveys.length})
+                  </button>
+                </div>
+              )}
               {/* Quick Status Navigation Pills */}
               {(() => {
                 const overdueSurveys = surveys.filter(s => {
@@ -3598,8 +3677,8 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
               </div>
             </div>
 
-            {/* Mobile Card View (< md) */}
-            <div className="md:hidden divide-y divide-slate-100">
+            {/* Mobile Card View (< lg) */}
+            <div className="lg:hidden divide-y divide-slate-100">
               {filteredSurveys.length === 0 ? (
                 <div className="p-8 text-center text-slate-400 text-xs">
                   No site surveys match your search filter.
@@ -3657,7 +3736,7 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
                         </div>
                       </div>
 
-                      <div className="flex items-center justify-between pt-1">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pt-2 border-t border-slate-100">
                         <div className="text-[10px] text-slate-500 flex items-center gap-1.5 flex-wrap">
                           <span className="flex items-center gap-1 font-medium text-slate-700">
                             <User className="w-3 h-3 text-slate-400" />
@@ -3693,7 +3772,7 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
                           )}
                         </div>
 
-                        <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-end gap-1.5 pt-1 sm:pt-0 shrink-0" onClick={e => e.stopPropagation()}>
                           {isReviewer && s.status === 'Submitted for Review' ? (
                             <button
                               onClick={() => handleOpenAuditView(s.id)}
@@ -3719,7 +3798,7 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
                           {s.status === 'Approved' && (
                             s.quotationId ? (
                               <button
-                                onClick={() => onNavigateToQuotation(s.leadId)}
+                                onClick={() => handleOpenQuotation(s)}
                                 className="flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold cursor-pointer transition-colors shadow-xs"
                                 title={`View approved commercial quotation (${s.quotationId})`}
                               >
@@ -3765,8 +3844,8 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
               )}
             </div>
 
-            {/* Desktop Table View (>= md) */}
-            <div className="hidden md:block overflow-x-auto">
+            {/* Desktop Table View (>= lg) */}
+            <div className="hidden lg:block overflow-x-auto">
               <table className="w-full text-left text-xs text-slate-600">
                 <thead className="bg-slate-50/80 text-slate-500 font-bold uppercase tracking-wider text-[10px] border-b border-slate-200">
                   <tr>
@@ -3889,7 +3968,7 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
                               {s.status === 'Approved' && (
                                 s.quotationId ? (
                                   <button
-                                    onClick={() => onNavigateToQuotation(s.leadId)}
+                                    onClick={() => handleOpenQuotation(s)}
                                     className="flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer shadow-xs"
                                     title={`View approved quotation (${s.quotationId})`}
                                   >
@@ -4170,50 +4249,128 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
       {/* ========================================================= */}
       {/* RESCHEDULE MODAL */}
       {/* ========================================================= */}
-      {rescheduleModalOpen && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-3 sm:p-4">
-          <div className="bg-white rounded-2xl max-w-sm w-full p-4 sm:p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
-              <h3 className="font-bold text-slate-900 text-sm">Reschedule Site Survey</h3>
-              <button onClick={() => setRescheduleModalOpen(false)} className="p-1 text-slate-400 hover:text-slate-600">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+      {rescheduleModalOpen && activeSurvey && (() => {
+        const surveyEngineers = employees.filter(e => e.role === 'Survey Engineer');
+        const targetEngId = rescheduleEngineerId || activeSurvey.engineerId || surveyEngineers[0]?.id;
+        const targetEng = employees.find(e => e.id === targetEngId);
+        const targetEngName = targetEng?.name || activeSurvey.engineerName;
 
-            <div className="space-y-3 text-xs">
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">New Planned Visit Date</label>
-                <input
-                  type="date"
-                  value={rescheduleDate}
-                  onChange={e => setRescheduleDate(e.target.value)}
-                  className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-teal-500"
-                />
+        const getRescheduleConflict = (slot: string) => {
+          return surveys.find(s =>
+            s.id !== activeSurvey.id &&
+            s.status !== 'Cancelled' &&
+            s.status !== 'Rejected' &&
+            s.scheduledDate === rescheduleDate &&
+            s.scheduledTime === slot &&
+            (s.engineerId === targetEngId || s.engineerName === targetEngName)
+          );
+        };
+        const currentConflict = getRescheduleConflict(rescheduleTime);
+
+        return (
+          <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-3 sm:p-4">
+            <div className="bg-white rounded-2xl max-w-md w-full p-4 sm:p-6 shadow-2xl space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                <div>
+                  <h3 className="font-bold text-slate-900 text-sm">Reschedule Site Survey</h3>
+                  <p className="text-[11px] text-slate-500 font-mono">{activeSurvey.id} • {activeSurvey.customerName}</p>
+                </div>
+                <button onClick={() => setRescheduleModalOpen(false)} className="p-1 text-slate-400 hover:text-slate-600">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-3.5 text-xs">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Assigned Survey Engineer</label>
+                  <select
+                    value={targetEngId}
+                    onChange={e => setRescheduleEngineerId(e.target.value)}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-teal-500"
+                  >
+                    {surveyEngineers.map(eng => (
+                      <option key={eng.id} value={eng.id}>
+                        {eng.name} ({eng.activeLeadsCount || 0} active assignments)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">New Planned Visit Date</label>
+                    <input
+                      type="date"
+                      value={rescheduleDate}
+                      onChange={e => setRescheduleDate(e.target.value)}
+                      min={new Date().toISOString().split('T')[0]}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-teal-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Time Slot</label>
+                    <select
+                      value={rescheduleTime}
+                      onChange={e => setRescheduleTime(e.target.value)}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-teal-500"
+                    >
+                      {[
+                        { slot: '10:00 AM - 12:00 PM', label: '10:00 AM - 12:00 PM' },
+                        { slot: '12:00 PM - 02:00 PM', label: '12:00 PM - 02:00 PM' },
+                        { slot: '02:00 PM - 04:00 PM', label: '02:00 PM - 04:00 PM' },
+                        { slot: '04:00 PM - 06:00 PM', label: '04:00 PM - 06:00 PM' },
+                      ].map(item => {
+                        const conflict = getRescheduleConflict(item.slot);
+                        return (
+                          <option key={item.slot} value={item.slot}>
+                            {item.label} {conflict ? `[Booked: ${conflict.customerName}]` : '[Available]'}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                </div>
+
+                {currentConflict && (
+                  <div className="p-2.5 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
+                    <span>
+                      Slot Conflict: {targetEngName} is already scheduled for {currentConflict.customerName} ({currentConflict.id}) during {rescheduleTime}.
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  onClick={() => setRescheduleModalOpen(false)}
+                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  disabled={Boolean(currentConflict)}
+                  onClick={async () => {
+                    if (activeSurvey && rescheduleDate) {
+                      const res = await rescheduleSurveyAction(activeSurvey.id, rescheduleDate, rescheduleTime, targetEngId, targetEngName);
+                      if (res && !res.success) {
+                        showToast(res.error || 'Failed to reschedule survey', 'error');
+                        return;
+                      }
+                      showToast('Site survey rescheduled successfully!', 'success');
+                      setRescheduleModalOpen(false);
+                    }
+                  }}
+                  className="px-4 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-lg text-xs cursor-pointer shadow-xs"
+                >
+                  Save Schedule
+                </button>
               </div>
             </div>
-
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-              <button
-                onClick={() => setRescheduleModalOpen(false)}
-                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={async () => {
-                  if (activeSurvey && rescheduleDate) {
-                    await rescheduleSurveyAction(activeSurvey.id, rescheduleDate);
-                    setRescheduleModalOpen(false);
-                  }
-                }}
-                className="px-4 py-1.5 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-lg text-xs"
-              >
-                Save Date
-              </button>
-            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ========================================================= */}
       {/* DELETE SURVEY MODAL (Enabled only for Approved surveys)   */}
@@ -4309,6 +4466,14 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
         initialFacingMode={liveCameraFacing}
         onCapture={handleLiveCameraCapture}
         onClose={() => setLiveCameraOpen(false)}
+      />
+
+      {/* Comprehensive Techno-Commercial Quotation Proposal Modal */}
+      <QuotationProposalModal
+        quotation={viewingQuotation}
+        isOpen={Boolean(viewingQuotation)}
+        onClose={() => setViewingQuotation(null)}
+        currentUserRole={currentRole}
       />
 
     </div>

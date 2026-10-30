@@ -6,7 +6,8 @@ import {
   Sparkles, AlertCircle
 } from 'lucide-react';
 import { useCrm } from '../../context/CrmContext';
-import { Lead, LeadStatus, Priority, CustomerApplicationType, SolarSystemType } from '../../types';
+import { Lead, LeadStatus, Priority, CustomerApplicationType, SolarSystemType, SiteSurvey } from '../../types';
+import { initiateLeadCall } from '../../utils/telephonyBridge';
 
 interface LeadsViewProps {
   onOpenNewLead: () => void;
@@ -34,6 +35,22 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3500);
+  };
+
+  const handleInitiateCall = (lead: Lead) => {
+    const matchedEmp = employees.find(
+      e => (currentUser?.employeeId && e.id === currentUser.employeeId) ||
+           (currentUser?.email && e.email.toLowerCase() === currentUser.email.toLowerCase()) ||
+           (currentUser?.name && e.name.toLowerCase() === currentUser.name.toLowerCase())
+    );
+    initiateLeadCall({
+      leadId: lead.id,
+      customerName: lead.name,
+      customerPhone: lead.phone,
+      employeeId: matchedEmp?.id || currentUser?.employeeId,
+      employeeName: currentUser?.name || 'Sales Staff',
+      employeePhone: matchedEmp?.phone,
+    });
   };
 
   const isLeadAssignedToMe = (lead: Lead) => {
@@ -327,7 +344,232 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
       {/* Main View: Table or Kanban */}
       {viewMode === 'table' ? (
         <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden">
-          <div className="overflow-x-auto">
+          {/* Mobile Card List View (< lg) */}
+          <div className="lg:hidden divide-y divide-slate-100">
+            {paginatedLeads.length === 0 ? (
+              <div className="py-12 text-center text-slate-500 p-4">
+                <Users className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                <div className="font-semibold text-slate-700">
+                  {isExecutive && assignedScope === 'my'
+                    ? 'No leads currently assigned to your queue.'
+                    : 'No solar leads match the selected filter.'}
+                </div>
+                <div className="text-xs text-slate-400 mt-1">
+                  {isExecutive && assignedScope === 'my'
+                    ? 'Switch to "All Team" to view available leads.'
+                    : 'Try clearing your search or adjusting the filters.'}
+                </div>
+              </div>
+            ) : (
+              paginatedLeads.map(lead => {
+                const linkedSurvey = surveys.find(s => 
+                  s.leadId === lead.id || 
+                  s.id === lead.surveyId || 
+                  (lead.phone && s.phone === lead.phone) || 
+                  (lead.name && s.leadName && s.leadName.toLowerCase() === lead.name.toLowerCase())
+                );
+                const hasSurveyScheduled = Boolean(lead.surveyId || linkedSurvey || lead.status === 'Site Survey Scheduled' || lead.status === 'Qualified' || lead.status === 'Survey Completed');
+                const isSurveyApproved = 
+                  linkedSurvey?.status === 'Approved' || 
+                  lead.status === 'Survey Completed' || 
+                  lead.status === 'Quotation Sent' || 
+                  lead.status === 'Negotiation' || 
+                  lead.status === 'Won' || 
+                  Boolean(lead.quotationId) ||
+                  quotations.some(q => q.leadId === lead.id);
+
+                return (
+                  <div
+                    key={lead.id}
+                    onClick={() => setSelectedLead(lead)}
+                    className="p-4 hover:bg-slate-50 transition-colors cursor-pointer space-y-3"
+                  >
+                    {/* Header */}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <h4 className="font-bold text-slate-900 text-sm truncate">{lead.name}</h4>
+                        <div className="text-[10px] text-slate-400 font-mono">
+                          {lead.id} &bull; {lead.source}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col items-end gap-1 shrink-0">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          lead.status === 'Won' ? 'bg-emerald-100 text-emerald-800' :
+                          lead.status === 'Qualified' || lead.status === 'Site Survey Scheduled' ? 'bg-cyan-100 text-cyan-800 border border-cyan-200' :
+                          lead.status === 'Survey Completed' ? 'bg-purple-100 text-purple-800' :
+                          lead.status === 'New' ? 'bg-amber-100 text-amber-800' :
+                          'bg-slate-100 text-slate-700'
+                        }`}>
+                          {lead.status}
+                        </span>
+                        <span className={`text-[9px] font-bold uppercase tracking-wider ${
+                          lead.priority === 'Urgent' ? 'text-red-600' :
+                          lead.priority === 'High' ? 'text-amber-600' :
+                          'text-slate-400'
+                        }`}>
+                          ● {lead.priority}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Tags */}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                        {lead.customerType || 'Residential'}
+                      </span>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-200">
+                        {lead.systemType || 'On-Grid'}
+                      </span>
+                    </div>
+
+                    {/* Contact Info */}
+                    <div className="text-xs space-y-1 text-slate-600 bg-slate-50 p-2.5 rounded-xl">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] text-slate-400 uppercase font-semibold">Phone</span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleInitiateCall(lead);
+                          }}
+                          className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 font-mono font-bold text-xs hover:bg-emerald-100 transition-colors cursor-pointer"
+                          title="Click to Call Lead"
+                        >
+                          <Phone className="w-3 h-3 text-emerald-600" />
+                          <span>{lead.phone}</span>
+                        </button>
+                      </div>
+                      {lead.email && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] text-slate-400 uppercase font-semibold">Email</span>
+                          <a href={`mailto:${lead.email}`} onClick={e => e.stopPropagation()} className="text-[11px] text-slate-700 truncate max-w-[200px] hover:text-emerald-700">
+                            {lead.email}
+                          </a>
+                        </div>
+                      )}
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] text-slate-400 uppercase font-semibold">Location</span>
+                        <span className="text-[11px] text-slate-700 truncate max-w-[200px]" title={lead.address || `${lead.city}, ${lead.state}`}>
+                          {lead.address || `${lead.city}, ${lead.state}`}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Sizing & Monthly Bill Grid */}
+                    <div className="grid grid-cols-2 gap-2 text-xs p-2.5 bg-slate-50/80 rounded-xl border border-slate-100">
+                      <div>
+                        <span className="text-[10px] text-slate-400 block font-semibold">System Feasibility</span>
+                        <span className="font-bold text-slate-900 font-mono">{lead.recommendedKw} kW</span>
+                        <span className="text-[10px] text-emerald-700 block font-medium">Est: ₹{(lead.estimatedBudget / 100000).toFixed(1)}L</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-400 block font-semibold">Monthly Energy Bill</span>
+                        <span className="font-bold text-slate-900 font-mono">₹{lead.monthlyBill.toLocaleString('en-IN')}/mo</span>
+                        <span className="text-[10px] text-slate-500 block">{lead.roofAreaSqFt} sq.ft ({lead.roofType})</span>
+                      </div>
+                      <div className="col-span-2 pt-1 border-t border-slate-200/60 flex items-center justify-between" onClick={e => e.stopPropagation()}>
+                        <span className="text-[10px] text-slate-400 uppercase font-semibold">Assigned To:</span>
+                        {isManager ? (
+                          <select
+                            value={lead.assignedToId || ''}
+                            onChange={e => {
+                              const repId = e.target.value;
+                              const rep = employees.find(emp => emp.id === repId);
+                              if (rep) {
+                                updateLead(lead.id, {
+                                  assignedToId: rep.id,
+                                  assignedToName: rep.name
+                                });
+                                showToast(`Lead assigned to ${rep.name}!`, 'success');
+                              }
+                            }}
+                            className="text-[11px] font-semibold bg-emerald-50 border border-emerald-300 text-emerald-900 rounded-lg px-2 py-0.5 cursor-pointer max-w-[170px]"
+                          >
+                            <option value="" disabled>Select Executive</option>
+                            {salesExecutives.map(rep => (
+                              <option key={rep.id} value={rep.id}>{rep.name}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="font-semibold text-slate-800 text-[11px]">{lead.assignedToName || 'Unassigned'}</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Actions row */}
+                    <div className="flex items-center justify-end gap-1.5 pt-1" onClick={e => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        onClick={() => handleInitiateCall(lead)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold shadow-xs cursor-pointer transition-colors"
+                        title="Call Lead"
+                      >
+                        <Phone className="w-3.5 h-3.5" />
+                        <span>Call</span>
+                      </button>
+
+                      {!hasSurveyScheduled && !isSurveyApproved && (
+                        <button
+                          onClick={() => {
+                            setSurveyLeadToSchedule(lead);
+                            setEditingSurvey(null);
+                            const engs = employees.filter(e => e.role === 'Survey Engineer');
+                            if (engs.length > 0) setScheduleEngineerId(engs[0].id);
+                            setScheduleDate(new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0]);
+                            setScheduleTime('10:00 AM - 12:00 PM');
+                            setScheduleNotes('');
+                          }}
+                          className="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold shadow-xs"
+                        >
+                          <Compass className="w-3.5 h-3.5" />
+                          <span>Survey</span>
+                        </button>
+                      )}
+
+                      {hasSurveyScheduled && !isSurveyApproved && (
+                        <button
+                          onClick={() => {
+                            setSurveyLeadToSchedule(lead);
+                            setEditingSurvey(linkedSurvey || null);
+                            if (linkedSurvey?.engineerId) setScheduleEngineerId(linkedSurvey.engineerId);
+                            setScheduleDate(linkedSurvey?.scheduledDate ? linkedSurvey.scheduledDate.split('T')[0] : new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0]);
+                            setScheduleTime('10:00 AM - 12:00 PM');
+                            setScheduleNotes(linkedSurvey?.notes || '');
+                          }}
+                          className="flex items-center gap-1 px-3 py-1.5 bg-amber-50 text-amber-800 border border-amber-300 rounded-lg text-xs font-semibold"
+                        >
+                          <Calendar className="w-3.5 h-3.5 text-amber-600" />
+                          <span>Edit Survey</span>
+                        </button>
+                      )}
+
+                      {isSurveyApproved && (
+                        <button
+                          onClick={() => onNavigateToQuotation(lead.id)}
+                          className="flex items-center gap-1 px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-xs font-semibold"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          <span>{lead.quotationId ? 'View Quote' : 'Quote'}</span>
+                        </button>
+                      )}
+
+                      <button
+                        onClick={() => setLeadToDelete(lead)}
+                        className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg text-xs"
+                        title="Delete Lead"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Desktop Table View (>= lg) */}
+          <div className="hidden lg:block overflow-x-auto">
             <table className="w-full text-left text-xs text-slate-600">
               <thead className="bg-slate-50/80 text-slate-500 font-bold uppercase tracking-wider text-[10px] border-b border-slate-200">
                 <tr>
@@ -382,7 +624,18 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                     </td>
 
                     <td className="py-3 px-4">
-                      <div className="font-medium text-slate-800">{lead.phone}</div>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleInitiateCall(lead);
+                        }}
+                        className="font-medium text-slate-800 hover:text-emerald-700 font-mono flex items-center gap-1.5 transition-colors cursor-pointer group/call"
+                        title="Click to Call Lead"
+                      >
+                        <Phone className="w-3.5 h-3.5 text-emerald-600 group-hover/call:scale-110 transition-transform" />
+                        <span className="group-hover/call:underline">{lead.phone}</span>
+                      </button>
                       {lead.email && <div className="text-[10px] text-slate-500 truncate max-w-[180px]">{lead.email}</div>}
                       <div className="text-[11px] text-slate-500 truncate max-w-[180px]" title={lead.address || `${lead.city}, ${lead.state}`}>
                         {lead.address || `${lead.city}, ${lead.state}`}
@@ -486,6 +739,16 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
 
                         return (
                           <div className="flex items-center justify-end gap-1.5">
+                            {/* Click-to-Call Action */}
+                            <button
+                              type="button"
+                              onClick={() => handleInitiateCall(lead)}
+                              className="p-1.5 text-emerald-700 bg-emerald-50 hover:bg-emerald-600 hover:text-white border border-emerald-200 rounded-lg text-xs font-semibold shadow-2xs transition-all cursor-pointer"
+                              title="Call Lead"
+                            >
+                              <Phone className="w-3.5 h-3.5" />
+                            </button>
+
                             {/* CASE 1: Survey NOT yet scheduled -> show "Survey" button */}
                             {!hasSurveyScheduled && !isSurveyApproved && (
                               <button
@@ -721,6 +984,16 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
 
             {/* Quick Action Bar */}
             <div className="p-3 bg-slate-50 border-b border-slate-200 flex items-center gap-2 text-xs">
+              <button
+                type="button"
+                onClick={() => handleInitiateCall(selectedLead)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg transition-colors cursor-pointer shadow-xs"
+                title="Call Lead"
+              >
+                <Phone className="w-3.5 h-3.5" />
+                <span>Call Lead</span>
+              </button>
+
               {(() => {
                 const linkedSurvey = surveys.find(s => 
                   s.leadId === selectedLead.id || 
@@ -831,7 +1104,17 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                 <div className="grid grid-cols-2 gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
                   <div>
                     <span className="text-[10px] text-slate-400">Phone</span>
-                    <div className="font-semibold text-slate-800">{selectedLead.phone}</div>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="font-semibold text-slate-800 font-mono">{selectedLead.phone}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleInitiateCall(selectedLead)}
+                        className="p-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-md transition-colors cursor-pointer"
+                        title="Call Lead"
+                      >
+                        <Phone className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                   <div>
                     <span className="text-[10px] text-slate-400">Email</span>
@@ -1099,118 +1382,165 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
               </div>
             </div>
 
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                const selectedEng = employees.find(emp => emp.id === scheduleEngineerId) || employees.find(emp => emp.role === 'Survey Engineer');
-                if (editingSurvey) {
-                  rescheduleSurveyAction(editingSurvey.id, scheduleDate, scheduleTime, selectedEng?.id, selectedEng?.name);
-                  showToast(`Survey schedule updated for ${surveyLeadToSchedule.name}!`, 'success');
-                } else {
-                  qualifyLead(surveyLeadToSchedule.id, {
-                    engineerId: selectedEng?.id,
-                    engineerName: selectedEng?.name,
-                    scheduledDate: scheduleDate,
-                    scheduledTime: scheduleTime,
-                    notes: scheduleNotes.trim(),
-                  });
-                  showToast(`Survey scheduled for ${surveyLeadToSchedule.name}!`, 'success');
-                }
-                if (selectedLead?.id === surveyLeadToSchedule.id) {
-                  setSelectedLead({ ...selectedLead, status: 'Site Survey Scheduled' });
-                }
-                setSurveyLeadToSchedule(null);
-                setEditingSurvey(null);
-                setScheduleNotes('');
-              }}
-              className="space-y-3.5 text-xs"
-            >
-              <div>
-                <label className="block text-[11px] font-bold text-slate-700 mb-1 flex items-center gap-1">
-                  <UserCheck className="w-3.5 h-3.5 text-emerald-600" />
-                  Select Survey Engineer *
-                </label>
-                <select
-                  required
-                  value={scheduleEngineerId}
-                  onChange={(e) => setScheduleEngineerId(e.target.value)}
-                  className="w-full text-xs p-2.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 font-medium"
-                >
-                  {employees.filter(e => e.role === 'Survey Engineer').map(eng => (
-                    <option key={eng.id} value={eng.id}>
-                      {eng.name} ({eng.activeLeadsCount || 2} active assignments)
-                    </option>
-                  ))}
-                </select>
-              </div>
+            {(() => {
+              const selectedEng = employees.find(emp => emp.id === scheduleEngineerId) || employees.find(emp => emp.role === 'Survey Engineer');
+              const getSlotConflict = (slot: string) => {
+                return surveys.find(s => 
+                  s.id !== editingSurvey?.id &&
+                  s.status !== 'Cancelled' &&
+                  s.status !== 'Rejected' &&
+                  s.scheduledDate === scheduleDate &&
+                  s.scheduledTime === slot &&
+                  (s.engineerId === (selectedEng?.id || scheduleEngineerId) || s.engineerName === selectedEng?.name)
+                );
+              };
+              const activeConflict = getSlotConflict(scheduleTime);
 
-              <div className="grid grid-cols-2 gap-2.5">
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1 flex items-center gap-1">
-                    <Calendar className="w-3.5 h-3.5 text-emerald-600" />
-                    Visit Date *
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={scheduleDate}
-                    onChange={(e) => setScheduleDate(e.target.value)}
-                    min={new Date().toISOString().split('T')[0]}
-                    className="w-full text-xs p-2 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 font-medium"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1 flex items-center gap-1">
-                    <Clock className="w-3.5 h-3.5 text-emerald-600" />
-                    Time Slot
-                  </label>
-                  <select
-                    value={scheduleTime}
-                    onChange={(e) => setScheduleTime(e.target.value)}
-                    className="w-full text-xs p-2 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 font-medium"
-                  >
-                    <option value="10:00 AM - 12:00 PM">10:00 AM – 12:00 PM (Morning)</option>
-                    <option value="12:00 PM - 02:00 PM">12:00 PM – 02:00 PM (Midday)</option>
-                    <option value="02:00 PM - 04:00 PM">02:00 PM – 04:00 PM (Afternoon)</option>
-                    <option value="04:00 PM - 06:00 PM">04:00 PM – 06:00 PM (Late)</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                  Survey Instructions &amp; Site Notes
-                </label>
-                <textarea
-                  rows={2}
-                  value={scheduleNotes}
-                  onChange={(e) => setScheduleNotes(e.target.value)}
-                  placeholder="e.g. Bring laser meter, inspect parapet shading, verify 3-phase LT meter."
-                  className="w-full text-xs p-2 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 placeholder:text-slate-400"
-                />
-              </div>
-
-              <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => {
+              return (
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    if (activeConflict) {
+                      showToast(`Slot Conflict: ${selectedEng?.name} is already booked at this time.`, 'error');
+                      return;
+                    }
+                    if (editingSurvey) {
+                      const res = await rescheduleSurveyAction(editingSurvey.id, scheduleDate, scheduleTime, selectedEng?.id, selectedEng?.name);
+                      if (res && !res.success) {
+                        showToast(res.error || 'Failed to reschedule survey', 'error');
+                        return;
+                      }
+                      showToast(`Survey schedule updated for ${surveyLeadToSchedule.name}!`, 'success');
+                    } else {
+                      const res = await qualifyLead(surveyLeadToSchedule.id, {
+                        engineerId: selectedEng?.id,
+                        engineerName: selectedEng?.name,
+                        scheduledDate: scheduleDate,
+                        scheduledTime: scheduleTime,
+                        notes: scheduleNotes.trim(),
+                      });
+                      if (res && !res.success) {
+                        showToast(res.error || 'Failed to schedule survey', 'error');
+                        return;
+                      }
+                      showToast(`Survey scheduled for ${surveyLeadToSchedule.name}!`, 'success');
+                    }
+                    if (selectedLead?.id === surveyLeadToSchedule.id) {
+                      setSelectedLead({ ...selectedLead, status: 'Site Survey Scheduled' });
+                    }
                     setSurveyLeadToSchedule(null);
                     setEditingSurvey(null);
+                    setScheduleNotes('');
                   }}
-                  className="px-3.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                  className="space-y-3.5 text-xs"
                 >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
-                >
-                  <Compass className="w-3.5 h-3.5" />
-                  <span>{editingSurvey ? 'Update Survey Schedule' : 'Confirm & Dispatch Survey'}</span>
-                </button>
-              </div>
-            </form>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1 flex items-center gap-1">
+                      <UserCheck className="w-3.5 h-3.5 text-emerald-600" />
+                      Select Survey Engineer *
+                    </label>
+                    <select
+                      required
+                      value={scheduleEngineerId}
+                      onChange={(e) => setScheduleEngineerId(e.target.value)}
+                      className="w-full text-xs p-2.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 font-medium"
+                    >
+                      {employees.filter(e => e.role === 'Survey Engineer').map(eng => (
+                        <option key={eng.id} value={eng.id}>
+                          {eng.name} ({eng.activeLeadsCount || 2} active assignments)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 mb-1 flex items-center gap-1">
+                        <Calendar className="w-3.5 h-3.5 text-emerald-600" />
+                        Visit Date *
+                      </label>
+                      <input
+                        type="date"
+                        required
+                        value={scheduleDate}
+                        onChange={(e) => setScheduleDate(e.target.value)}
+                        min={new Date().toISOString().split('T')[0]}
+                        className="w-full text-xs p-2 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 font-medium"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 mb-1 flex items-center gap-1">
+                        <Clock className="w-3.5 h-3.5 text-emerald-600" />
+                        Time Slot
+                      </label>
+                      <select
+                        value={scheduleTime}
+                        onChange={(e) => setScheduleTime(e.target.value)}
+                        className="w-full text-xs p-2 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 font-medium"
+                      >
+                        {[
+                          { slot: '10:00 AM - 12:00 PM', label: '10:00 AM - 12:00 PM (Morning)' },
+                          { slot: '12:00 PM - 02:00 PM', label: '12:00 PM - 02:00 PM (Midday)' },
+                          { slot: '02:00 PM - 04:00 PM', label: '02:00 PM - 04:00 PM (Afternoon)' },
+                          { slot: '04:00 PM - 06:00 PM', label: '04:00 PM - 06:00 PM (Late)' },
+                        ].map(item => {
+                          const conflict = getSlotConflict(item.slot);
+                          return (
+                            <option key={item.slot} value={item.slot}>
+                              {item.label} {conflict ? `[Booked: ${conflict.customerName}]` : '[Available]'}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
+                  </div>
+
+                  {activeConflict && (
+                    <div className="p-2.5 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
+                      <span>
+                        Slot Conflict: {selectedEng?.name} is already booked for {activeConflict.customerName} during {scheduleTime}. Please choose another slot or engineer.
+                      </span>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Survey Instructions &amp; Site Notes
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={scheduleNotes}
+                      onChange={(e) => setScheduleNotes(e.target.value)}
+                      placeholder="e.g. Bring laser meter, inspect parapet shading, verify 3-phase LT meter."
+                      className="w-full text-xs p-2 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 placeholder:text-slate-400"
+                    />
+                  </div>
+
+                  <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSurveyLeadToSchedule(null);
+                        setEditingSurvey(null);
+                      }}
+                      className="px-3.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={Boolean(activeConflict)}
+                      className="px-4 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                    >
+                      <Compass className="w-3.5 h-3.5" />
+                      <span>{editingSurvey ? 'Update Survey Schedule' : 'Confirm & Dispatch Survey'}</span>
+                    </button>
+                  </div>
+                </form>
+              );
+            })()}
           </div>
         </div>
       )}

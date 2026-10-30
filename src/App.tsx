@@ -53,6 +53,16 @@ import { GovtSubsidyMasterView } from './components/solar/GovtSubsidyMasterView'
 // Modals
 import { NewLeadModal } from './components/modals/NewLeadModal';
 import { GlobalSearchModal } from './components/modals/GlobalSearchModal';
+import { CallDispositionModal } from './components/modals/CallDispositionModal';
+import { CallTrackingOnboardingModal } from './components/modals/CallTrackingOnboardingModal';
+import { 
+  getActiveCallSession, 
+  clearActiveCallSession,
+  syncCallLogToBackend,
+  isCallTrackingEnabled, 
+  isTelephonyOnboardingDone,
+  ActiveCallSession
+} from './utils/telephonyBridge';
 
 // Public Portals
 import { CustomerGrnSignPortal } from './components/public/CustomerGrnSignPortal';
@@ -80,7 +90,7 @@ const AppContent: React.FC = () => {
     return <CustomerGrnSignPortal token={publicSigningToken} />;
   }
 
-  const { isAuthenticated, isRestoringSession, activeRole } = useCrm();
+  const { isAuthenticated, isRestoringSession, activeRole, currentUser, employees } = useCrm();
   const [activeNav, setActiveNav] = useState<NavItemKey>(() => {
     if (activeRole === 'Customer') return 'customer-portal';
     if (activeRole === 'Purchase Team') return 'purchase-orders';
@@ -109,9 +119,113 @@ const AppContent: React.FC = () => {
     }
   }, [activeRole]);
 
+  // Keep Android native tracker synchronized with active employee's phone number
+  useEffect(() => {
+    const matchedEmp = employees?.find(
+      e => (currentUser?.employeeId && e.id === currentUser.employeeId) ||
+           (currentUser?.email && e.email.toLowerCase() === currentUser.email.toLowerCase()) ||
+           (currentUser?.name && e.name.toLowerCase() === currentUser.name.toLowerCase())
+    );
+    const empPhone = matchedEmp?.phone || currentUser?.phone;
+    if (empPhone && typeof (window as any).AndroidCallTracker?.setEmployeePhone === 'function') {
+      try {
+        (window as any).AndroidCallTracker.setEmployeePhone(empPhone);
+      } catch (err) {
+        console.warn('Could not set employee phone on AndroidCallTracker:', err);
+      }
+    }
+  }, [currentUser, employees]);
+
   // Modals state
   const [showNewLeadModal, setShowNewLeadModal] = useState(false);
   const [showGlobalSearch, setShowGlobalSearch] = useState(false);
+  const [activeCallSession, setActiveCallSession] = useState<ActiveCallSession | null>(null);
+  const [showCallDispositionModal, setShowCallDispositionModal] = useState<boolean>(false);
+  const [showTelephonyOnboarding, setShowTelephonyOnboarding] = useState<boolean>(false);
+
+  // In-app telephony visibility & dialer return listener
+  useEffect(() => {
+    const checkPendingCall = async () => {
+      const session = getActiveCallSession();
+      if (session && isCallTrackingEnabled()) {
+        const elapsed = Math.max(1, Math.round((Date.now() - session.startTime) / 1000));
+        // If at least 2 seconds passed since dialing was initiated, auto-record call
+        if (elapsed >= 2) {
+          clearActiveCallSession();
+          setActiveCallSession(session);
+          setShowCallDispositionModal(true);
+
+          // Guaranteed auto-sync directly to live database
+          try {
+            await syncCallLogToBackend({
+              employee_id: session.employeeId,
+              employee_name: session.employeeName || 'Siva P',
+              employee_phone: session.employeePhone || '9655247872',
+              customer_phone: session.customerPhone,
+              customer_name: session.customerName,
+              lead_id: session.leadId,
+              call_type: 'OUTGOING',
+              call_status: 'ANSWERED',
+              duration_seconds: elapsed,
+              call_time: new Date(session.startTime).toISOString(),
+              notes: `In-app lead call to ${session.customerName || 'Lead'}`
+            });
+          } catch (err) {
+            console.error('Auto-sync call error:', err);
+          }
+        }
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        checkPendingCall();
+      }
+    };
+
+    const handleWindowFocus = () => {
+      checkPendingCall();
+    };
+
+    const handleTriggerDisposition = (e: any) => {
+      if (e.detail) {
+        setActiveCallSession(e.detail);
+        setShowCallDispositionModal(true);
+      }
+    };
+
+    // Auto-check periodically and on user touch/focus
+    const interval = setInterval(checkPendingCall, 2000);
+    window.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleWindowFocus);
+    window.addEventListener('pointerdown', checkPendingCall);
+    window.addEventListener('touchstart', checkPendingCall);
+    window.addEventListener('trigger-call-disposition', handleTriggerDisposition);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleWindowFocus);
+      window.removeEventListener('pointerdown', checkPendingCall);
+      window.removeEventListener('touchstart', checkPendingCall);
+      window.removeEventListener('trigger-call-disposition', handleTriggerDisposition);
+    };
+  }, []);
+
+  // First-time sales executive onboarding prompt for call tracking
+  useEffect(() => {
+    if (
+      isAuthenticated &&
+      currentUser &&
+      (currentUser.role === 'Sales Executive' || currentUser.role === 'Sales Manager') &&
+      !isTelephonyOnboardingDone()
+    ) {
+      const timer = setTimeout(() => {
+        setShowTelephonyOnboarding(true);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [isAuthenticated, currentUser]);
 
   const [targetQuoteLeadId, setTargetQuoteLeadId] = useState<string | undefined>(undefined);
 
@@ -279,6 +393,21 @@ const AppContent: React.FC = () => {
       );
     }
 
+    // Direct targeted quotation viewer when navigated with targetQuoteLeadId
+    if (activeNav === 'quotations' && targetQuoteLeadId) {
+      return (
+        <SalesPanel
+          initialSubTab="quotations"
+          targetQuoteLeadId={targetQuoteLeadId}
+          onTabChange={(tab) => setActiveNav(tab as NavItemKey)}
+          onOpenNewLead={() => setShowNewLeadModal(true)}
+          onNavigateToQuotation={handleNavigateToQuotation}
+          onNavigateToSurvey={handleNavigateToSurvey}
+          onNavigateToProject={handleNavigateToProject}
+        />
+      );
+    }
+
     // 5. Project Manager Persona Panel (Must evaluate before generic nav keys)
     if (
       activeRole === 'Project Manager' ||
@@ -435,6 +564,21 @@ const AppContent: React.FC = () => {
         isOpen={showGlobalSearch}
         onClose={() => setShowGlobalSearch(false)}
         onNavigate={(tab) => setActiveNav(tab as NavItemKey)}
+      />
+
+      {/* In-App Telephony Modals */}
+      <CallDispositionModal
+        isOpen={showCallDispositionModal}
+        session={activeCallSession}
+        onClose={() => {
+          setShowCallDispositionModal(false);
+          setActiveCallSession(null);
+        }}
+      />
+
+      <CallTrackingOnboardingModal
+        isOpen={showTelephonyOnboarding}
+        onClose={() => setShowTelephonyOnboarding(false)}
       />
     </div>
   );

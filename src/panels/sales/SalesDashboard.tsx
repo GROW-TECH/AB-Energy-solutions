@@ -317,7 +317,47 @@ export const SalesDashboard: React.FC<SalesDashboardProps> = ({
               </div>
             </div>
 
-            <div className="overflow-x-auto mt-3">
+            {/* Mobile Cards (< lg) */}
+            <div className="lg:hidden divide-y divide-slate-100 mt-3">
+              {salesExecutives.map(rep => {
+                const repLeads = leads.filter(l => l.assignedToId === rep.id || l.assignedToName === rep.name);
+                const repWon = repLeads.filter(l => l.status === 'Won').length;
+                const repQuotes = quotations.filter(q => q.salespersonId === rep.id || q.salespersonName === rep.name).length;
+                const repWinRate = repLeads.length > 0 ? Math.round((repWon / repLeads.length) * 100) : 0;
+                return (
+                  <div key={rep.id} className="py-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-full bg-slate-900 text-emerald-400 font-bold text-xs flex items-center justify-center">
+                          {rep.name.slice(0, 2).toUpperCase()}
+                        </div>
+                        <span className="font-bold text-slate-800 text-xs">{rep.name}</span>
+                      </div>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                        {repWinRate}% Won
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 p-2 bg-slate-50 rounded-xl text-center text-xs">
+                      <div>
+                        <span className="text-[10px] text-slate-400 block font-medium">Pipeline</span>
+                        <span className="font-bold text-slate-800 text-xs">{repLeads.length}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-400 block font-medium">Quotes</span>
+                        <span className="font-bold text-slate-800 text-xs">{repQuotes}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-400 block font-medium">Won Deals</span>
+                        <span className="font-bold text-emerald-700 text-xs">{repWon}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Desktop Table (>= lg) */}
+            <div className="hidden lg:block overflow-x-auto mt-3">
               <table className="w-full text-left text-xs">
                 <thead>
                   <tr className="border-b border-slate-100 text-[10px] uppercase font-bold text-slate-400">

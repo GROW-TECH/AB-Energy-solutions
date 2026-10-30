@@ -44,8 +44,14 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
     results.tickets.length;
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-start justify-center pt-20 p-4">
-      <div className="bg-white rounded-2xl max-w-2xl w-full shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[75vh] animate-in fade-in zoom-in-95 duration-100">
+    <div 
+      className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-start justify-center pt-20 p-4"
+      onClick={onClose}
+    >
+      <div 
+        className="bg-white rounded-2xl max-w-2xl w-full shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[75vh] animate-in fade-in zoom-in-95 duration-100"
+        onClick={e => e.stopPropagation()}
+      >
         {/* Search Input Bar */}
         <div className="p-4 border-b border-slate-200 flex items-center gap-3 bg-slate-50">
           <Search className="w-5 h-5 text-emerald-600 flex-shrink-0" />
@@ -59,15 +65,23 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
           />
           {query && (
             <button 
+              type="button"
               onClick={() => setQuery('')}
-              className="p-1 text-slate-400 hover:text-slate-600"
+              className="p-1 text-slate-400 hover:text-slate-600 cursor-pointer"
+              title="Clear search text"
             >
               <X className="w-4 h-4" />
             </button>
           )}
-          <kbd className="px-2 py-0.5 text-[10px] font-mono text-slate-400 bg-white border border-slate-200 rounded">
-            ESC
-          </kbd>
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-2.5 py-1 text-[11px] font-mono text-slate-500 hover:text-slate-900 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg shadow-2xs transition-colors cursor-pointer flex items-center gap-1.5"
+            title="Close Search (ESC)"
+          >
+            <span>ESC</span>
+            <X className="w-3.5 h-3.5 text-slate-400" />
+          </button>
         </div>
 
         {/* Results List */}

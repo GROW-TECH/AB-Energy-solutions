@@ -117,8 +117,70 @@ export const PaymentsView: React.FC = () => {
         </div>
       </div>
 
-      {/* Main Full-Width Ledger Table */}
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+      {/* Payments Mobile Cards (< lg) */}
+      <div className="lg:hidden divide-y divide-slate-100 bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+        {filteredPayments.length === 0 ? (
+          <div className="py-12 text-center text-slate-400">
+            <Receipt className="w-9 h-9 mx-auto text-slate-300 mb-2" />
+            <p className="font-semibold text-slate-700">No payment receipts found</p>
+          </div>
+        ) : (
+          filteredPayments.map(p => (
+            <div key={p.id} className="p-4 hover:bg-slate-50/80 transition-colors space-y-3">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-mono font-bold text-slate-900 text-xs sm:text-sm">{p.paymentNumber}</span>
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                      {p.status}
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-medium mt-0.5">{p.paymentDate}</div>
+                </div>
+
+                <div className="text-right">
+                  <div className="font-mono font-black text-emerald-700 text-sm sm:text-base">
+                    ₹{p.amount.toLocaleString('en-IN')}
+                  </div>
+                </div>
+              </div>
+
+              <div className="text-xs space-y-1 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500 font-medium">Customer:</span>
+                  <span className="font-bold text-slate-900 truncate max-w-[190px]">{p.customerName}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500 font-medium">Invoice:</span>
+                  <span className="font-mono text-slate-700 font-semibold">{p.invoiceId}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500 font-medium">Payment Mode:</span>
+                  <span className="font-semibold text-slate-800">{p.paymentMode}</span>
+                </div>
+                <div className="flex items-center justify-between pt-1 border-t border-slate-200/60">
+                  <span className="text-slate-500 font-medium">Bank UTR / Ref:</span>
+                  <span className="font-mono text-[11px] text-slate-700 truncate max-w-[180px]">{p.transactionReference}</span>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end pt-1">
+                <button
+                  onClick={() => setSelectedReceipt(p)}
+                  className="px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-bold transition-colors inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Receipt className="w-3.5 h-3.5 text-slate-500" />
+                  <span>View Receipt</span>
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Main Full-Width Ledger Table (Desktop >= lg) */}
+      <div className="hidden lg:block bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs text-slate-600">
             <thead className="bg-slate-50/90 uppercase font-extrabold text-[10px] text-slate-500 border-b border-slate-200 tracking-wider">

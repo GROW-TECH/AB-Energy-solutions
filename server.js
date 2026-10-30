@@ -161,12 +161,18 @@ async function generateUniqueSurveyId() {
 }
 var getSurveys = async (req, res) => {
   try {
-    const user2 = req.user;
+    const user = req.user;
     let query = "SELECT * FROM site_surveys";
     const params = [];
-    if (user2 && user2.role === "Customer") {
+    if (user && user.role === "Customer") {
       query += " WHERE lead_id IN (SELECT id FROM leads WHERE email = ? OR phone = ?) OR customer_name = ?";
-      params.push(user2.email || "", user2.phone || "", user2.name || "");
+      params.push(user.email || "", user.phone || "", user.name || "");
+    } else if (user && user.role === "Survey Engineer") {
+      const empId = user.employeeId || user.id || user.userId;
+      const userName = (user.name || user.username || "").trim();
+      const firstPart = userName.split(" ")[0] || userName;
+      query += " WHERE (engineer_id = ? OR engineer_id = ? OR engineer_name = ? OR engineer_name LIKE ?)";
+      params.push(empId, user.userId || user.id, userName, `%${firstPart}%`);
     }
     query += " ORDER BY scheduled_date DESC";
     const [surveys] = await pool.query(query, params);
@@ -227,6 +233,34 @@ var createSurvey = async (req, res) => {
     }
     const scheduledDate = s.scheduledDate || (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
     const scheduledTime = s.scheduledTime || "10:00 AM - 12:00 PM";
+    const engineerId = s.engineerId || null;
+    let engineerName = s.engineerName || null;
+    if (engineerId && !engineerName) {
+      const [empRows] = await pool.query("SELECT name FROM employees WHERE id = ? LIMIT 1", [engineerId]);
+      if (empRows && empRows.length > 0) engineerName = empRows[0].name;
+    }
+    if (!engineerName && !engineerId) {
+      engineerName = "Field Engineer";
+    }
+    if ((engineerId || engineerName) && scheduledDate && scheduledTime) {
+      const [conflicts] = await pool.query(
+        `SELECT id, customer_name, scheduled_date, scheduled_time, engineer_name 
+         FROM site_surveys 
+         WHERE (engineer_id = ? OR (engineer_name IS NOT NULL AND engineer_name = ?))
+           AND scheduled_date = ? 
+           AND scheduled_time = ? 
+           AND status NOT IN ('Cancelled', 'Rejected')
+         LIMIT 1`,
+        [engineerId || "", engineerName || "", scheduledDate, scheduledTime]
+      );
+      if (conflicts && conflicts.length > 0) {
+        return res.status(409).json({
+          success: false,
+          error: `Slot Conflict: ${conflicts[0].engineer_name || engineerName} is already scheduled for ${conflicts[0].customer_name} (${conflicts[0].id}) on ${scheduledDate} during ${scheduledTime}.`,
+          conflict: conflicts[0]
+        });
+      }
+    }
     await pool.query(
       `INSERT INTO site_surveys (
         id, lead_id, lead_name, customer_name, phone, address, scheduled_date, scheduled_time,
@@ -274,8 +308,8 @@ var createSurvey = async (req, res) => {
         s.address,
         scheduledDate,
         scheduledTime,
-        s.engineerId || null,
-        s.engineerName || "Vikram Mehta",
+        engineerId,
+        engineerName || "Field Engineer",
         s.status || "Scheduled",
         s.roofAreaSqFt || 0,
         s.shadowFreeAreaSqFt || 0,
@@ -427,7 +461,7 @@ var updateSurvey = async (req, res) => {
 var uploadSurveyPhoto = async (req, res) => {
   try {
     const { id: surveyId } = req.params;
-    const user2 = req.user;
+    const user = req.user;
     const [surveys] = await pool.query("SELECT * FROM site_surveys WHERE id = ?", [surveyId]);
     if (!surveys || surveys.length === 0) {
       return res.status(404).json({ success: false, error: "Survey not found" });
@@ -494,8 +528,8 @@ var uploadSurveyPhoto = async (req, res) => {
         fileSize,
         mimeType,
         caption,
-        user2?.id || "EMP-03",
-        user2?.name || "Rahul Sharma",
+        user?.id || "EMP-03",
+        user?.name || "Rahul Sharma",
         capturedAt,
         uploadedAt,
         hasValidGps ? Number(latitude) : null,
@@ -539,7 +573,7 @@ var deleteSurveyPhoto = async (req, res) => {
 var submitSurveyForReview = async (req, res) => {
   try {
     const { id } = req.params;
-    const user2 = req.user;
+    const user = req.user;
     const { comments, bypassWithExceptions, updates } = req.body;
     const [rows] = await pool.query("SELECT * FROM site_surveys WHERE id = ?", [id]);
     if (!rows || rows.length === 0) {
@@ -638,13 +672,13 @@ var submitSurveyForReview = async (req, res) => {
            submitted_by_id = ?, 
            is_draft = 0 
        WHERE id = ?`,
-      [submittedAt, user2?.id || "EMP-03", id]
+      [submittedAt, user?.id || "EMP-03", id]
     );
     const historyId = `HIST-${Date.now()}`;
     await pool.query(
       `INSERT INTO survey_review_history (id, survey_id, reviewer_id, reviewer_name, action, comments, created_at)
        VALUES (?, ?, ?, ?, 'Submitted', ?, ?)`,
-      [historyId, id, user2?.id || null, user2?.name || "Engineer", comments || req.body.comments || "Survey technical audit submitted for review", submittedAt]
+      [historyId, id, user?.id || null, user?.name || "Engineer", comments || req.body.comments || "Survey technical audit submitted for review", submittedAt]
     );
     const [updated] = await pool.query("SELECT * FROM site_surveys WHERE id = ?", [id]);
     const [surveyPhotos] = await pool.query("SELECT * FROM survey_photos WHERE survey_id = ?", [id]);
@@ -657,7 +691,7 @@ var submitSurveyForReview = async (req, res) => {
 var reviewSurvey = async (req, res) => {
   try {
     const { id } = req.params;
-    const user2 = req.user;
+    const user = req.user;
     const { decision, comments } = req.body;
     if (!decision || decision !== "Approved" && decision !== "Changes Required") {
       return res.status(400).json({ success: false, error: 'Valid decision ("Approved" or "Changes Required") is required' });
@@ -678,13 +712,13 @@ var reviewSurvey = async (req, res) => {
            review_decision = ?, 
            review_comments = ?
        WHERE id = ?`,
-      [newStatus, reviewedAt, user2?.id || "EMP-01", user2?.name || "Reviewer", decision, comments || "", id]
+      [newStatus, reviewedAt, user?.id || "EMP-01", user?.name || "Reviewer", decision, comments || "", id]
     );
     const historyId = `HIST-${Date.now()}`;
     await pool.query(
       `INSERT INTO survey_review_history (id, survey_id, reviewer_id, reviewer_name, action, comments, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [historyId, id, user2?.id || null, user2?.name || "Reviewer", decision, comments || "", reviewedAt]
+      [historyId, id, user?.id || null, user?.name || "Reviewer", decision, comments || "", reviewedAt]
     );
     if (decision === "Approved") {
       if (survey.lead_id) {
@@ -716,6 +750,35 @@ var rescheduleSurvey = async (req, res) => {
     const [rows] = await pool.query("SELECT * FROM site_surveys WHERE id = ?", [id]);
     if (!rows || rows.length === 0) {
       return res.status(404).json({ success: false, error: "Survey not found" });
+    }
+    const currentSurvey = rows[0];
+    const targetDate = scheduledDate;
+    const targetTime = scheduledTime || currentSurvey.scheduled_time || "10:00 AM - 12:00 PM";
+    const targetEngId = engineerId !== void 0 ? engineerId : currentSurvey.engineer_id;
+    let targetEngName = engineerName !== void 0 ? engineerName : currentSurvey.engineer_name;
+    if (targetEngId && !targetEngName) {
+      const [empRows] = await pool.query("SELECT name FROM employees WHERE id = ? LIMIT 1", [targetEngId]);
+      if (empRows && empRows.length > 0) targetEngName = empRows[0].name;
+    }
+    if ((targetEngId || targetEngName) && targetDate && targetTime) {
+      const [conflicts] = await pool.query(
+        `SELECT id, customer_name, scheduled_date, scheduled_time, engineer_name 
+         FROM site_surveys 
+         WHERE id != ?
+           AND (engineer_id = ? OR (engineer_name IS NOT NULL AND engineer_name = ?))
+           AND scheduled_date = ? 
+           AND scheduled_time = ? 
+           AND status NOT IN ('Cancelled', 'Rejected')
+         LIMIT 1`,
+        [id, targetEngId || "", targetEngName || "", targetDate, targetTime]
+      );
+      if (conflicts && conflicts.length > 0) {
+        return res.status(409).json({
+          success: false,
+          error: `Slot Conflict: ${conflicts[0].engineer_name || targetEngName} is already scheduled for ${conflicts[0].customer_name} (${conflicts[0].id}) on ${targetDate} during ${targetTime}.`,
+          conflict: conflicts[0]
+        });
+      }
     }
     const fields = ["scheduled_date = ?"];
     const values = [scheduledDate];
@@ -869,7 +932,17 @@ var getBootstrapData = async (req, res) => {
     const [customers] = await pool.query(
       "SELECT id, name, email, phone, alternate_phone, address, city, state, pincode, consumer_number_discom, discom_name, gstin, converted_from_lead_id, total_system_kw, total_order_value, paid_amount, balance_amount, status, created_at FROM customers ORDER BY created_at DESC"
     );
-    const [surveys] = await pool.query("SELECT * FROM site_surveys ORDER BY scheduled_date DESC");
+    let surveysQuery = "SELECT * FROM site_surveys";
+    const surveysParams = [];
+    if (role === "Survey Engineer") {
+      const empId = req.user.employeeId || req.user.id || req.user.userId;
+      const userName = (req.user.name || req.user.username || "").trim();
+      const firstPart = userName.split(" ")[0] || userName;
+      surveysQuery += " WHERE (engineer_id = ? OR engineer_id = ? OR engineer_name = ? OR engineer_name LIKE ?)";
+      surveysParams.push(empId, req.user.userId || req.user.id, userName, `%${firstPart}%`);
+    }
+    surveysQuery += " ORDER BY scheduled_date DESC";
+    const [surveys] = await pool.query(surveysQuery, surveysParams);
     const [surveyPhotos] = await pool.query("SELECT * FROM survey_photos ORDER BY uploaded_at ASC");
     const [surveyHistory] = await pool.query("SELECT * FROM survey_review_history ORDER BY created_at ASC");
     const photosBySurvey = {};
@@ -1075,6 +1148,14 @@ function formatProject(p, role) {
     projectManagerName: p.project_manager_name,
     installationLeadId: p.installation_lead_id,
     installationLeadName: p.installation_lead_name,
+    scheduled_installation_date: p.scheduled_installation_date || p.target_completion_date,
+    assigned_crew_members: typeof p.assigned_crew_members === "string" ? (() => {
+      try {
+        return JSON.parse(p.assigned_crew_members);
+      } catch {
+        return [];
+      }
+    })() : p.assigned_crew_members || [],
     checklist: typeof p.checklist === "string" ? JSON.parse(p.checklist) : p.checklist || {},
     tasks: typeof p.tasks === "string" ? JSON.parse(p.tasks) : p.tasks || [],
     inventoryReserved: Boolean(p.inventory_reserved),
@@ -1328,8 +1409,8 @@ var login = async (req, res) => {
        LIMIT 1`,
       [identifier, identifier]
     );
-    let user2 = rows && rows.length > 0 ? rows[0] : null;
-    if (!user2) {
+    let user = rows && rows.length > 0 ? rows[0] : null;
+    if (!user) {
       const [empRows] = await pool.query(
         `SELECT id, username, email, password_hash, password_salt, role, name 
          FROM employees 
@@ -1338,7 +1419,7 @@ var login = async (req, res) => {
         [identifier, identifier]
       );
       if (empRows && empRows.length > 0) {
-        user2 = {
+        user = {
           ...empRows[0],
           employee_id: empRows[0].id,
           customer_id: null,
@@ -1346,7 +1427,7 @@ var login = async (req, res) => {
         };
       }
     }
-    if (!user2) {
+    if (!user) {
       const [custRows] = await pool.query(
         `SELECT id, username, email, password_hash, password_salt, name 
          FROM customers 
@@ -1355,7 +1436,7 @@ var login = async (req, res) => {
         [identifier, identifier]
       );
       if (custRows && custRows.length > 0) {
-        user2 = {
+        user = {
           ...custRows[0],
           role: "Customer",
           employee_id: null,
@@ -1364,7 +1445,7 @@ var login = async (req, res) => {
         };
       }
     }
-    if (!user2 || !user2.password_hash || !user2.password_salt) {
+    if (!user || !user.password_hash || !user.password_salt) {
       const currentAttempts = limitRecord ? limitRecord.attempts + 1 : 1;
       loginRateLimitMap.set(ip, { attempts: currentAttempts, lastAttemptTime: now });
       return res.status(401).json({
@@ -1372,7 +1453,7 @@ var login = async (req, res) => {
         error: "Invalid credentials. Please verify your username and password."
       });
     }
-    const isValid = verifyPassword(password, user2.password_hash, user2.password_salt);
+    const isValid = verifyPassword(password, user.password_hash, user.password_salt);
     if (!isValid) {
       const currentAttempts = limitRecord ? limitRecord.attempts + 1 : 1;
       loginRateLimitMap.set(ip, { attempts: currentAttempts, lastAttemptTime: now });
@@ -1382,14 +1463,21 @@ var login = async (req, res) => {
       });
     }
     loginRateLimitMap.delete(ip);
+    let userPhone = null;
+    const targetEmpId = user.employee_id || user.id;
+    if (targetEmpId) {
+      const [empP] = await pool.query(`SELECT phone FROM employees WHERE id = ? OR username = ? OR email = ? LIMIT 1`, [targetEmpId, user.username || "", user.email || ""]);
+      if (empP && empP.length > 0) userPhone = empP[0].phone;
+    }
     const tokenPayload = {
-      userId: user2.id,
-      username: user2.username,
-      email: user2.email,
-      name: user2.name,
-      role: user2.role,
-      employeeId: user2.employee_id,
-      customerId: user2.customer_id
+      userId: user.id,
+      username: user.username,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      phone: userPhone,
+      employeeId: user.employee_id || (user.role !== "Customer" ? user.id : null),
+      customerId: user.customer_id
     };
     const token = signJwt(tokenPayload, 86400);
     res.json({
@@ -1408,9 +1496,20 @@ var getMe = async (req, res) => {
     if (!req.user) {
       return res.status(401).json({ success: false, error: "Unauthenticated." });
     }
+    const userObj = { ...req.user };
+    if (!userObj.phone && (userObj.employeeId || userObj.userId)) {
+      const [empP] = await pool.query(
+        `SELECT phone, name FROM employees WHERE id = ? OR id = ? OR email = ? LIMIT 1`,
+        [userObj.employeeId, userObj.userId, userObj.email || ""]
+      );
+      if (empP && empP.length > 0) {
+        userObj.phone = empP[0].phone;
+        if (!userObj.name) userObj.name = empP[0].name;
+      }
+    }
     res.json({
       success: true,
-      user: req.user
+      user: userObj
     });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -2728,16 +2827,16 @@ var calculateQuotationPreview = async (req, res) => {
 };
 var getQuotations = async (req, res) => {
   try {
-    const user2 = req.user;
+    const user = req.user;
     let query = "SELECT * FROM quotations ORDER BY created_at DESC";
     let params = [];
-    if (user2?.role === "Customer") {
-      const custId = user2.customerId || "";
+    if (user?.role === "Customer") {
+      const custId = user.customerId || "";
       query = `SELECT q.* FROM quotations q 
                LEFT JOIN customers c ON (c.converted_from_lead_id = q.lead_id OR c.phone = q.customer_phone)
                WHERE c.id = ? OR q.customer_phone = ?
                ORDER BY q.created_at DESC`;
-      params = [custId, user2?.phone || ""];
+      params = [custId, user?.phone || ""];
     }
     const [rows] = await pool.query(query, params);
     const parsed = rows.map((q) => formatQuotation(q));
@@ -2759,7 +2858,7 @@ var getQuotationById = async (req, res) => {
   }
 };
 async function createQuotationDraftInternal(connOrPool, options) {
-  const { surveyId, leadId, user: user2, packageTier = "Premium Bifacial", discountAmount = 0, customItems } = options;
+  const { surveyId, leadId, user, packageTier = "Premium Bifacial", discountAmount = 0, customItems } = options;
   const [existingBySurvey] = await connOrPool.query(
     'SELECT * FROM quotations WHERE survey_id = ? AND status != "Declined" ORDER BY created_at DESC LIMIT 1',
     [surveyId]
@@ -2845,8 +2944,8 @@ async function createQuotationDraftInternal(connOrPool, options) {
     notes: `Techno-Commercial Proposal based on approved Technical Site Survey ${surveyId}.`
   };
   const validUntil = new Date(Date.now() + 864e5 * 14).toISOString().split("T")[0];
-  const salespersonId = lead?.assigned_to_id || user2?.employeeId || "EMP-265286";
-  const salespersonName = lead?.assigned_to_name || (user2?.role === "Sales Executive" ? user2?.name : "Suresh Kumar");
+  const salespersonId = lead?.assigned_to_id || user?.employeeId || "EMP-265286";
+  const salespersonName = lead?.assigned_to_name || (user?.role === "Sales Executive" ? user?.name : "Suresh Kumar");
   await connOrPool.query(
     `INSERT INTO quotations (
       id, quotation_number, lead_id, lead_name, customer_phone, customer_address, 
@@ -2941,12 +3040,12 @@ async function createQuotationDraftInternal(connOrPool, options) {
 var createQuotation = async (req, res) => {
   try {
     const body = req.body;
-    const user2 = req.user;
+    const user = req.user;
     if (body.surveyId) {
       const result = await createQuotationDraftInternal(pool, {
         surveyId: body.surveyId,
         leadId: body.leadId,
-        user: user2,
+        user,
         packageTier: body.packageTier,
         discountAmount: body.discountAmount,
         customItems: body.customItems
@@ -3015,8 +3114,8 @@ var createQuotation = async (req, res) => {
       notes: isSurveyApproved ? `Techno-Commercial Proposal based on approved Technical Site Survey ${surveyRef}.` : `Preliminary indicative solar estimate. Final capacity subject to on-site roof audit.`
     };
     const validUntil = new Date(Date.now() + 864e5 * 14).toISOString().split("T")[0];
-    const salespersonId = body.salespersonId || user2?.employeeId || "EMP-06";
-    const salespersonName = body.salespersonName || user2?.name || "Vikram Mehta (Sales)";
+    const salespersonId = body.salespersonId || user?.employeeId || "EMP-06";
+    const salespersonName = body.salespersonName || user?.name || "Vikram Mehta (Sales)";
     await pool.query(
       `INSERT INTO quotations (
         id, quotation_number, lead_id, lead_name, customer_phone, customer_address, 
@@ -3121,7 +3220,7 @@ var createQuotationRevision = async (req, res) => {
   try {
     const { id } = req.params;
     const body = req.body;
-    const user2 = req.user;
+    const user = req.user;
     const [rows] = await pool.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [id]);
     if (!rows || rows.length === 0) {
       return res.status(404).json({ success: false, error: "Quotation not found" });
@@ -3162,7 +3261,7 @@ var createQuotationRevision = async (req, res) => {
       netTotal: calc.finalContractAmount,
       amountInWords: calc.amountInWords,
       terms: calc.terms,
-      notes: body.notes || `Revision V${nextVerNum} created by ${user2?.name || "Sales Rep"}.`
+      notes: body.notes || `Revision V${nextVerNum} created by ${user?.name || "Sales Rep"}.`
     };
     versions.push(newVersion);
     let pdfUrl = existing.pdf_url;
@@ -3179,7 +3278,7 @@ var createQuotationRevision = async (req, res) => {
         actualCapacityKwp: calc.actualCapacityKwp,
         packageTier: calc.packageTier,
         proposalType: calc.proposalType,
-        salespersonName: user2?.name || existing.salesperson_name,
+        salespersonName: user?.name || existing.salesperson_name,
         taxMode: calc.taxMode,
         taxType: calc.taxType,
         items: calc.items,
@@ -3247,8 +3346,8 @@ var createQuotationRevision = async (req, res) => {
 var approveQuotationDiscount = async (req, res) => {
   try {
     const { id } = req.params;
-    const user2 = req.user;
-    if (user2?.role !== "Sales Manager" && user2?.role !== "Super Admin") {
+    const user = req.user;
+    if (user?.role !== "Sales Manager" && user?.role !== "Super Admin") {
       return res.status(403).json({
         success: false,
         error: "Only Sales Manager or Super Admin can approve commercial discounts."
@@ -3256,9 +3355,9 @@ var approveQuotationDiscount = async (req, res) => {
     }
     await pool.query(
       'UPDATE quotations SET approval_status = "Approved", discount_approved_by = ? WHERE id = ?',
-      [user2.name, id]
+      [user.name, id]
     );
-    res.json({ success: true, message: `Quotation ${id} approved by ${user2.name}` });
+    res.json({ success: true, message: `Quotation ${id} approved by ${user.name}` });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -3268,6 +3367,7 @@ var updateQuotation = async (req, res) => {
     const { id } = req.params;
     const updates = req.body;
     const allowed = ["status", "notes", "validUntil", "sentDate", "packageTier", "versions", "totalAmount", "approvalStatus"];
+    const user = req.user;
     const fields = [];
     const values = [];
     if (updates.status !== void 0) {
@@ -3320,7 +3420,7 @@ var editQuotation = async (req, res) => {
   try {
     const { id } = req.params;
     const body = req.body;
-    const user2 = req.user;
+    const user = req.user;
     const [rows] = await pool.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [id]);
     if (!rows || rows.length === 0) {
       return res.status(404).json({ success: false, error: "Quotation not found" });
@@ -3402,7 +3502,7 @@ var editQuotation = async (req, res) => {
         actualCapacityKwp: calc.actualCapacityKwp,
         packageTier: calc.packageTier,
         proposalType: calc.proposalType,
-        salespersonName: existing.salesperson_name || user2?.name || "Vikram Mehta (Sales)",
+        salespersonName: existing.salesperson_name || user?.name || "Vikram Mehta (Sales)",
         taxMode: calc.taxMode,
         taxType: calc.taxType,
         items: calc.items,
@@ -3430,9 +3530,9 @@ var editQuotation = async (req, res) => {
     } catch (e) {
       console.warn("PDF regeneration error:", e);
     }
-    const isManager = user2?.role === "Sales Manager" || user2?.role === "Super Admin";
+    const isManager = user?.role === "Sales Manager" || user?.role === "Super Admin";
     const finalApproval = body.approvalStatus || (isManager ? "Approved" : calc.approvalStatus);
-    const approvedBy = isManager ? user2?.name || "Sales Manager" : existing.discount_approved_by;
+    const approvedBy = isManager ? user?.name || "Sales Manager" : existing.discount_approved_by;
     await pool.query(
       `UPDATE quotations SET
         system_capacity_kw = ?, package_tier = ?, discount_amount = ?,
@@ -3472,7 +3572,7 @@ var recordCustomerAcceptance = async (req, res) => {
   try {
     const { id } = req.params;
     const { acceptanceNotes, clientPoNumber } = req.body;
-    const user2 = req.user;
+    const user = req.user;
     const [rows] = await pool.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [id]);
     if (!rows || rows.length === 0) {
       return res.status(404).json({ success: false, error: "Quotation not found" });
@@ -3491,7 +3591,7 @@ var recordCustomerAcceptance = async (req, res) => {
         sent_date = COALESCE(sent_date, NOW())
        WHERE id = ?`,
       [`
-[Customer Accepted: ${(/* @__PURE__ */ new Date()).toLocaleDateString("en-IN")}] Recorded by ${user2?.name || "Sales"}. PO: ${clientPoNumber || "N/A"}. ${acceptanceNotes || ""}`, id]
+[Customer Accepted: ${(/* @__PURE__ */ new Date()).toLocaleDateString("en-IN")}] Recorded by ${user?.name || "Sales"}. PO: ${clientPoNumber || "N/A"}. ${acceptanceNotes || ""}`, id]
     );
     const [updated] = await pool.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [id]);
     res.json({ success: true, quotation: formatQuotation(updated[0]) });
@@ -3503,8 +3603,8 @@ var acceptQuotation = async (req, res) => {
   const conn = await pool.getConnection();
   try {
     const { id } = req.params;
-    const user2 = req.user;
-    if (user2 && user2.role !== "Project Manager" && user2.role !== "Super Admin") {
+    const user = req.user;
+    if (user && user.role !== "Project Manager" && user.role !== "Super Admin") {
       conn.release();
       return res.status(403).json({
         success: false,
@@ -3733,13 +3833,13 @@ var acceptQuotation = async (req, res) => {
 var downloadProposalPdf = async (req, res) => {
   try {
     const { id } = req.params;
-    const user2 = req.user;
+    const user = req.user;
     const [rows] = await pool.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [id]);
     if (!rows || rows.length === 0) {
       return res.status(404).json({ success: false, error: "Quotation not found" });
     }
     const q = rows[0];
-    if (user2?.role === "Customer" && user2?.phone !== q.customer_phone) {
+    if (user?.role === "Customer" && user?.phone !== q.customer_phone) {
       return res.status(403).json({ success: false, error: "Unauthorized to download this quotation." });
     }
     const versions = typeof q.versions === "string" ? JSON.parse(q.versions) : q.versions || [];
@@ -4118,46 +4218,75 @@ var updateProject = async (req, res) => {
   try {
     const { id } = req.params;
     const updates = req.body;
-    const fields = [];
-    const values = [];
+    const baseFields = [];
+    const baseValues = [];
     if (updates.stage !== void 0) {
-      fields.push("stage = ?");
-      values.push(updates.stage);
+      baseFields.push("stage = ?");
+      baseValues.push(updates.stage);
     }
     if (updates.checklist !== void 0) {
-      fields.push("checklist = ?");
-      values.push(JSON.stringify(updates.checklist));
+      baseFields.push("checklist = ?");
+      baseValues.push(JSON.stringify(updates.checklist));
     }
     if (updates.tasks !== void 0) {
-      fields.push("tasks = ?");
-      values.push(JSON.stringify(updates.tasks));
+      baseFields.push("tasks = ?");
+      baseValues.push(JSON.stringify(updates.tasks));
     }
     if (updates.commissioningDate !== void 0) {
-      fields.push("commissioning_date = ?");
-      values.push(updates.commissioningDate);
+      baseFields.push("commissioning_date = ?");
+      baseValues.push(updates.commissioningDate);
     }
     if (updates.netMeterInstalledDate !== void 0) {
-      fields.push("net_meter_installed_date = ?");
-      values.push(updates.netMeterInstalledDate);
+      baseFields.push("net_meter_installed_date = ?");
+      baseValues.push(updates.netMeterInstalledDate);
     }
     if (updates.siteReadinessConfirmed !== void 0) {
-      fields.push("site_readiness_confirmed = ?");
-      values.push(updates.siteReadinessConfirmed ? 1 : 0);
+      baseFields.push("site_readiness_confirmed = ?");
+      baseValues.push(updates.siteReadinessConfirmed ? 1 : 0);
     }
     if (updates.siteReadinessNotes !== void 0) {
-      fields.push("site_readiness_notes = ?");
-      values.push(updates.siteReadinessNotes);
+      baseFields.push("site_readiness_notes = ?");
+      baseValues.push(updates.siteReadinessNotes);
     }
-    if (updates.scheduledInstallationDate !== void 0) {
-      fields.push("scheduled_installation_date = ?");
-      values.push(updates.scheduledInstallationDate);
+    if (updates.targetCompletionDate !== void 0 || updates.target_completion_date !== void 0) {
+      baseFields.push("target_completion_date = ?");
+      baseValues.push(updates.targetCompletionDate || updates.target_completion_date);
     }
-    if (fields.length > 0) {
-      values.push(id);
-      await pool.query(`UPDATE projects SET ${fields.join(", ")} WHERE id = ?`, values);
+    if (updates.installationLeadName !== void 0 || updates.installation_lead_name !== void 0) {
+      baseFields.push("installation_lead_name = ?");
+      baseValues.push(updates.installationLeadName || updates.installation_lead_name);
+    }
+    if (updates.notes !== void 0) {
+      baseFields.push("notes = ?");
+      baseValues.push(updates.notes);
+    }
+    const extendedFields = [...baseFields];
+    const extendedValues = [...baseValues];
+    if (updates.scheduledInstallationDate !== void 0 || updates.scheduled_installation_date !== void 0) {
+      extendedFields.push("scheduled_installation_date = ?");
+      extendedValues.push(updates.scheduledInstallationDate || updates.scheduled_installation_date);
+    }
+    if (updates.assignedCrewMembers !== void 0 || updates.assigned_crew_members !== void 0) {
+      extendedFields.push("assigned_crew_members = ?");
+      const crewVal = updates.assignedCrewMembers || updates.assigned_crew_members;
+      extendedValues.push(Array.isArray(crewVal) ? JSON.stringify(crewVal) : crewVal);
+    }
+    if (extendedFields.length > 0) {
+      try {
+        await pool.query(`UPDATE projects SET ${extendedFields.join(", ")} WHERE id = ?`, [...extendedValues, id]);
+      } catch (extendedErr) {
+        if (baseFields.length > 0) {
+          try {
+            await pool.query(`UPDATE projects SET ${baseFields.join(", ")} WHERE id = ?`, [...baseValues, id]);
+          } catch (baseErr) {
+            console.warn("Base project update warning:", baseErr);
+          }
+        }
+      }
     }
     res.json({ success: true, id, updates });
   } catch (err) {
+    console.error("Error updating project:", err);
     res.status(500).json({ success: false, error: err.message });
   }
 };
@@ -4855,7 +4984,7 @@ var getAuditLogs = async (req, res) => {
 var createAuditLog = async (req, res) => {
   try {
     const { action, category, details, targetEntityId, targetEntityType, status, metadata } = req.body;
-    const user2 = req.user;
+    const user = req.user;
     const id = `AUD-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
     const ipAddress = req.ip || req.socket.remoteAddress || "127.0.0.1";
     await pool.query(
@@ -4863,9 +4992,9 @@ var createAuditLog = async (req, res) => {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
-        user2?.userId || user2?.id || "SYSTEM",
-        user2?.name || "System User",
-        user2?.role || "Super Admin",
+        user?.userId || user?.id || "SYSTEM",
+        user?.name || "System User",
+        user?.role || "Super Admin",
         action || "SYSTEM_ACTION",
         category || "Security",
         details || "",
@@ -4926,7 +5055,7 @@ function saveBase64File(base64Data, prefix) {
 }
 var uploadCustomerDocument = async (req, res) => {
   try {
-    const user2 = req.user;
+    const user = req.user;
     const {
       customerId = null,
       projectId = null,
@@ -4973,8 +5102,8 @@ var uploadCustomerDocument = async (req, res) => {
         docFrontPath,
         docBackPath,
         notes,
-        user2?.userId || null,
-        user2?.name || user2?.username || "Survey Engineer",
+        user?.userId || null,
+        user?.name || user?.username || "Survey Engineer",
         uploadedAt
       ]
     );
@@ -5141,7 +5270,7 @@ var getBom = async (req, res) => {
 };
 var saveBom = async (req, res) => {
   try {
-    const user2 = req.user;
+    const user = req.user;
     const {
       id,
       projectId = null,
@@ -5185,8 +5314,8 @@ var saveBom = async (req, res) => {
           projectId,
           surveyId,
           status,
-          user2?.userId || user2?.id || null,
-          user2?.name || user2?.username || "Survey Engineer",
+          user?.userId || user?.id || null,
+          user?.name || user?.username || "Survey Engineer",
           totalEstimatedCost,
           revisionComments,
           now,
@@ -5270,14 +5399,14 @@ var reviewBom = async (req, res) => {
   try {
     const { id } = req.params;
     const { action, comments = "" } = req.body;
-    const user2 = req.user;
+    const user = req.user;
     const now = (/* @__PURE__ */ new Date()).toISOString();
     if (action === "Approve") {
       await pool.query(
         `UPDATE project_boms 
          SET status = 'Approved', approved_by_id = ?, approved_by_name = ?, revision_comments = ?, updated_at = ?
          WHERE id = ?`,
-        [user2?.userId || null, user2?.name || "Project Manager", comments, now, id]
+        [user?.userId || null, user?.name || "Project Manager", comments, now, id]
       );
       let createdQuotation = null;
       try {
@@ -5298,7 +5427,7 @@ var reviewBom = async (req, res) => {
           }));
           const resDraft = await createQuotationDraftInternal(pool, {
             surveyId: bom.survey_id,
-            user: user2,
+            user,
             customItems: mappedItems.length > 0 ? mappedItems : void 0
           });
           createdQuotation = resDraft.quotation;
@@ -7125,9 +7254,65 @@ async function getProjectCommandCentre(req, res) {
     res.status(500).json({ success: false, error: error.message });
   }
 }
+async function scheduleInstallation(req, res) {
+  try {
+    const { projectId, scheduledDate, installationLeadName, crewMembers } = req.body;
+    if (!projectId) {
+      res.status(400).json({ success: false, error: "Project ID is required" });
+      return;
+    }
+    const crewArray = Array.isArray(crewMembers) ? crewMembers : [];
+    try {
+      await pool.query(
+        `UPDATE projects 
+         SET target_completion_date = COALESCE(?, target_completion_date),
+             scheduled_installation_date = COALESCE(?, scheduled_installation_date),
+             installation_lead_name = COALESCE(?, installation_lead_name),
+             assigned_crew_members = ?
+         WHERE id = ?`,
+        [scheduledDate || null, scheduledDate || null, installationLeadName || null, JSON.stringify(crewArray), projectId]
+      );
+    } catch (dbErr) {
+      try {
+        await pool.query(
+          `UPDATE projects 
+           SET target_completion_date = COALESCE(?, target_completion_date),
+               installation_lead_name = COALESCE(?, installation_lead_name)
+           WHERE id = ?`,
+          [scheduledDate || null, installationLeadName || null, projectId]
+        );
+      } catch (innerErr) {
+        console.warn("Could not update project schedule in DB:", innerErr);
+      }
+    }
+    try {
+      await createNotification({
+        recipientRole: "Installation Team",
+        type: "info",
+        title: "Installation Scheduled",
+        message: `Project ${projectId} kickoff scheduled for ${scheduledDate || "upcoming date"} with ${crewArray.length} assigned crew members.`,
+        entityId: projectId,
+        actionUrl: `/projects`
+      });
+    } catch {
+    }
+    res.json({
+      success: true,
+      projectId,
+      scheduledDate,
+      installationLeadName,
+      crewMembers: crewArray,
+      message: "Installation schedule and crew assignments saved successfully"
+    });
+  } catch (error) {
+    console.error("Error saving installation schedule:", error);
+    res.status(500).json({ success: false, error: error.message || "Internal server error" });
+  }
+}
 
 // server/routes/installation.routes.ts
 var router2 = Router15();
+router2.post("/schedule", authenticateToken, scheduleInstallation);
 router2.post("/attendance", authenticateToken, recordAttendance);
 router2.get("/attendance/:projectId", authenticateToken, getProjectAttendance);
 router2.post("/progress", authenticateToken, logProgress);
@@ -7271,7 +7456,7 @@ var syncCallLog = async (req, res) => {
 };
 var getCallLogs = async (req, res) => {
   try {
-    const user2 = req.user;
+    const user = req.user;
     const {
       type,
       status,
@@ -7280,20 +7465,61 @@ var getCallLogs = async (req, res) => {
       search,
       start_date,
       end_date,
-      limit = 50,
-      offset = 0
+      page,
+      limit = 15,
+      offset
     } = req.query;
-    const userRole = (user2?.role || "").toLowerCase().replace(/[\s_-]+/g, "");
+    const pageNum = Math.max(1, Number(page) || 1);
+    const limitNum = Math.max(1, Math.min(100, Number(limit) || 15));
+    const offsetNum = offset !== void 0 ? Number(offset) : (pageNum - 1) * limitNum;
+    const userRole = (user?.role || "").toLowerCase().replace(/[\s_-]+/g, "");
     const isManager = Boolean(
-      !user2 || userRole === "admin" || userRole === "salesmanager" || userRole === "superadmin" || userRole === "management" || userRole === "managingdirector" || userRole === "ceo" || userRole === "manager" || user2.role === "Sales Manager" || user2.role === "Super Admin"
+      !user || userRole === "admin" || userRole === "salesmanager" || userRole === "superadmin" || userRole === "management" || userRole === "managingdirector" || userRole === "ceo" || userRole === "manager" || user.role === "Sales Manager" || user.role === "Super Admin"
     );
     const baseConditions = ["1=1"];
     const baseParams = [];
-    if (!isManager && user2) {
-      const empId = user2.employeeId || user2.id || user2.userId;
-      const empPhone = user2.phone || "";
-      baseConditions.push("(employee_id = ? OR employee_id = ? OR employee_phone = ?)");
-      baseParams.push(empId, user2.id, empPhone);
+    if (!isManager && user) {
+      const rawEmpId = user.employeeId || user.id || user.userId;
+      let matchedEmpId = user.employeeId || null;
+      let matchedEmpPhone = (user.phone || "").replace(/\D/g, "").slice(-10);
+      let matchedEmpName = user.name || "";
+      if (rawEmpId || user.email || user.username) {
+        const [empRows] = await pool.query(
+          `SELECT id, name, phone FROM employees WHERE id = ? OR username = ? OR email = ? LIMIT 1`,
+          [rawEmpId, user.username || "", user.email || ""]
+        );
+        if (empRows && empRows.length > 0) {
+          matchedEmpId = empRows[0].id;
+          matchedEmpName = empRows[0].name;
+          const digits = (empRows[0].phone || "").replace(/\D/g, "").slice(-10);
+          if (digits) matchedEmpPhone = digits;
+        }
+      }
+      const orParts = [];
+      const orParams = [];
+      if (matchedEmpId) {
+        orParts.push("employee_id = ?");
+        orParams.push(matchedEmpId);
+      }
+      if (rawEmpId && rawEmpId !== matchedEmpId) {
+        orParts.push("employee_id = ?");
+        orParams.push(rawEmpId);
+      }
+      if (matchedEmpPhone) {
+        orParts.push("(employee_phone IS NOT NULL AND employee_phone LIKE ?)");
+        orParams.push(`%${matchedEmpPhone}%`);
+      }
+      if (matchedEmpName) {
+        orParts.push("employee_name = ?");
+        orParams.push(matchedEmpName);
+      }
+      if (orParts.length > 0) {
+        baseConditions.push(`(${orParts.join(" OR ")})`);
+        baseParams.push(...orParams);
+      } else {
+        baseConditions.push("employee_id = ?");
+        baseParams.push(rawEmpId);
+      }
     } else if (employee_id) {
       baseConditions.push("employee_id = ?");
       baseParams.push(employee_id);
@@ -7325,12 +7551,17 @@ var getCallLogs = async (req, res) => {
       queryParams.push(end_date);
     }
     const whereClause = queryConditions.join(" AND ");
+    const [countRows] = await pool.query(
+      `SELECT COUNT(*) as total FROM call_logs WHERE ${whereClause}`,
+      queryParams
+    );
+    const totalCalls = countRows && countRows.length > 0 ? Number(countRows[0].total) : 0;
     const [calls] = await pool.query(
       `SELECT * FROM call_logs 
        WHERE ${whereClause} 
        ORDER BY call_time DESC 
        LIMIT ? OFFSET ?`,
-      [...queryParams, Number(limit), Number(offset)]
+      [...queryParams, limitNum, offsetNum]
     );
     const baseWhereClause = baseConditions.join(" AND ");
     const [summaryRows] = await pool.query(
@@ -7365,6 +7596,12 @@ var getCallLogs = async (req, res) => {
     return res.json({
       success: true,
       calls,
+      pagination: {
+        total: totalCalls,
+        page: pageNum,
+        limit: limitNum,
+        total_pages: Math.ceil(totalCalls / limitNum) || 1
+      },
       metrics: summaryRows[0] || {
         total_calls_today: 0,
         outgoing_count: 0,
@@ -7389,8 +7626,8 @@ var resolveMissedCall = async (req, res) => {
   try {
     const { id } = req.params;
     const { notes } = req.body;
-    const user2 = req.user;
-    const resolvedBy = user2 ? user2.name || user2.username : "Sales Staff";
+    const user = req.user;
+    const resolvedBy = user ? user.name || user.username : "Sales Staff";
     const [result] = await pool.query(
       `UPDATE call_logs 
        SET is_resolved = TRUE, 
@@ -7836,8 +8073,19 @@ app.use(["/uploads", "*/uploads"], express.static(path7.join(process.cwd(), "upl
 app.use(["/documents", "*/documents"], express.static(path7.join(process.cwd(), "public", "documents")));
 app.use(["/api", "*/api"], apiRouter);
 async function startServer() {
-  const distPath = fs6.existsSync(path7.resolve(__dirname, "dist", "index.html")) ? path7.resolve(__dirname, "dist") : path7.resolve(process.cwd(), "dist");
-  const isProd = process.env.NODE_ENV === "production";
+  const distCandidate1 = path7.resolve(__dirname, "dist");
+  const distCandidate2 = path7.resolve(process.cwd(), "dist");
+  const rootCandidate = process.cwd();
+  let distPath = distCandidate1;
+  let hasDist = fs6.existsSync(path7.resolve(distCandidate1, "index.html"));
+  if (!hasDist && fs6.existsSync(path7.resolve(distCandidate2, "index.html"))) {
+    distPath = distCandidate2;
+    hasDist = true;
+  } else if (!hasDist && fs6.existsSync(path7.resolve(rootCandidate, "assets"))) {
+    distPath = rootCandidate;
+    hasDist = true;
+  }
+  const isProd = process.env.NODE_ENV === "production" || hasDist;
   if (!isProd) {
     const vite = await createViteServer({
       server: { middlewareMode: true },

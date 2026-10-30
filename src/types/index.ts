@@ -341,6 +341,7 @@ export interface QuotationVersion {
   netTotal: number;
   terms: string[];
   notes: string;
+  packageTier?: 'Standard' | 'Premium Bifacial' | 'Commercial Heavy Duty';
 }
 
 export type QuotationStatus = 'Draft' | 'Sent' | 'Negotiation' | 'Accepted' | 'Customer_Accepted' | 'Converted_To_Project' | 'Declined' | 'Expired';
@@ -369,6 +370,8 @@ export interface Quotation {
   discountAmount?: number;
   discountApprovedBy?: string;
   subsidyAmount?: number;
+  subsidyEligible?: boolean;
+  indicativeNetCustomerCost?: number;
   taxableAmount?: number;
   gstRate?: number;
   gstAmount?: number;
@@ -445,6 +448,8 @@ export interface Project {
   material_readiness_status?: 'Pending BOM' | 'PO Issued' | 'Partially Inwarded' | 'Fully Inwarded' | 'Ready for Installation' | 'Fully Received at Site' | 'Partial Shortage' | 'In Warehouse';
   leadId?: string;
   notes: string;
+  scheduled_installation_date?: string;
+  assigned_crew_members?: string[];
 }
 
 export interface InventoryProduct {

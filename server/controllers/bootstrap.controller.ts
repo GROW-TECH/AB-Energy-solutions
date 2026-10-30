@@ -91,7 +91,17 @@ export const getBootstrapData = async (req: Request, res: Response) => {
     const [customers]: any = await pool.query(
       'SELECT id, name, email, phone, alternate_phone, address, city, state, pincode, consumer_number_discom, discom_name, gstin, converted_from_lead_id, total_system_kw, total_order_value, paid_amount, balance_amount, status, created_at FROM customers ORDER BY created_at DESC'
     );
-    const [surveys]: any = await pool.query('SELECT * FROM site_surveys ORDER BY scheduled_date DESC');
+    let surveysQuery = 'SELECT * FROM site_surveys';
+    const surveysParams: any[] = [];
+    if (role === 'Survey Engineer') {
+      const empId = req.user.employeeId || req.user.id || req.user.userId;
+      const userName = (req.user.name || req.user.username || '').trim();
+      const firstPart = userName.split(' ')[0] || userName;
+      surveysQuery += ' WHERE (engineer_id = ? OR engineer_id = ? OR engineer_name = ? OR engineer_name LIKE ?)';
+      surveysParams.push(empId, req.user.userId || req.user.id, userName, `%${firstPart}%`);
+    }
+    surveysQuery += ' ORDER BY scheduled_date DESC';
+    const [surveys]: any = await pool.query(surveysQuery, surveysParams);
     const [surveyPhotos]: any = await pool.query('SELECT * FROM survey_photos ORDER BY uploaded_at ASC');
     const [surveyHistory]: any = await pool.query('SELECT * FROM survey_review_history ORDER BY created_at ASC');
 
@@ -302,6 +312,10 @@ function formatProject(p: any, role?: string) {
     projectManagerName: p.project_manager_name,
     installationLeadId: p.installation_lead_id,
     installationLeadName: p.installation_lead_name,
+    scheduled_installation_date: p.scheduled_installation_date || p.target_completion_date,
+    assigned_crew_members: typeof p.assigned_crew_members === 'string'
+      ? (() => { try { return JSON.parse(p.assigned_crew_members); } catch { return []; } })()
+      : (p.assigned_crew_members || []),
     checklist: typeof p.checklist === 'string' ? JSON.parse(p.checklist) : (p.checklist || {}),
     tasks: typeof p.tasks === 'string' ? JSON.parse(p.tasks) : (p.tasks || []),
     inventoryReserved: Boolean(p.inventory_reserved),

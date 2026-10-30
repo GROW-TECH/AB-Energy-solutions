@@ -166,9 +166,14 @@ export const getCallLogs = async (req: Request, res: Response) => {
       search,
       start_date,
       end_date,
-      limit = 50,
-      offset = 0
+      page,
+      limit = 15,
+      offset
     } = req.query;
+
+    const pageNum = Math.max(1, Number(page) || 1);
+    const limitNum = Math.max(1, Math.min(100, Number(limit) || 15));
+    const offsetNum = offset !== undefined ? Number(offset) : (pageNum - 1) * limitNum;
 
     const userRole = (user?.role || '').toLowerCase().replace(/[\s_-]+/g, '');
     const isManager = Boolean(
@@ -187,12 +192,54 @@ export const getCallLogs = async (req: Request, res: Response) => {
     const baseConditions: string[] = ['1=1'];
     const baseParams: any[] = [];
 
-    // RBAC: If executive, restrict to their own employee record
+    // RBAC: If executive, strictly isolate to their own employee ID, their name, or their registered phone
     if (!isManager && user) {
-      const empId = user.employeeId || user.id || user.userId;
-      const empPhone = user.phone || '';
-      baseConditions.push('(employee_id = ? OR employee_id = ? OR employee_phone = ?)');
-      baseParams.push(empId, user.id, empPhone);
+      const rawEmpId = user.employeeId || user.id || user.userId;
+      let matchedEmpId = user.employeeId || null;
+      let matchedEmpPhone = (user.phone || '').replace(/\D/g, '').slice(-10);
+      let matchedEmpName = user.name || '';
+
+      // Look up current employee phone and name from database
+      if (rawEmpId || user.email || user.username) {
+        const [empRows]: any = await pool.query(
+          `SELECT id, name, phone FROM employees WHERE id = ? OR username = ? OR email = ? LIMIT 1`,
+          [rawEmpId, user.username || '', user.email || '']
+        );
+        if (empRows && empRows.length > 0) {
+          matchedEmpId = empRows[0].id;
+          matchedEmpName = empRows[0].name;
+          const digits = (empRows[0].phone || '').replace(/\D/g, '').slice(-10);
+          if (digits) matchedEmpPhone = digits;
+        }
+      }
+
+      const orParts: string[] = [];
+      const orParams: any[] = [];
+
+      if (matchedEmpId) {
+        orParts.push('employee_id = ?');
+        orParams.push(matchedEmpId);
+      }
+      if (rawEmpId && rawEmpId !== matchedEmpId) {
+        orParts.push('employee_id = ?');
+        orParams.push(rawEmpId);
+      }
+      if (matchedEmpPhone) {
+        orParts.push('(employee_phone IS NOT NULL AND employee_phone LIKE ?)');
+        orParams.push(`%${matchedEmpPhone}%`);
+      }
+      if (matchedEmpName) {
+        orParts.push('employee_name = ?');
+        orParams.push(matchedEmpName);
+      }
+
+      if (orParts.length > 0) {
+        baseConditions.push(`(${orParts.join(' OR ')})`);
+        baseParams.push(...orParams);
+      } else {
+        baseConditions.push('employee_id = ?');
+        baseParams.push(rawEmpId);
+      }
     } else if (employee_id) {
       // Manager can filter by specific employee
       baseConditions.push('employee_id = ?');
@@ -234,13 +281,20 @@ export const getCallLogs = async (req: Request, res: Response) => {
 
     const whereClause = queryConditions.join(' AND ');
 
-    // 1. Fetch Call Records
+    // 1. Fetch Total Count for Pagination
+    const [countRows]: any = await pool.query(
+      `SELECT COUNT(*) as total FROM call_logs WHERE ${whereClause}`,
+      queryParams
+    );
+    const totalCalls = countRows && countRows.length > 0 ? Number(countRows[0].total) : 0;
+
+    // 2. Fetch Call Records for Current Page
     const [calls]: any = await pool.query(
       `SELECT * FROM call_logs 
        WHERE ${whereClause} 
        ORDER BY call_time DESC 
        LIMIT ? OFFSET ?`,
-      [...queryParams, Number(limit), Number(offset)]
+      [...queryParams, limitNum, offsetNum]
     );
 
     // 2. Fetch Aggregated Performance Metrics for Today (unaffected by tab filter so top stats stay consistent)
@@ -280,6 +334,12 @@ export const getCallLogs = async (req: Request, res: Response) => {
     return res.json({
       success: true,
       calls,
+      pagination: {
+        total: totalCalls,
+        page: pageNum,
+        limit: limitNum,
+        total_pages: Math.ceil(totalCalls / limitNum) || 1
+      },
       metrics: summaryRows[0] || {
         total_calls_today: 0,
         outgoing_count: 0,

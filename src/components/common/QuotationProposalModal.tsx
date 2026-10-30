@@ -15,6 +15,49 @@ export const getQuotationPdfUrl = (id: string, download = false) => {
   return getApiUrl(`/api/quotations/${id}/pdf${query ? `?${query}` : ''}`);
 };
 
+/**
+ * Robust mobile-friendly and WebView-friendly PDF download handler.
+ * Works seamlessly on desktop, mobile browsers, and Android native WebView wrapper.
+ */
+export const downloadQuotationPdf = async (id: string, quotationNumber: string = '') => {
+  const url = getQuotationPdfUrl(id, true);
+  const cleanNumber = (quotationNumber || id).replace(/[^a-zA-Z0-9_-]/g, '_');
+  const filename = `AB_Energy_Proposal_${cleanNumber}.pdf`;
+
+  // 1. Check for Android Native Webview Bridge
+  const androidBridge = (window as any).AndroidCallTracker;
+  if (androidBridge && typeof androidBridge.downloadFile === 'function') {
+    try {
+      androidBridge.downloadFile(url, filename);
+      return;
+    } catch (e) {
+      console.warn('Native downloadFile error, falling back to browser download:', e);
+    }
+  }
+
+  // 2. Fetch Blob for reliable client-side browser download
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    const blobUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => window.URL.revokeObjectURL(blobUrl), 15000);
+  } catch (err) {
+    console.warn('Blob download fallback, opening direct URL:', err);
+    // Direct navigation / new tab fallback
+    const win = window.open(url, '_blank');
+    if (!win) {
+      window.location.href = url;
+    }
+  }
+};
+
 interface QuotationProposalModalProps {
   quotation: Quotation | null;
   isOpen: boolean;
@@ -65,7 +108,7 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
   );
 
   const dailyKwh = Math.round(quotation.systemCapacityKw * 5);
-  const hasSubsidy = quotation.subsidyEligible && (quotation.subsidyAmount > 0);
+  const hasSubsidy = Boolean(quotation.subsidyEligible && (quotation.subsidyAmount || 0) > 0);
   const netCustomerCost = quotation.indicativeNetCustomerCost || (quotation.totalAmount - (quotation.subsidyAmount || 0));
 
   return (
@@ -143,13 +186,13 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
       <div className="bg-slate-100 rounded-2xl border border-slate-300 shadow-2xl max-w-5xl w-full my-auto flex flex-col max-h-[95vh] overflow-hidden animate-in zoom-in-95">
         
         {/* MODAL TOP HEADER (Hidden when printing) */}
-        <div className="bg-white px-6 py-3.5 border-b border-slate-200 flex items-center justify-between shrink-0 shadow-2xs no-print">
-          <div className="flex items-center gap-3">
-            <span className="p-2 bg-slate-900 text-white rounded-xl font-bold">
+        <div className="bg-white px-3 sm:px-6 py-3 sm:py-3.5 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0 shadow-2xs no-print">
+          <div className="flex items-center gap-3 min-w-0">
+            <span className="p-2 bg-slate-900 text-white rounded-xl font-bold shrink-0">
               <FileText className="w-5 h-5" />
             </span>
-            <div>
-              <div className="flex items-center gap-2">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-base font-black text-black font-mono">
                   {quotation.quotationNumber}
                 </h2>
@@ -160,47 +203,46 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
                   {quotation.systemCapacityKw} kW On-Grid
                 </span>
               </div>
-              <p className="text-xs text-slate-600 mt-0.5">
+              <p className="text-xs text-slate-600 mt-0.5 truncate">
                 Client: <strong className="text-black font-bold">{quotation.leadName}</strong> ({quotation.customerPhone}) &bull; {quotation.customerAddress || 'Tamil Nadu, India'}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
             <button
               onClick={() => window.print()}
-              className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-xs cursor-pointer"
+              className="px-3 py-1.5 sm:px-3.5 sm:py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-xs cursor-pointer"
               title="Print Clean A4 Proposal"
             >
               <Printer className="w-3.5 h-3.5" />
-              <span>Print Proposal</span>
+              <span>Print</span>
             </button>
 
             <a
               href={getQuotationPdfUrl(quotation.id, false)}
               target="_blank"
               rel="noopener noreferrer"
-              className="px-3 py-2 bg-slate-900 hover:bg-black text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-xs"
+              className="px-3 py-1.5 sm:px-3 sm:py-2 bg-slate-900 hover:bg-black text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-xs"
               title="Open Official PDF in New Tab"
             >
               <Eye className="w-3.5 h-3.5" />
               <span>Open PDF</span>
             </a>
 
-            <a
-              href={getQuotationPdfUrl(quotation.id, true)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-3 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5"
+            <button
+              type="button"
+              onClick={() => downloadQuotationPdf(quotation.id, quotation.quotationNumber)}
+              className="px-3 py-1.5 sm:px-3 sm:py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
               title="Download PDF to Device"
             >
               <Download className="w-3.5 h-3.5 text-slate-600" />
               <span>Download</span>
-            </a>
+            </button>
 
             <button
               onClick={onClose}
-              className="p-2 text-slate-400 hover:text-black hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+              className="p-1.5 sm:p-2 text-slate-400 hover:text-black hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -208,42 +250,42 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
         </div>
 
         {/* VIEW SELECTOR TOGGLE (OFFICIAL PROPOSAL vs STATUTORY GST BREAKDOWN) */}
-        <div className="bg-white px-6 py-2.5 border-b border-slate-200 flex items-center justify-between shrink-0 no-print">
+        <div className="bg-white px-3 sm:px-6 py-2.5 border-b border-slate-200 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 shrink-0 no-print">
           <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
             <button
               onClick={() => setDocTab('proposal')}
-              className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-2 cursor-pointer ${
+              className={`flex-1 sm:flex-none px-3 sm:px-4 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                 docTab === 'proposal'
                   ? 'bg-white text-black shadow-xs'
                   : 'text-slate-600 hover:text-black'
               }`}
             >
-              <FileText className="w-3.5 h-3.5 text-black" />
-              <span>Official Quotation Proposal (Client View)</span>
+              <FileText className="w-3.5 h-3.5 text-black shrink-0" />
+              <span>Proposal (Client View)</span>
             </button>
             <button
               onClick={() => setDocTab('tax_audit')}
-              className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-2 cursor-pointer ${
+              className={`flex-1 sm:flex-none px-3 sm:px-4 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                 docTab === 'tax_audit'
                   ? 'bg-white text-black shadow-xs'
                   : 'text-slate-600 hover:text-black'
               }`}
             >
-              <Layers className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Statutory GST Audit (5% &amp; 18%)</span>
+              <Layers className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+              <span>GST Breakdown</span>
             </button>
           </div>
 
-          <div className="text-right">
+          <div className="text-left sm:text-right flex items-center sm:block justify-between">
             <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Contract Value</span>
-            <span className="text-base font-black text-black font-mono">
+            <span className="text-sm sm:text-base font-black text-black font-mono">
               ₹{quotation.totalAmount.toLocaleString('en-IN')}
             </span>
           </div>
         </div>
 
         {/* MODAL BODY (SCROLLABLE) */}
-        <div className="overflow-y-auto flex-1 p-6 space-y-6">
+        <div className="overflow-y-auto flex-1 p-3 sm:p-6 space-y-6">
 
           {/* ======================================================== */}
           {/* TAB 1: OFFICIAL AUTHENTIC 6-PAGE AB ENERGY PROPOSAL     */}
@@ -252,18 +294,18 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
             <div id="printable-proposal-modal" className="space-y-6 max-w-4xl mx-auto">
               
               {/* PAGE 1: COVER PAGE */}
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-8 space-y-5 print-page-break">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 sm:p-6 lg:p-8 space-y-4 sm:space-y-5 print-page-break">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 pb-3 border-b border-slate-200">
                   <img
                     src={getApiUrl('/logo.png')}
                     alt="AB Energy Solutions"
-                    className="h-12 w-auto object-contain"
+                    className="h-10 sm:h-12 w-auto object-contain"
                   />
-                  <div className="text-right">
+                  <div className="text-left sm:text-right">
                     <span className="font-mono font-black text-black text-xs block">
                       GST: 33FSQPA3244H1ZU
                     </span>
-                    <span className="text-[10px] text-slate-500 font-semibold">Turnkey Solar EPC &bull; Electrical Infrastructure &bull; O&amp;M</span>
+                    <span className="text-[10px] text-slate-500 font-semibold block">Turnkey Solar EPC &bull; Electrical Infrastructure &bull; O&amp;M</span>
                   </div>
                 </div>
 
@@ -276,7 +318,7 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
                   </p>
                 </div>
 
-                <div className="flex items-center justify-between text-xs font-bold text-slate-700 pb-1">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between text-xs font-bold text-slate-700 gap-1 pb-1">
                   <span>Quotation No.: <span className="font-mono text-black font-black">{quotation.quotationNumber}</span></span>
                   <span className="text-slate-500 font-normal">Package Tier: <strong>{activeVer.packageTier || 'Premium Tier-1'}</strong></span>
                   <span>Date: <span className="text-black font-black">{new Date(quotation.createdAt).toLocaleDateString('en-GB')}</span></span>
@@ -286,11 +328,11 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
                   <img
                     src={getApiUrl('/solar-roof-cover.jpg')}
                     alt="Solar Rooftop Plant"
-                    className="w-full h-64 sm:h-72 object-cover"
+                    className="w-full h-48 sm:h-64 md:h-72 object-cover"
                   />
                 </div>
 
-                <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl">
+                <div className="p-3.5 sm:p-4 bg-slate-50 border border-slate-200 rounded-xl">
                   <h3 className="font-black text-black text-xs uppercase tracking-wider mb-2">Customer Details</h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-800">
                     <div><span className="font-bold text-black">Client Name:</span> {quotation.leadName}</div>
@@ -303,7 +345,7 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
                 </div>
 
                 {/* Key Metrics Strip */}
-                <div className="grid grid-cols-3 gap-3 pt-1">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3 pt-1">
                   <div className="p-3 bg-white border border-slate-200 rounded-xl text-center">
                     <span className="text-[10px] text-slate-500 uppercase block font-semibold">Plant Capacity</span>
                     <span className="text-sm font-black text-emerald-700 font-mono">{quotation.systemCapacityKw} kW On-Grid</span>
@@ -324,8 +366,8 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
               </div>
 
               {/* PAGE 2: CORPORATE PROFILE & LETTER */}
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-8 space-y-6 text-xs text-slate-700 leading-relaxed print-page-break">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 sm:p-6 lg:p-8 space-y-5 sm:space-y-6 text-xs text-slate-700 leading-relaxed print-page-break">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1.5 pb-3 border-b border-slate-200">
                   <div className="flex items-center gap-2">
                     <img src={getApiUrl('/logo.png')} alt="AB" className="h-7 w-auto" />
                     <div>
@@ -333,7 +375,7 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
                       <span className="text-[9px] text-slate-500">Corporate Profile &amp; Letter</span>
                     </div>
                   </div>
-                  <div className="text-right font-mono text-[10px] text-slate-500">
+                  <div className="text-left sm:text-right font-mono text-[10px] text-slate-500">
                     Quote: <strong className="text-emerald-700">{quotation.quotationNumber}</strong> &bull; GST: 33FSQPA3244H1ZU
                   </div>
                 </div>
@@ -383,8 +425,8 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
               </div>
 
               {/* PAGE 3: SERVICES, ADVANTAGES & VISION */}
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-8 space-y-6 text-xs text-slate-700 leading-relaxed print-page-break">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 sm:p-6 lg:p-8 space-y-5 sm:space-y-6 text-xs text-slate-700 leading-relaxed print-page-break">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1.5 pb-3 border-b border-slate-200">
                   <div className="flex items-center gap-2">
                     <img src={getApiUrl('/logo.png')} alt="AB" className="h-7 w-auto" />
                     <div>
@@ -392,7 +434,7 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
                       <span className="text-[9px] text-slate-500">Services &amp; Why Choose Us</span>
                     </div>
                   </div>
-                  <div className="text-right font-mono text-[10px] text-slate-500">
+                  <div className="text-left sm:text-right font-mono text-[10px] text-slate-500">
                     Quote: <strong className="text-emerald-700">{quotation.quotationNumber}</strong> &bull; GST: 33FSQPA3244H1ZU
                   </div>
                 </div>
@@ -458,8 +500,8 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
               </div>
 
               {/* PAGE 4: SCOPE OF WORK & DYNAMIC BILL OF MATERIALS */}
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-8 space-y-5 text-xs text-slate-700 leading-relaxed print-page-break">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 sm:p-6 lg:p-8 space-y-4 sm:space-y-5 text-xs text-slate-700 leading-relaxed print-page-break">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1.5 pb-3 border-b border-slate-200">
                   <div className="flex items-center gap-2">
                     <img src={getApiUrl('/logo.png')} alt="AB" className="h-7 w-auto" />
                     <div>
@@ -467,7 +509,7 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
                       <span className="text-[9px] text-slate-500">Technical Scope &amp; BOM</span>
                     </div>
                   </div>
-                  <div className="text-right font-mono text-[10px] text-slate-500">
+                  <div className="text-left sm:text-right font-mono text-[10px] text-slate-500">
                     Quote: <strong className="text-emerald-700">{quotation.quotationNumber}</strong> &bull; GST: 33FSQPA3244H1ZU
                   </div>
                 </div>
@@ -488,17 +530,14 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
                 </div>
 
                 <div className="pt-3 border-t border-slate-100">
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="mb-2">
                     <h3 className="text-sm font-black text-black tracking-tight uppercase">
                       Bill Of Materials
                     </h3>
-                    <span className="text-[10px] text-black font-black bg-slate-100 px-2.5 py-0.5 rounded-full border border-slate-300">
-                      Populated dynamically from Database BOM ({items.length} Line Items)
-                    </span>
                   </div>
 
-                  <div className="overflow-x-auto border border-slate-300 rounded-xl shadow-2xs">
-                    <table className="w-full text-left text-[11px]">
+                  <div className="overflow-x-auto -mx-2 sm:mx-0 border border-slate-300 rounded-xl shadow-2xs">
+                    <table className="w-full min-w-[540px] text-left text-[11px]">
                       <thead className="bg-slate-900 text-white font-black text-[10px] uppercase border-b border-slate-300">
                         <tr>
                           <th className="py-2 px-3 text-center w-12">S.NO</th>
@@ -545,8 +584,8 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
               </div>
 
               {/* PAGE 5: CLIENT SCOPE, FEATURES & WARRANTY, SYSTEM CAPACITY & PRICING */}
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-8 space-y-5 text-xs text-slate-700 leading-relaxed print-page-break">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 sm:p-6 lg:p-8 space-y-4 sm:space-y-5 text-xs text-slate-700 leading-relaxed print-page-break">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1.5 pb-3 border-b border-slate-200">
                   <div className="flex items-center gap-2">
                     <img src={getApiUrl('/logo.png')} alt="AB" className="h-7 w-auto" />
                     <div>
@@ -554,7 +593,7 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
                       <span className="text-[9px] text-slate-500">Client Scope &amp; Commercial Pricing</span>
                     </div>
                   </div>
-                  <div className="text-right font-mono text-[10px] text-slate-500">
+                  <div className="text-left sm:text-right font-mono text-[10px] text-slate-500">
                     Quote: <strong className="text-emerald-700">{quotation.quotationNumber}</strong> &bull; GST: 33FSQPA3244H1ZU
                   </div>
                 </div>
@@ -614,7 +653,7 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
                           <td className="py-3 px-4 font-bold text-slate-800">
                             {hasSubsidy ? (
                               <div>
-                                <span className="text-emerald-700 font-black block">Subsidy: ₹{Math.round(quotation.subsidyAmount).toLocaleString('en-IN')}</span>
+                                <span className="text-emerald-700 font-black block">Subsidy: ₹{Math.round(quotation.subsidyAmount || 0).toLocaleString('en-IN')}</span>
                                 <span className="text-slate-900 text-xs block">Net Cost: ₹{Math.round(netCustomerCost).toLocaleString('en-IN')}/-</span>
                               </div>
                             ) : (
@@ -644,8 +683,8 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
               </div>
 
               {/* PAGE 6: TERMS & CONDITIONS, CONTACT CARD & SIGNATORY */}
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-8 space-y-5 text-xs text-slate-700 leading-relaxed print-page-break">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 sm:p-6 lg:p-8 space-y-4 sm:space-y-5 text-xs text-slate-700 leading-relaxed print-page-break">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1.5 pb-3 border-b border-slate-200">
                   <div className="flex items-center gap-2">
                     <img src={getApiUrl('/logo.png')} alt="AB" className="h-7 w-auto" />
                     <div>
@@ -653,7 +692,7 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
                       <span className="text-[9px] text-slate-500">Commercial Terms &amp; Authorization</span>
                     </div>
                   </div>
-                  <div className="text-right font-mono text-[10px] text-slate-500">
+                  <div className="text-left sm:text-right font-mono text-[10px] text-slate-500">
                     Quote: <strong className="text-emerald-700">{quotation.quotationNumber}</strong> &bull; GST: 33FSQPA3244H1ZU
                   </div>
                 </div>
@@ -800,8 +839,8 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
                   <h4 className="text-xs font-black text-black uppercase tracking-wider mb-2">
                     Itemized Tax Breakdown ({items.length} Items)
                   </h4>
-                  <div className="overflow-x-auto border border-slate-300 rounded-xl">
-                    <table className="w-full text-left text-xs text-slate-700">
+                  <div className="overflow-x-auto -mx-2 sm:mx-0 border border-slate-300 rounded-xl">
+                    <table className="w-full min-w-[540px] text-left text-xs text-slate-700">
                       <thead className="bg-slate-100 text-black font-black uppercase text-[10px] border-b border-slate-300">
                         <tr>
                           <th className="py-2.5 px-3">#</th>

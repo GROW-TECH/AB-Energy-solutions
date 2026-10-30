@@ -1017,8 +1017,134 @@ export const PurchaseOrdersView: React.FC = () => {
             </div>
           </div>
 
-          {/* Purchase Orders Table */}
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+          {/* Purchase Orders Mobile Cards (< lg) */}
+          <div className="lg:hidden divide-y divide-slate-100 bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+            {filteredPos.length === 0 ? (
+              <div className="py-12 text-center text-slate-400">
+                <ShoppingCart className="w-10 h-10 mx-auto text-slate-300 mb-2" />
+                <p className="font-medium text-slate-600">No purchase orders found</p>
+              </div>
+            ) : (
+              filteredPos.map(po => {
+                const poId = po.id;
+                const pNum = po.poNumber || po.po_number || poId;
+                const sName = po.supplierName || po.supplier_name;
+                const gNum = po.grnNumber || po.grn_number;
+                const grandTotal = Number(po.grandTotal || po.grand_total) || 0;
+                const warehouse = po.deliveryWarehouse || po.delivery_warehouse || 'Site Delivery';
+                const items = po.items || [];
+                const isDelivered = po.status === 'Delivered' || po.status === 'Received';
+                const hasGrnChallan = po.delivery_challan_url || (po.grns && po.grns[0]?.signed_pdf_url);
+
+                return (
+                  <div key={poId} className="p-4 hover:bg-slate-50/80 transition-colors space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-slate-900 text-sm">{pNum}</span>
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                            isDelivered ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                            po.status === 'Partial Delivered' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                            po.status === 'In-Transit' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                            'bg-slate-100 text-slate-700 border-slate-200'
+                          }`}>
+                            {po.status}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-slate-400 font-mono mt-0.5">
+                          {po.created_at ? new Date(po.created_at).toLocaleDateString() : ''}
+                        </div>
+                      </div>
+
+                      <div className="text-right">
+                        <div className="font-bold text-slate-900 text-sm font-mono">
+                          ₹{grandTotal.toLocaleString('en-IN')}
+                        </div>
+                        <span className="text-[10px] text-slate-400">Incl. GST</span>
+                      </div>
+                    </div>
+
+                    <div className="text-xs space-y-1 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-500 font-medium">Customer:</span>
+                        <span className="font-semibold text-slate-900 truncate max-w-[180px]">{po.customer_name || 'Client Site'}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-500 font-medium">Supplier:</span>
+                        <span className="font-semibold text-slate-900 truncate max-w-[180px]">{sName}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-500 font-medium">Destination:</span>
+                        <span className="text-slate-700 truncate max-w-[180px]">{warehouse}</span>
+                      </div>
+                      {gNum && (
+                        <div className="flex items-center justify-between pt-1 border-t border-slate-200/60">
+                          <span className="text-emerald-700 font-bold">GRN Ref:</span>
+                          <span className="font-mono text-emerald-700 font-bold">{gNum}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {items.length > 0 && (
+                      <div className="text-[11px] text-slate-600 space-y-0.5">
+                        {items.slice(0, 2).map((item: any, idx: number) => (
+                          <div key={idx} className="flex items-center justify-between">
+                            <span className="truncate max-w-[200px] text-slate-800">{item.name || item.itemName}</span>
+                            <span className="font-bold text-slate-600 shrink-0">× {item.quantity} {item.unit}</span>
+                          </div>
+                        ))}
+                        {items.length > 2 && (
+                          <div className="text-[10px] text-slate-400 font-medium">+{items.length - 2} more items</div>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-100">
+                      {!isDelivered ? (
+                        <button
+                          onClick={() => handleOpenGrnModal(po)}
+                          className="px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-xs transition-colors flex items-center gap-1 cursor-pointer mr-auto"
+                        >
+                          <PackageCheck className="w-3.5 h-3.5" />
+                          <span>Inward (GRN)</span>
+                        </button>
+                      ) : (
+                        hasGrnChallan && (
+                          <a
+                            href={hasGrnChallan}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            download
+                            className="px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 rounded-lg border border-emerald-200 transition-colors inline-flex items-center gap-1 mr-auto"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                            <span>GRN Receipt</span>
+                          </a>
+                        )
+                      )}
+                      <button
+                        onClick={() => setViewingPo(po)}
+                        className="px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors inline-flex items-center gap-1"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                        <span>View</span>
+                      </button>
+                      <button
+                        onClick={() => handleDeletePurchaseOrder(po.id, pNum)}
+                        className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors"
+                        title="Delete Purchase Order"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Purchase Orders Table (Desktop >= lg) */}
+          <div className="hidden lg:block bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs text-slate-600">
                 <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200 uppercase text-[11px] tracking-wider">

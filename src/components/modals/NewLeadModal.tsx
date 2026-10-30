@@ -177,7 +177,7 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
 
@@ -244,7 +244,7 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
 
       // 2. Schedule Site Survey if explicitly enabled & verified
       if (scheduleSurveyNow && isQualified) {
-        qualifyLead(created.id, {
+        const qualifyRes = await qualifyLead(created.id, {
           engineerId: selectedEng?.id,
           engineerName: selectedEng?.name,
           scheduledDate: surveyDate,
@@ -252,6 +252,9 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
           notes: surveyNotes.trim(),
           leadData: { ...created, surveyId: newSurveyId, status: 'Site Survey Scheduled' },
         });
+        if (qualifyRes && !qualifyRes.success) {
+          console.warn('Survey scheduling warning:', qualifyRes.error);
+        }
       }
 
       resetForm();
@@ -881,22 +884,58 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-700 mb-1 flex items-center gap-1">
-                      <Clock className="w-3.5 h-3.5 text-emerald-600" />
-                      Visit Time Slot
-                    </label>
-                    <select
-                      value={surveyTime}
-                      onChange={e => setSurveyTime(e.target.value)}
-                      className="w-full text-xs p-2 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 font-medium"
-                    >
-                      <option value="10:00 AM - 12:00 PM">10:00 AM – 12:00 PM (Morning Audit)</option>
-                      <option value="12:00 PM - 02:00 PM">12:00 PM – 02:00 PM (Midday Solar Azimuth)</option>
-                      <option value="02:00 PM - 04:00 PM">02:00 PM – 04:00 PM (Afternoon Audit)</option>
-                      <option value="04:00 PM - 06:00 PM">04:00 PM – 06:00 PM (Late Afternoon)</option>
-                    </select>
-                  </div>
+                  {(() => {
+                    const getSlotConflict = (slot: string) => {
+                      if (!selectedEng) return null;
+                      return surveys.find(s =>
+                        s.status !== 'Cancelled' &&
+                        s.status !== 'Rejected' &&
+                        s.scheduledDate === surveyDate &&
+                        s.scheduledTime === slot &&
+                        (s.engineerId === selectedEng.id || s.engineerName === selectedEng.name)
+                      );
+                    };
+                    const slotConflict = getSlotConflict(surveyTime);
+
+                    return (
+                      <>
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-700 mb-1 flex items-center gap-1">
+                            <Clock className="w-3.5 h-3.5 text-emerald-600" />
+                            Visit Time Slot
+                          </label>
+                          <select
+                            value={surveyTime}
+                            onChange={e => setSurveyTime(e.target.value)}
+                            className="w-full text-xs p-2 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 font-medium"
+                          >
+                            {[
+                              { slot: '10:00 AM - 12:00 PM', label: '10:00 AM - 12:00 PM (Morning Audit)' },
+                              { slot: '12:00 PM - 02:00 PM', label: '12:00 PM - 02:00 PM (Midday Solar Azimuth)' },
+                              { slot: '02:00 PM - 04:00 PM', label: '02:00 PM - 04:00 PM (Afternoon Audit)' },
+                              { slot: '04:00 PM - 06:00 PM', label: '04:00 PM - 06:00 PM (Late Afternoon)' },
+                            ].map(item => {
+                              const conf = getSlotConflict(item.slot);
+                              return (
+                                <option key={item.slot} value={item.slot}>
+                                  {item.label} {conf ? `[Booked: ${conf.customerName}]` : '[Available]'}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </div>
+
+                        {slotConflict && (
+                          <div className="col-span-1 sm:col-span-2 p-2.5 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs flex items-center gap-2">
+                            <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
+                            <span>
+                              Slot Conflict: {selectedEng?.name} is already booked for {slotConflict.customerName} during {surveyTime}. Please choose another time slot.
+                            </span>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
 
                   <div>
                     <label className="block text-[11px] font-bold text-slate-700 mb-1 flex items-center gap-1">

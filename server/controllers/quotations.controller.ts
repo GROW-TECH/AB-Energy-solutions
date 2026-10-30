@@ -638,6 +638,7 @@ export const updateQuotation = async (req: Request, res: Response) => {
     const { id } = req.params;
     const updates = req.body;
     const allowed = ['status', 'notes', 'validUntil', 'sentDate', 'packageTier', 'versions', 'totalAmount', 'approvalStatus'];
+    const user = (req as any).user;
     
     const fields: string[] = [];
     const values: any[] = [];

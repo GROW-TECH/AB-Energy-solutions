@@ -207,15 +207,105 @@ export const ProjectTasksView: React.FC = () => {
         </div>
       </div>
 
-      {/* Task List Table */}
+      {/* Task List: Mobile Cards (< lg) & Desktop Table (>= lg) */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
-        <div className="overflow-x-auto">
+        {/* Mobile Cards (< lg) */}
+        <div className="lg:hidden divide-y divide-slate-100">
+          {filteredTasks.length === 0 ? (
+            <div className="p-8 text-center text-slate-400">
+              <CheckSquare className="w-10 h-10 mx-auto text-slate-300 mb-2" />
+              <p className="font-medium text-slate-600 text-xs">No project tasks found</p>
+              <p className="text-[11px] text-slate-400">Try changing your filters or create a new task</p>
+            </div>
+          ) : (
+            filteredTasks.map(task => {
+              const isOverdue = !task.isCompleted && new Date(task.dueDate) < new Date();
+              return (
+                <div key={`${task.projectId}-${task.id}`} className="p-4 hover:bg-slate-50 transition-colors space-y-2.5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-2.5 min-w-0">
+                      <button
+                        onClick={() => updateProjectTask(task.projectId, task.id, !task.isCompleted)}
+                        className={`w-6 h-6 mt-0.5 rounded flex items-center justify-center border shrink-0 transition-all ${
+                          task.isCompleted 
+                            ? 'bg-emerald-600 border-emerald-600 text-white shadow-xs' 
+                            : 'border-slate-300 hover:border-emerald-500 bg-white'
+                        }`}
+                        title={task.isCompleted ? 'Mark pending' : 'Mark completed'}
+                      >
+                        {task.isCompleted && <CheckCircle2 className="w-4 h-4 stroke-[3]" />}
+                      </button>
+                      <div className="min-w-0">
+                        <h4 className={`font-semibold text-slate-900 text-xs sm:text-sm ${task.isCompleted ? 'line-through text-slate-400' : ''}`}>
+                          {task.title}
+                        </h4>
+                        <div className="text-[10px] text-slate-400 font-mono mt-0.5">
+                          {task.id} &bull; {task.projectId} ({task.capacityKw} kW)
+                        </div>
+                      </div>
+                    </div>
+
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200 shrink-0">
+                      {task.stage}
+                    </span>
+                  </div>
+
+                  <div className="p-2.5 bg-slate-50 rounded-xl text-xs space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-slate-400 uppercase font-semibold">Customer</span>
+                      <span className="font-medium text-slate-800 text-[11px] truncate max-w-[200px]">{task.customerName}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-slate-400 uppercase font-semibold">Assigned To</span>
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-5 h-5 rounded-full bg-slate-200 flex items-center justify-center text-[9px] font-bold text-slate-700">
+                          {task.assignedToName.charAt(0)}
+                        </div>
+                        <span className="font-medium text-slate-800 text-[11px]">{task.assignedToName}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between pt-1 border-t border-slate-200/60">
+                      <span className="text-[10px] text-slate-400 uppercase font-semibold">Due Date</span>
+                      <div className="flex items-center gap-1">
+                        <Calendar className={`w-3 h-3 ${isOverdue ? 'text-red-500' : 'text-slate-400'}`} />
+                        <span className={`font-semibold text-[11px] ${isOverdue ? 'text-red-600' : 'text-slate-700'}`}>
+                          {task.dueDate}
+                        </span>
+                        {isOverdue && (
+                          <span className="text-[9px] font-bold text-red-600 ml-1">
+                            (Overdue)
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end pt-1">
+                    <button
+                      onClick={() => updateProjectTask(task.projectId, task.id, !task.isCompleted)}
+                      className={`w-full py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer text-center ${
+                        task.isCompleted
+                          ? 'text-slate-600 bg-slate-100 hover:bg-slate-200'
+                          : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200'
+                      }`}
+                    >
+                      {task.isCompleted ? 'Reopen Task' : 'Mark Completed'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Desktop Table (>= lg) */}
+        <div className="hidden lg:block overflow-x-auto">
           <table className="w-full text-left text-xs text-slate-600">
             <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200 uppercase text-[11px] tracking-wider">
               <tr>
                 <th className="py-3.5 px-4 w-12 text-center">Status</th>
                 <th className="py-3.5 px-4">Task Details</th>
-                <th className="py-3.5 px-4">Project & Customer</th>
+                <th className="py-3.5 px-4">Project &amp; Customer</th>
                 <th className="py-3.5 px-4">Project Stage</th>
                 <th className="py-3.5 px-4">Assigned To</th>
                 <th className="py-3.5 px-4">Due Date</th>

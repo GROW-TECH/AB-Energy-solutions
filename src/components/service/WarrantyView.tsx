@@ -110,8 +110,60 @@ export const WarrantyView: React.FC = () => {
         </div>
       </div>
 
-      {/* Main High-Density Table */}
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+      {/* Warranties Mobile Cards (< lg) */}
+      <div className="lg:hidden divide-y divide-slate-100 bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+        {filteredWarranties.length === 0 ? (
+          <div className="py-12 text-center text-slate-500">
+            <ShieldCheck className="w-8 h-8 text-emerald-500 mx-auto mb-2 opacity-80" />
+            <p className="font-bold text-sm text-slate-800">No Warranties Registered</p>
+            <p className="text-xs text-slate-400 mt-1 max-w-xs mx-auto">
+              {searchTerm
+                ? 'No warranties matched your search.'
+                : 'Warranties will auto-generate once a project is commissioned.'}
+            </p>
+          </div>
+        ) : (
+          filteredWarranties.map(w => (
+            <div key={w.id} className="p-4 hover:bg-slate-50/80 transition-colors space-y-2.5">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                    {w.status}
+                  </span>
+                  <h4 className="font-bold text-slate-900 text-sm mt-1">{w.equipmentType}</h4>
+                  <p className="text-xs text-slate-500 font-medium">{w.makeModel}</p>
+                </div>
+                <span className="font-mono text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded text-[11px] font-bold shrink-0">
+                  {w.serialNumber}
+                </span>
+              </div>
+
+              <div className="text-xs space-y-1 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500 font-medium">Customer:</span>
+                  <span className="font-semibold text-slate-900">{w.customerName}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500 font-medium">Project ID:</span>
+                  <span className="font-mono text-slate-700">{w.projectId}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500 font-medium">Coverage:</span>
+                  <span className="font-bold text-slate-800">{w.warrantyPeriodYears} Years OEM</span>
+                </div>
+                <div className="flex items-center justify-between pt-1 border-t border-slate-200/60">
+                  <span className="text-slate-500 font-medium">Expiry Date:</span>
+                  <span className="font-mono font-semibold text-slate-700">{w.endDate}</span>
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Main High-Density Table (Desktop >= lg) */}
+      <div className="hidden lg:block bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs text-slate-600">
             <thead className="bg-slate-50/90 uppercase font-extrabold text-[10px] text-slate-500 border-b border-slate-200 tracking-wider">

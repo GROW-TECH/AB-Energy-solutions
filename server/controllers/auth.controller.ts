@@ -119,13 +119,21 @@ export const login = async (req: Request, res: Response) => {
     loginRateLimitMap.delete(ip);
 
     // Issue signed JWT token valid for 24 hours
+    let userPhone = null;
+    const targetEmpId = user.employee_id || user.id;
+    if (targetEmpId) {
+      const [empP]: any = await pool.query(`SELECT phone FROM employees WHERE id = ? OR username = ? OR email = ? LIMIT 1`, [targetEmpId, user.username || '', user.email || '']);
+      if (empP && empP.length > 0) userPhone = empP[0].phone;
+    }
+
     const tokenPayload = {
       userId: user.id,
       username: user.username,
       email: user.email,
       name: user.name,
       role: user.role,
-      employeeId: user.employee_id,
+      phone: userPhone,
+      employeeId: user.employee_id || (user.role !== 'Customer' ? user.id : null),
       customerId: user.customer_id,
     };
 
@@ -149,9 +157,21 @@ export const getMe = async (req: Request, res: Response) => {
       return res.status(401).json({ success: false, error: 'Unauthenticated.' });
     }
 
+    const userObj = { ...req.user };
+    if (!userObj.phone && (userObj.employeeId || userObj.userId)) {
+      const [empP]: any = await pool.query(
+        `SELECT phone, name FROM employees WHERE id = ? OR id = ? OR email = ? LIMIT 1`,
+        [userObj.employeeId, userObj.userId, userObj.email || '']
+      );
+      if (empP && empP.length > 0) {
+        userObj.phone = empP[0].phone;
+        if (!userObj.name) userObj.name = empP[0].name;
+      }
+    }
+
     res.json({
       success: true,
-      user: req.user,
+      user: userObj,
     });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });

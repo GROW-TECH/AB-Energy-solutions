@@ -195,8 +195,67 @@ export const ExpensesView: React.FC = () => {
         </div>
       </div>
 
-      {/* Expenses Table */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+      {/* Expenses Mobile Cards (< lg) */}
+      <div className="lg:hidden divide-y divide-slate-100 bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+        {filteredExpenses.length === 0 ? (
+          <div className="py-12 text-center text-slate-400">
+            <DollarSign className="w-10 h-10 mx-auto text-slate-300 mb-2" />
+            <p className="font-medium text-slate-600">No expense records found</p>
+          </div>
+        ) : (
+          filteredExpenses.map(exp => (
+            <div key={exp.id} className="p-4 hover:bg-slate-50/80 transition-colors space-y-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-mono text-[10px] text-slate-400 font-semibold">{exp.expenseNumber}</span>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                      exp.status === 'Paid' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                      exp.status === 'Reimbursed' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                      'bg-amber-50 text-amber-700 border-amber-200'
+                    }`}>
+                      {exp.status}
+                    </span>
+                  </div>
+                  <h4 className="font-bold text-slate-900 text-sm mt-1 truncate">{exp.title}</h4>
+                  <div className="text-[11px] text-slate-400 mt-0.5">
+                    {exp.paymentDate} • {exp.paymentMode}
+                  </div>
+                </div>
+
+                <div className="text-right shrink-0">
+                  <div className="font-bold text-slate-900 text-sm font-mono">
+                    ₹{exp.totalAmount.toLocaleString('en-IN')}
+                  </div>
+                  {exp.taxAmount > 0 && (
+                    <div className="text-[10px] text-slate-400">
+                      GST ₹{exp.taxAmount.toLocaleString('en-IN')}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="text-xs space-y-1 bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500 font-medium">Category:</span>
+                  <span className="font-semibold text-slate-800">{exp.category}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500 font-medium">Project:</span>
+                  <span className="font-semibold text-slate-900 truncate max-w-[180px]">{exp.projectName || exp.projectId || 'General Overhead'}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500 font-medium">Vendor / Payee:</span>
+                  <span className="font-semibold text-slate-800 truncate max-w-[180px]">{exp.vendorName}</span>
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Expenses Table (Desktop >= lg) */}
+      <div className="hidden lg:block bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs text-slate-600">
             <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200 uppercase text-[11px] tracking-wider">

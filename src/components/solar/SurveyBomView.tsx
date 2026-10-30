@@ -520,124 +520,205 @@ export const SurveyBomView: React.FC<SurveyBomViewProps> = ({
                 </p>
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs divide-y divide-slate-200">
-                  <thead className="bg-slate-50 text-slate-700 font-bold text-[11px] uppercase tracking-wider">
-                    <tr>
-                      <th className="p-4">Customer &amp; Lead</th>
-                      <th className="p-4">Survey Details</th>
-                      <th className="p-4">System Capacity</th>
-                      <th className="p-4">Rooftop Type</th>
-                      <th className="p-4">Survey Status</th>
-                      <th className="p-4">Material Status</th>
-                      <th className="p-4 text-right">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {eligibleSurveys.map(srv => {
-                      const bom = bomsMap[srv.id];
-                      const hasBom = !!bom;
-                      const status = bom?.status || 'Pending';
+              <>
+                {/* Mobile Cards (< lg) */}
+                <div className="lg:hidden divide-y divide-slate-100">
+                  {eligibleSurveys.map(srv => {
+                    const bom = bomsMap[srv.id];
+                    const hasBom = !!bom;
+                    const status = bom?.status || 'Pending';
 
-                      return (
-                        <tr key={srv.id} className="hover:bg-slate-50/80 transition-colors">
-                          <td className="p-4">
-                            <div className="font-bold text-slate-900 text-sm">{srv.customerName}</div>
-                            <div className="text-[11px] text-slate-500 flex items-center gap-1.5 mt-0.5">
-                              <Building className="w-3.5 h-3.5 text-slate-400" />
+                    return (
+                      <div key={srv.id} className="p-4 hover:bg-slate-50/80 transition-colors space-y-2.5">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <h4 className="font-bold text-slate-900 text-sm truncate">{srv.customerName}</h4>
+                            <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1.5 mt-0.5">
+                              <span>{srv.id}</span>
+                              <span>&bull;</span>
                               <span>{srv.leadName}</span>
                             </div>
-                          </td>
+                          </div>
+                          <span className="font-bold font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded text-xs shrink-0">
+                            {srv.recommendedKw || 5} kWp
+                          </span>
+                        </div>
 
-                          <td className="p-4">
-                            <div className="font-mono font-semibold text-slate-700">{srv.id}</div>
-                            <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
-                              <Phone className="w-3 h-3 text-slate-400" />
-                              <span>{srv.phone}</span>
-                            </div>
-                          </td>
-
-                          <td className="p-4">
-                            <span className="font-bold font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-lg text-xs">
-                              {srv.recommendedKw || 5} kWp
-                            </span>
-                          </td>
-
-                          <td className="p-4 text-slate-700 font-medium">
-                            <div>{srv.roofType || 'RCC Flat Terrace'}</div>
-                            <div className="text-[11px] text-slate-400 truncate max-w-[200px]">{srv.address}</div>
-                          </td>
-
-                          <td className="p-4">
-                            {srv.status === 'Approved' ? (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-full text-[10px] font-bold">
-                                <ShieldCheck className="w-3 h-3 text-emerald-600" />
-                                <span>Approved by PM</span>
-                              </span>
-                            ) : srv.status === 'Submitted for Review' ? (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-50 text-blue-800 border border-blue-200 rounded-full text-[10px] font-bold">
-                                <Clock className="w-3 h-3 text-blue-600" />
-                                <span>Pending PM Review</span>
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-[10px] font-bold">
-                                <CheckCircle2 className="w-3 h-3" />
-                                <span>Survey Completed</span>
-                              </span>
-                            )}
-                          </td>
-
-                          <td className="p-4">
+                        <div className="p-2.5 bg-slate-50 rounded-xl text-xs space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] text-slate-400 uppercase font-semibold">Phone</span>
+                            <span className="font-mono text-slate-700 text-[11px]">{srv.phone}</span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] text-slate-400 uppercase font-semibold">Roof Type</span>
+                            <span className="font-medium text-slate-700 text-[11px]">{srv.roofType || 'RCC Flat Terrace'}</span>
+                          </div>
+                          <div className="flex items-center justify-between pt-1 border-t border-slate-200/60">
+                            <span className="text-[10px] text-slate-400 uppercase font-semibold">Material Status</span>
                             {!hasBom || status === 'Draft' ? (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
-                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                                <span>Need material update</span>
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                                Need material update
                               </span>
                             ) : status === 'Submitted' ? (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
-                                <Clock className="w-3 h-3" />
-                                <span>BOM Under PM Review</span>
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                                BOM Under PM Review
                               </span>
                             ) : status === 'Approved' ? (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
-                                <ShieldCheck className="w-3 h-3" />
-                                <span>BOM Approved by PM</span>
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                BOM Approved by PM
                               </span>
                             ) : (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
-                                <AlertTriangle className="w-3 h-3" />
-                                <span>Changes Requested</span>
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                                Changes Requested
                               </span>
                             )}
-                          </td>
+                          </div>
+                        </div>
 
-                          <td className="p-4 text-right">
-                            <button
-                              onClick={() => handleOpenBomBuilder(srv)}
-                              className={`px-4 py-2 font-bold rounded-xl text-xs transition-colors cursor-pointer inline-flex items-center gap-1.5 shadow-xs ${
-                                status === 'Submitted' || status === 'Approved'
-                                  ? 'bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300'
-                                  : 'bg-slate-900 hover:bg-emerald-700 text-white'
-                              }`}
-                            >
-                              <span>
-                                {!hasBom || status === 'Draft' 
-                                  ? 'Configure BOM' 
-                                  : status === 'Submitted' 
-                                    ? '🔒 View Locked BOM' 
-                                    : status === 'Approved' 
-                                      ? '✅ View Approved BOM' 
-                                      : 'Edit BOM'}
+                        <button
+                          onClick={() => handleOpenBomBuilder(srv)}
+                          className={`w-full py-2 font-bold rounded-xl text-xs transition-colors cursor-pointer inline-flex items-center justify-center gap-1.5 shadow-xs ${
+                            status === 'Submitted' || status === 'Approved'
+                              ? 'bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300'
+                              : 'bg-slate-900 hover:bg-emerald-700 text-white'
+                          }`}
+                        >
+                          <span>
+                            {!hasBom || status === 'Draft' 
+                              ? 'Configure BOM' 
+                              : status === 'Submitted' 
+                                ? '🔒 View Locked BOM' 
+                                : status === 'Approved' 
+                                  ? '✅ View Approved BOM' 
+                                  : 'Edit BOM'}
+                          </span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Desktop Table (>= lg) */}
+                <div className="hidden lg:block overflow-x-auto">
+                  <table className="w-full text-left text-xs divide-y divide-slate-200">
+                    <thead className="bg-slate-50 text-slate-700 font-bold text-[11px] uppercase tracking-wider">
+                      <tr>
+                        <th className="p-4">Customer &amp; Lead</th>
+                        <th className="p-4">Survey Details</th>
+                        <th className="p-4">System Capacity</th>
+                        <th className="p-4">Rooftop Type</th>
+                        <th className="p-4">Survey Status</th>
+                        <th className="p-4">Material Status</th>
+                        <th className="p-4 text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {eligibleSurveys.map(srv => {
+                        const bom = bomsMap[srv.id];
+                        const hasBom = !!bom;
+                        const status = bom?.status || 'Pending';
+
+                        return (
+                          <tr key={srv.id} className="hover:bg-slate-50/80 transition-colors">
+                            <td className="p-4">
+                              <div className="font-bold text-slate-900 text-sm">{srv.customerName}</div>
+                              <div className="text-[11px] text-slate-500 flex items-center gap-1.5 mt-0.5">
+                                <Building className="w-3.5 h-3.5 text-slate-400" />
+                                <span>{srv.leadName}</span>
+                              </div>
+                            </td>
+
+                            <td className="p-4">
+                              <div className="font-mono font-semibold text-slate-700">{srv.id}</div>
+                              <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
+                                <Phone className="w-3 h-3 text-slate-400" />
+                                <span>{srv.phone}</span>
+                              </div>
+                            </td>
+
+                            <td className="p-4">
+                              <span className="font-bold font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-lg text-xs">
+                                {srv.recommendedKw || 5} kWp
                               </span>
-                              <ArrowRight className="w-3.5 h-3.5" />
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                            </td>
+
+                            <td className="p-4 text-slate-700 font-medium">
+                              <div>{srv.roofType || 'RCC Flat Terrace'}</div>
+                              <div className="text-[11px] text-slate-400 truncate max-w-[200px]">{srv.address}</div>
+                            </td>
+
+                            <td className="p-4">
+                              {srv.status === 'Approved' ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-full text-[10px] font-bold">
+                                  <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                                  <span>Approved by PM</span>
+                                </span>
+                              ) : srv.status === 'Submitted for Review' ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-50 text-blue-800 border border-blue-200 rounded-full text-[10px] font-bold">
+                                  <Clock className="w-3 h-3 text-blue-600" />
+                                  <span>Pending PM Review</span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-[10px] font-bold">
+                                  <CheckCircle2 className="w-3 h-3" />
+                                  <span>Survey Completed</span>
+                                </span>
+                              )}
+                            </td>
+
+                            <td className="p-4">
+                              {!hasBom || status === 'Draft' ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                                  <span>Need material update</span>
+                                </span>
+                              ) : status === 'Submitted' ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                                  <Clock className="w-3 h-3" />
+                                  <span>BOM Under PM Review</span>
+                                </span>
+                              ) : status === 'Approved' ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                  <ShieldCheck className="w-3 h-3" />
+                                  <span>BOM Approved by PM</span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                                  <AlertTriangle className="w-3 h-3" />
+                                  <span>Changes Requested</span>
+                                </span>
+                              )}
+                            </td>
+
+                            <td className="p-4 text-right">
+                              <button
+                                onClick={() => handleOpenBomBuilder(srv)}
+                                className={`px-4 py-2 font-bold rounded-xl text-xs transition-colors cursor-pointer inline-flex items-center gap-1.5 shadow-xs ${
+                                  status === 'Submitted' || status === 'Approved'
+                                    ? 'bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300'
+                                    : 'bg-slate-900 hover:bg-emerald-700 text-white'
+                                }`}
+                              >
+                                <span>
+                                  {!hasBom || status === 'Draft' 
+                                    ? 'Configure BOM' 
+                                    : status === 'Submitted' 
+                                      ? '🔒 View Locked BOM' 
+                                      : status === 'Approved' 
+                                        ? '✅ View Approved BOM' 
+                                        : 'Edit BOM'}
+                                </span>
+                                <ArrowRight className="w-3.5 h-3.5" />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </>
             )}
           </div>
         </div>

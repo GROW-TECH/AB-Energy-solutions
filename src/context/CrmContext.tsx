@@ -76,7 +76,7 @@ interface CrmContextType {
   updateProject: (id: string, updates: Partial<Project>) => void;
   assignProject: (projectId: string, installationLeadId: string, installationLeadName: string) => void;
   autoAssignAllProjects: () => { assignedCount: number; crewCount: number };
-  qualifyLead: (leadId: string, surveyOptions?: { engineerId?: string; engineerName?: string; scheduledDate?: string; scheduledTime?: string; notes?: string }) => void;
+  qualifyLead: (leadId: string, surveyOptions?: { engineerId?: string; engineerName?: string; scheduledDate?: string; scheduledTime?: string; notes?: string; leadData?: any }) => Promise<{ success: boolean; error?: string }>;
   createSiteSurvey: (surveyData: Partial<SiteSurvey>) => SiteSurvey;
   completeSiteSurvey: (surveyId: string, updates: Partial<SiteSurvey>) => void;
   saveSurveyDraft: (surveyId: string, updates: Partial<SiteSurvey>) => Promise<SiteSurvey | null>;
@@ -93,7 +93,7 @@ interface CrmContextType {
   deleteSurveyPhoto: (surveyId: string, photoId: string) => Promise<boolean>;
   submitSurveyForReview: (surveyId: string, comments?: string, bypassWithExceptions?: boolean, updates?: Partial<SiteSurvey>) => Promise<{ success: boolean; error?: string; checklistErrors?: string[] }>;
   reviewSurveyAction: (surveyId: string, decision: 'Approved' | 'Changes Required', comments: string) => Promise<{ success: boolean; error?: string; quotation?: any; quotationError?: string | null }>;
-  rescheduleSurveyAction: (surveyId: string, newDate: string, newTime?: string, engineerId?: string, engineerName?: string) => Promise<void>;
+  rescheduleSurveyAction: (surveyId: string, newDate: string, newTime?: string, engineerId?: string, engineerName?: string) => Promise<{ success: boolean; error?: string }>;
   deleteSiteSurvey: (surveyId: string) => Promise<{ success: boolean; error?: string }>;
   reloadSurvey: (surveyId: string) => Promise<SiteSurvey | null>;
   createQuotation: (quoteData: Partial<Quotation>) => Quotation;
@@ -817,7 +817,7 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // 2. AUTOMATION: Qualify Lead -> Auto-schedule Site Survey (RULE-02)
-  const qualifyLead = (
+  const qualifyLead = async (
     leadId: string, 
     surveyOptions?: { 
       engineerId?: string; 
@@ -827,27 +827,70 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       notes?: string;
       leadData?: Partial<Lead>;
     }
-  ) => {
+  ): Promise<{ success: boolean; error?: string }> => {
     let lead = leads.find(l => l.id === leadId) || (surveyOptions?.leadData ? (surveyOptions.leadData as Lead) : undefined);
-    if (!lead) return;
+    if (!lead) return { success: false, error: 'Lead not found' };
 
     // Protection against duplicate survey creation
     if (lead.surveyId) {
       const existing = surveys.find(s => s.id === lead.surveyId || s.leadId === lead.id);
       if (existing) {
         console.warn('Site survey already exists for this lead:', lead.surveyId);
-        return;
+        return { success: true };
       }
     }
 
     let surveyEng = employees.find(e => e.id === surveyOptions?.engineerId);
+    if (!surveyEng && surveyOptions?.engineerName) {
+      surveyEng = employees.find(e => e.name.toLowerCase() === surveyOptions.engineerName?.toLowerCase());
+    }
+    if (!surveyEng && surveyOptions?.engineerId) {
+      surveyEng = {
+        id: surveyOptions.engineerId,
+        name: surveyOptions.engineerName || 'Field Engineer',
+        email: 'field@abenergy.in',
+        phone: '+91 98450 00000',
+        role: 'Survey Engineer',
+        department: 'Engineering',
+        activeLeadsCount: 0,
+        completedProjectsCount: 0,
+      };
+    }
     if (!surveyEng) {
-      surveyEng = employees.find(e => e.role === 'Survey Engineer') || employees[2];
+      surveyEng = employees.find(e => e.role === 'Survey Engineer');
+    }
+    if (!surveyEng) {
+      surveyEng = employees[2] || {
+        id: 'EMP-03',
+        name: 'Field Engineer',
+        email: 'field@abenergy.in',
+        phone: '+91 98450 00000',
+        role: 'Survey Engineer',
+        department: 'Engineering',
+        activeLeadsCount: 0,
+        completedProjectsCount: 0,
+      };
+    }
+
+    const scheduledDate = surveyOptions?.scheduledDate || new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0];
+    const scheduledTime = surveyOptions?.scheduledTime || '10:00 AM - 12:00 PM';
+
+    // Verify slot conflict before proceeding
+    const conflicting = surveys.find(s =>
+      s.leadId !== lead.id &&
+      s.status !== 'Cancelled' &&
+      s.status !== 'Rejected' &&
+      s.scheduledDate === scheduledDate &&
+      s.scheduledTime === scheduledTime &&
+      (s.engineerId === surveyEng.id || s.engineerName === surveyEng.name)
+    );
+    if (conflicting) {
+      const errMsg = `Slot Conflict: ${surveyEng.name} is already booked for ${conflicting.customerName} on ${scheduledDate} during ${scheduledTime}.`;
+      console.warn(errMsg);
+      return { success: false, error: errMsg };
     }
 
     const surveyId = lead.surveyId || `SRV-2026-${String(surveys.length + 1).padStart(3, '0')}`;
-    const scheduledDate = surveyOptions?.scheduledDate || new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0];
-    const scheduledTime = surveyOptions?.scheduledTime || '10:00 AM - 12:00 PM';
 
     const newSurvey: SiteSurvey = {
       id: surveyId,
@@ -881,15 +924,24 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       notes: surveyOptions?.notes || 'Scheduled site audit. Inspect shadow obstructions, laser measure roof area, and verify LT meter board.',
     };
 
+    // Persist Site Survey to MySQL with error validation
+    try {
+      const res = await authFetch('/api/surveys', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newSurvey)
+      });
+      const data = await res.json();
+      if (!data.success) {
+        return { success: false, error: data.error || 'Failed to schedule survey' };
+      }
+    } catch (err: any) {
+      console.error('Failed to save survey to MySQL:', err);
+      return { success: false, error: err.message || 'Network error while scheduling survey' };
+    }
+
     setSurveys(prev => [newSurvey, ...prev]);
     updateLead(lead.id, { status: 'Site Survey Scheduled', surveyId });
-
-    // Persist Site Survey to MySQL
-    authFetch('/api/surveys', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newSurvey)
-    }).catch(err => console.error('Failed to save survey to MySQL:', err));
 
     addAutomationLog(
       'Schedule Site Survey on Lead Qualification',
@@ -899,8 +951,9 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       `Created Site Survey ${surveyId} assigned to ${surveyEng.name} for ${scheduledDate} (${scheduledTime}).`
     );
 
-    addTimelineItem('Lead', lead.id, 'Lead Qualified → Site Survey Scheduled', `Assigned to ${surveyEng.name}. Date: ${scheduledDate} (${scheduledTime}).`, 'Automation Engine', 'survey');
+    addTimelineItem('Lead', lead.id, 'Lead Qualified -> Site Survey Scheduled', `Assigned to ${surveyEng.name}. Date: ${scheduledDate} (${scheduledTime}).`, 'Automation Engine', 'survey');
     addNotification('Site Survey Scheduled', `Survey for ${lead.name} assigned to ${surveyEng.name} on ${scheduledDate} (${scheduledTime}).`, 'Task', surveyId, 'Survey');
+    return { success: true };
   };
 
   const createSiteSurvey = (surveyData: Partial<SiteSurvey>): SiteSurvey => {
@@ -1082,7 +1135,7 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const rescheduleSurveyAction = async (surveyId: string, newDate: string, newTime?: string, engineerId?: string, engineerName?: string) => {
+  const rescheduleSurveyAction = async (surveyId: string, newDate: string, newTime?: string, engineerId?: string, engineerName?: string): Promise<{ success: boolean; error?: string }> => {
     try {
       const res = await authFetch(`/api/surveys/${surveyId}/reschedule`, {
         method: 'POST',
@@ -1090,17 +1143,23 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         body: JSON.stringify({ scheduledDate: newDate, scheduledTime: newTime, engineerId, engineerName }),
       });
       const data = await res.json();
-      if (data.success && data.survey) {
+      if (!data.success) {
+        return { success: false, error: data.error || 'Failed to reschedule survey' };
+      }
+      if (data.survey) {
         setSurveys(prev => prev.map(s => s.id === surveyId ? { 
           ...s, 
           scheduledDate: newDate, 
           scheduledTime: newTime || s.scheduledTime, 
+          engineerId: engineerId || s.engineerId,
           engineerName: engineerName || s.engineerName 
         } : s));
         addTimelineItem('Lead', data.survey.leadId || surveyId, 'Survey Rescheduled', `Rescheduled to ${newDate} (${newTime || 'Standard Slot'}).`, 'System', 'survey');
       }
-    } catch (err) {
+      return { success: true };
+    } catch (err: any) {
       console.error('Failed to reschedule survey:', err);
+      return { success: false, error: err.message || 'Network error while rescheduling survey' };
     }
   };
 

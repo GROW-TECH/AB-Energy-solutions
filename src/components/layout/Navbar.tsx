@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { 
   Search, Bell, Plus, Sun, ShieldCheck, User, 
-  RotateCcw, CheckCircle2, AlertTriangle, X, Menu, LogOut
+  RotateCcw, CheckCircle2, AlertTriangle, X, Menu, LogOut, Phone
 } from 'lucide-react';
 import { useCrm } from '../../context/CrmContext';
 import { Role } from '../../types';
+import { UserProfileModal } from '../modals/UserProfileModal';
 
 interface NavbarProps {
   onOpenNewLead: () => void;
@@ -30,6 +31,19 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenNewLead, onOpenSearch, onO
   const [showNotifications, setShowNotifications] = useState(false);
   const [showRoleDropdown, setShowRoleDropdown] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+
+  // Close popups on Escape key
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowNotifications(false);
+        setShowRoleDropdown(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
   const activeRulesCount = automationRules.filter(r => r.isActive).length;
@@ -52,7 +66,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenNewLead, onOpenSearch, onO
   ];
 
   return (
-    <header className="h-14 sm:h-16 bg-white border-b border-slate-200/80 sticky top-0 z-30 flex items-center justify-between px-2.5 sm:px-6 shadow-xs">
+    <header className="h-[calc(3.5rem+max(env(safe-area-inset-top,0px),28px))] sm:h-16 pt-[max(env(safe-area-inset-top,0px),28px)] sm:pt-0 bg-white border-b border-slate-200/80 sticky top-0 z-30 flex items-center justify-between px-2.5 sm:px-6 shadow-xs">
       {/* Left: Search Bar Trigger or Customer Branding */}
       <div className="flex items-center gap-1.5 sm:gap-3 min-w-0">
         {onOpenMobileMenu && (
@@ -79,10 +93,10 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenNewLead, onOpenSearch, onO
           <>
             <button 
               onClick={onOpenSearch}
-              className="flex items-center gap-2 sm:gap-3 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm text-slate-500 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors w-36 xs:w-48 sm:w-64 md:w-80 text-left group shrink-0"
+              className="flex items-center gap-1.5 sm:gap-3 px-2 sm:px-3 py-1.5 text-xs sm:text-sm text-slate-500 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors flex-1 max-w-[140px] xs:max-w-[200px] sm:max-w-xs text-left group shrink"
             >
               <Search className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-400 group-hover:text-emerald-600 transition-colors shrink-0" />
-              <span className="flex-1 truncate">Search leads...</span>
+              <span className="flex-1 truncate">Search...</span>
               <kbd className="hidden sm:inline-block px-1.5 py-0.5 text-[10px] font-mono text-slate-400 bg-white border border-slate-200 rounded">
                 ⌘K
               </kbd>
@@ -122,53 +136,70 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenNewLead, onOpenSearch, onO
 
           {/* Notifications Dropdown */}
           {showNotifications && (
-            <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white border border-slate-200 rounded-xl shadow-xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150">
-              <div className="p-3 border-b border-slate-100 flex items-center justify-between bg-slate-50/70">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">Notifications</h3>
-                  {unreadCount > 0 && (
-                    <span className="text-[11px] font-semibold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
-                      {unreadCount} new
-                    </span>
+            <>
+              {/* Click-outside backdrop */}
+              <div 
+                className="fixed inset-0 z-40 bg-slate-900/20 backdrop-blur-[1px] sm:bg-transparent sm:backdrop-blur-none"
+                onClick={() => setShowNotifications(false)}
+              />
+
+              <div className="fixed inset-x-3 top-[calc(3.5rem+max(env(safe-area-inset-top,0px),28px)+8px)] sm:absolute sm:top-full sm:inset-x-auto sm:right-0 sm:mt-2 sm:w-96 bg-white border border-slate-200 rounded-2xl sm:rounded-xl shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 sm:zoom-in-100 duration-150">
+                <div className="p-3 border-b border-slate-100 flex items-center justify-between bg-slate-50/70">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">Notifications</h3>
+                    {unreadCount > 0 && (
+                      <span className="text-[11px] font-semibold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+                        {unreadCount} new
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {unreadCount > 0 && (
+                      <button 
+                        onClick={markAllNotificationsRead}
+                        className="text-[11px] text-emerald-600 hover:text-emerald-700 font-medium cursor-pointer"
+                      >
+                        Mark all read
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setShowNotifications(false)}
+                      className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 rounded-lg transition-colors cursor-pointer"
+                      title="Close (Esc)"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
+                  {notifications.length === 0 ? (
+                    <div className="p-6 text-center text-xs text-slate-400">
+                      No new notifications
+                    </div>
+                  ) : (
+                    notifications.map(notif => (
+                      <div 
+                        key={notif.id}
+                        onClick={() => markNotificationRead(notif.id)}
+                        className={`p-3 text-xs transition-colors cursor-pointer hover:bg-slate-50 flex items-start gap-2.5 ${!notif.isRead ? 'bg-emerald-50/40' : ''}`}
+                      >
+                        <div className={`w-2 h-2 mt-1.5 rounded-full flex-shrink-0 ${!notif.isRead ? 'bg-emerald-500' : 'bg-transparent'}`} />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-1 mb-0.5">
+                            <span className="font-semibold text-slate-800 truncate">{notif.title}</span>
+                            <span className="text-[10px] text-slate-400 flex-shrink-0">
+                              {new Date(notif.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                          <p className="text-slate-600 leading-snug">{notif.message}</p>
+                        </div>
+                      </div>
+                    ))
                   )}
                 </div>
-                {unreadCount > 0 && (
-                  <button 
-                    onClick={markAllNotificationsRead}
-                    className="text-[11px] text-emerald-600 hover:text-emerald-700 font-medium"
-                  >
-                    Mark all read
-                  </button>
-                )}
               </div>
-
-              <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
-                {notifications.length === 0 ? (
-                  <div className="p-6 text-center text-xs text-slate-400">
-                    No new notifications
-                  </div>
-                ) : (
-                  notifications.map(notif => (
-                    <div 
-                      key={notif.id}
-                      onClick={() => markNotificationRead(notif.id)}
-                      className={`p-3 text-xs transition-colors cursor-pointer hover:bg-slate-50 flex items-start gap-2.5 ${!notif.isRead ? 'bg-emerald-50/40' : ''}`}
-                    >
-                      <div className={`w-2 h-2 mt-1.5 rounded-full flex-shrink-0 ${!notif.isRead ? 'bg-emerald-500' : 'bg-transparent'}`} />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-1 mb-0.5">
-                          <span className="font-semibold text-slate-800 truncate">{notif.title}</span>
-                          <span className="text-[10px] text-slate-400 flex-shrink-0">
-                            {new Date(notif.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        </div>
-                        <p className="text-slate-600 leading-snug">{notif.message}</p>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
+            </>
           )}
         </div>
 
@@ -213,7 +244,12 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenNewLead, onOpenSearch, onO
             </button>
 
             {showRoleDropdown && (
-              <div className="absolute right-0 mt-2 w-64 bg-white border border-slate-200 rounded-xl shadow-xl z-50 py-1 divide-y divide-slate-100 animate-in fade-in duration-150">
+              <>
+                <div 
+                  className="fixed inset-0 z-40 bg-slate-900/10 sm:bg-transparent"
+                  onClick={() => setShowRoleDropdown(false)}
+                />
+                <div className="absolute right-0 mt-2 w-64 bg-white border border-slate-200 rounded-xl shadow-xl z-50 py-1 divide-y divide-slate-100 animate-in fade-in duration-150">
                 <div className="px-3 py-2 bg-slate-50/80">
                   <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
                     Demo Preview Mode
@@ -246,17 +282,34 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenNewLead, onOpenSearch, onO
                         setDemoPreviewRole(null);
                         setShowRoleDropdown(false);
                       }}
-                      className="w-full text-center py-1 text-xs font-semibold text-amber-800 hover:bg-amber-100 rounded transition-colors"
+                      className="w-full text-center py-1 text-xs font-semibold text-amber-800 hover:bg-amber-100 rounded transition-colors cursor-pointer"
                     >
                       Exit Preview Mode
                     </button>
                   </div>
                 )}
+                <div className="p-1.5 bg-slate-50 border-t border-slate-100">
+                  <button
+                    onClick={() => {
+                      setShowRoleDropdown(false);
+                      setShowProfileModal(true);
+                    }}
+                    className="w-full text-left px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-200/60 rounded flex items-center gap-2 transition-colors cursor-pointer"
+                  >
+                    <User className="w-3.5 h-3.5 text-slate-500" />
+                    <span>My Profile &amp; Telephony</span>
+                  </button>
+                </div>
               </div>
-            )}
+            </>
+          )}
           </div>
         ) : (
-          <div className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50/80 text-xs text-slate-700 font-medium cursor-default">
+          <button
+            onClick={() => setShowProfileModal(true)}
+            title="Open User Profile &amp; Telephony Tracking"
+            className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50/80 hover:bg-slate-100/90 text-xs text-slate-700 font-medium cursor-pointer transition-colors shadow-2xs"
+          >
             <div className="w-5 h-5 rounded-full bg-slate-900 text-emerald-400 flex items-center justify-center font-bold text-[10px]">
               {currentUser?.role?.slice(0, 2).toUpperCase() || 'US'}
             </div>
@@ -264,7 +317,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenNewLead, onOpenSearch, onO
               <span className="hidden md:inline font-bold text-slate-900">{currentUser?.name || currentUser?.username}</span>
               <span className="text-[10px] text-slate-500 font-semibold">{currentUser?.role}</span>
             </div>
-          </div>
+          </button>
         )}
 
         {/* Demo Data Reset Button (Super Admin only) */}
@@ -272,7 +325,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenNewLead, onOpenSearch, onO
           <button
             onClick={() => setShowResetConfirm(true)}
             title="Reset Demo Data to Initial State"
-            className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+            className="hidden sm:block p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
           >
             <RotateCcw className="w-4 h-4" />
           </button>
@@ -320,6 +373,12 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenNewLead, onOpenSearch, onO
           </div>
         </div>
       )}
+
+      {/* User Profile & Telephony Modal */}
+      <UserProfileModal 
+        isOpen={showProfileModal} 
+        onClose={() => setShowProfileModal(false)} 
+      />
     </header>
   );
 };

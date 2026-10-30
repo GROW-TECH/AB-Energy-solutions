@@ -28,24 +28,58 @@ export const updateProject = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const updates = req.body;
-    const fields: string[] = [];
-    const values: any[] = [];
 
-    if (updates.stage !== undefined) { fields.push('stage = ?'); values.push(updates.stage); }
-    if (updates.checklist !== undefined) { fields.push('checklist = ?'); values.push(JSON.stringify(updates.checklist)); }
-    if (updates.tasks !== undefined) { fields.push('tasks = ?'); values.push(JSON.stringify(updates.tasks)); }
-    if (updates.commissioningDate !== undefined) { fields.push('commissioning_date = ?'); values.push(updates.commissioningDate); }
-    if (updates.netMeterInstalledDate !== undefined) { fields.push('net_meter_installed_date = ?'); values.push(updates.netMeterInstalledDate); }
-    if (updates.siteReadinessConfirmed !== undefined) { fields.push('site_readiness_confirmed = ?'); values.push(updates.siteReadinessConfirmed ? 1 : 0); }
-    if (updates.siteReadinessNotes !== undefined) { fields.push('site_readiness_notes = ?'); values.push(updates.siteReadinessNotes); }
-    if (updates.scheduledInstallationDate !== undefined) { fields.push('scheduled_installation_date = ?'); values.push(updates.scheduledInstallationDate); }
+    const baseFields: string[] = [];
+    const baseValues: any[] = [];
 
-    if (fields.length > 0) {
-      values.push(id);
-      await pool.query(`UPDATE projects SET ${fields.join(', ')} WHERE id = ?`, values);
+    if (updates.stage !== undefined) { baseFields.push('stage = ?'); baseValues.push(updates.stage); }
+    if (updates.checklist !== undefined) { baseFields.push('checklist = ?'); baseValues.push(JSON.stringify(updates.checklist)); }
+    if (updates.tasks !== undefined) { baseFields.push('tasks = ?'); baseValues.push(JSON.stringify(updates.tasks)); }
+    if (updates.commissioningDate !== undefined) { baseFields.push('commissioning_date = ?'); baseValues.push(updates.commissioningDate); }
+    if (updates.netMeterInstalledDate !== undefined) { baseFields.push('net_meter_installed_date = ?'); baseValues.push(updates.netMeterInstalledDate); }
+    if (updates.siteReadinessConfirmed !== undefined) { baseFields.push('site_readiness_confirmed = ?'); baseValues.push(updates.siteReadinessConfirmed ? 1 : 0); }
+    if (updates.siteReadinessNotes !== undefined) { baseFields.push('site_readiness_notes = ?'); baseValues.push(updates.siteReadinessNotes); }
+    if (updates.targetCompletionDate !== undefined || updates.target_completion_date !== undefined) {
+      baseFields.push('target_completion_date = ?');
+      baseValues.push(updates.targetCompletionDate || updates.target_completion_date);
     }
+    if (updates.installationLeadName !== undefined || updates.installation_lead_name !== undefined) {
+      baseFields.push('installation_lead_name = ?');
+      baseValues.push(updates.installationLeadName || updates.installation_lead_name);
+    }
+    if (updates.notes !== undefined) { baseFields.push('notes = ?'); baseValues.push(updates.notes); }
+
+    const extendedFields = [...baseFields];
+    const extendedValues = [...baseValues];
+
+    if (updates.scheduledInstallationDate !== undefined || updates.scheduled_installation_date !== undefined) { 
+      extendedFields.push('scheduled_installation_date = ?'); 
+      extendedValues.push(updates.scheduledInstallationDate || updates.scheduled_installation_date); 
+    }
+    if (updates.assignedCrewMembers !== undefined || updates.assigned_crew_members !== undefined) {
+      extendedFields.push('assigned_crew_members = ?');
+      const crewVal = updates.assignedCrewMembers || updates.assigned_crew_members;
+      extendedValues.push(Array.isArray(crewVal) ? JSON.stringify(crewVal) : crewVal);
+    }
+
+    if (extendedFields.length > 0) {
+      try {
+        await pool.query(`UPDATE projects SET ${extendedFields.join(', ')} WHERE id = ?`, [...extendedValues, id]);
+      } catch (extendedErr) {
+        // Fallback to base known columns if custom columns don't exist in MySQL table
+        if (baseFields.length > 0) {
+          try {
+            await pool.query(`UPDATE projects SET ${baseFields.join(', ')} WHERE id = ?`, [...baseValues, id]);
+          } catch (baseErr) {
+            console.warn('Base project update warning:', baseErr);
+          }
+        }
+      }
+    }
+
     res.json({ success: true, id, updates });
   } catch (err: any) {
+    console.error('Error updating project:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 };

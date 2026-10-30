@@ -30,7 +30,7 @@ export const InstallationView: React.FC = () => {
   // Field Attendance State
   const [attendanceMode, setAttendanceMode] = useState<'solo' | 'team'>('solo');
   const [siteLeadName, setSiteLeadName] = useState(currentUser?.name || 'Muthu Vel');
-  const [teamMembersInput, setTeamMembersInput] = useState('Rahul (Fitter), Suresh (Electrician), Imran (Rigger)');
+  const [teamMembersInput, setTeamMembersInput] = useState('Karthik Mani (Inverter & Wiring), Saravanan Perumal (Earthing & BOS), Rajesh Varma (Structure & Foundation), Vijay Anand (Safety & QA)');
   const [attendanceGps, setAttendanceGps] = useState<{ lat?: number; lng?: number } | null>(null);
   const [isCheckingIn, setIsCheckingIn] = useState(false);
   const [attendanceLoggedToday, setAttendanceLoggedToday] = useState(false);
@@ -485,7 +485,12 @@ export const InstallationView: React.FC = () => {
                     </div>
 
                     <div className="pt-1">
-                      {isSiteReady ? (
+                      {isCompleted ? (
+                        <div className="px-2.5 py-1.5 bg-slate-100 border border-slate-200 rounded-xl text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span>Installation Completed &amp; Commissioned</span>
+                        </div>
+                      ) : isSiteReady ? (
                         <div className="px-2.5 py-1.5 bg-emerald-50 border border-emerald-200 rounded-xl text-[11px] font-bold text-emerald-800 flex items-center gap-1.5">
                           <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                           <span>Site Readiness Cleared (PM Approved)</span>
@@ -501,11 +506,13 @@ export const InstallationView: React.FC = () => {
                     <div className="text-[11px] text-slate-600 flex items-center justify-between">
                       <span className="text-slate-400">Material Status:</span>
                       <span className={`font-bold ${
-                        project.material_readiness_status === 'Fully Received at Site' 
+                        isCompleted
+                          ? 'text-emerald-700'
+                          : project.material_readiness_status === 'Fully Received at Site' 
                           ? 'text-emerald-700' 
                           : 'text-amber-700'
                       }`}>
-                        {project.material_readiness_status || 'In Warehouse'}
+                        {isCompleted ? 'Fully Installed & Commissioned' : (project.material_readiness_status || 'In Warehouse')}
                       </span>
                     </div>
                   </div>
@@ -513,9 +520,13 @@ export const InstallationView: React.FC = () => {
                   <div className="mt-4 pt-3 border-t border-slate-100">
                     <button
                       onClick={() => handleSelectProject(project)}
-                      className="w-full py-2.5 bg-slate-900 hover:bg-emerald-600 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs group-hover:bg-emerald-600"
+                      className={`w-full py-2.5 ${
+                        isCompleted
+                          ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
+                          : 'bg-slate-900 hover:bg-emerald-600 text-white shadow-xs group-hover:bg-emerald-600'
+                      } font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer`}
                     >
-                      <span>Open Site Work Order</span>
+                      <span>{isCompleted ? 'View Work Order Details' : 'Open Site Work Order'}</span>
                       <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
                     </button>
                   </div>
@@ -535,7 +546,7 @@ export const InstallationView: React.FC = () => {
     <div className="space-y-6 animate-in fade-in duration-200">
       {/* Top Navigation & Project Switcher Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2.5">
           <button
             onClick={() => setActiveViewMode('list')}
             className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
@@ -560,7 +571,7 @@ export const InstallationView: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2.5">
           <select
             value={selectedProjectId}
             onChange={e => setSelectedProjectId(e.target.value)}
@@ -702,13 +713,24 @@ export const InstallationView: React.FC = () => {
 
             {attendanceMode === 'team' ? (
               <div>
-                <label className="block text-[11px] font-bold text-slate-700 mb-1">Additional Crew Members</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-[11px] font-bold text-slate-700">Additional Crew Members</label>
+                  {selectedProject?.assigned_crew_members && selectedProject.assigned_crew_members.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setTeamMembersInput(selectedProject.assigned_crew_members!.join(', '))}
+                      className="text-[10px] text-indigo-600 font-bold hover:underline cursor-pointer"
+                    >
+                      Fill Assigned Crew
+                    </button>
+                  )}
+                </div>
                 <input
                   type="text"
                   value={teamMembersInput}
                   onChange={e => setTeamMembersInput(e.target.value)}
                   className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:outline-indigo-500"
-                  placeholder="Comma separated: Suresh (Elec), Rahul (Fitter)"
+                  placeholder="Comma separated: Karthik Mani (Inverter), Saravanan Perumal (Earthing), Rajesh Varma (Structure)"
                 />
               </div>
             ) : (
@@ -720,6 +742,26 @@ export const InstallationView: React.FC = () => {
               </div>
             )}
           </div>
+
+          {/* Today's Checked-in Crew Roster */}
+          {attendanceLogs.length > 0 && (
+            <div className="pt-2 border-t border-slate-100 space-y-1.5">
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                Today's Checked-in Crew Members:
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {attendanceLogs.map((log: any, idx: number) => {
+                  const mList = Array.isArray(log.presentTeamMembers) ? log.presentTeamMembers : [log.siteLeadName];
+                  return mList.map((m: string, mIdx: number) => (
+                    <span key={`${idx}-${mIdx}`} className="px-2.5 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg text-[11px] font-bold flex items-center gap-1">
+                      <Check className="w-3 h-3 text-emerald-600" />
+                      <span>{m} ({log.checkInTime || log.check_in_time || 'Checked In'})</span>
+                    </span>
+                  ));
+                })}
+              </div>
+            </div>
+          )}
 
           <div className="flex items-center justify-between pt-2 border-t border-slate-100">
             <span className="text-[11px] text-slate-400 flex items-center gap-1 font-mono">

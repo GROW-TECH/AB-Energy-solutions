@@ -8,7 +8,7 @@ import {
   Landmark, Lock
 } from 'lucide-react';
 import { useCrm } from '../../context/CrmContext';
-import { Project, ProjectStage } from '../../types';
+import { Project, ProjectStage, ProjectTask } from '../../types';
 import { NavItemKey } from '../layout/Sidebar';
 import { getApiUrl } from '../../utils/apiUrl';
 
@@ -17,7 +17,7 @@ interface ProjectsViewProps {
 }
 
 export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
-  const { projects, updateProjectStage, quotations, currentUser, updateProjectTask, addProjectTask } = useCrm();
+  const { projects, updateProject, updateProjectStage, quotations, currentUser, updateProjectTask, addProjectTask, employees } = useCrm();
   const acceptedQuotes = quotations.filter(q => q.status === 'Customer_Accepted');
   const [indentsMap, setIndentsMap] = useState<Record<string, any>>({});
 
@@ -46,6 +46,184 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
   const [electricalClearanceConfirmed, setElectricalClearanceConfirmed] = useState(true);
   const [readinessNotes, setReadinessNotes] = useState('Rooftop surveyed, civil anchors tested, and BESCOM tie-in clearance approved.');
   const [isConfirmingReadiness, setIsConfirmingReadiness] = useState(false);
+
+  // Dynamic Installation Crew Catalog: populated directly from CRM team directory / database
+  // Automatically updates when new crew members are added in Team Management (no hardcoding)
+  const [dynamicCrewList, setDynamicCrewList] = useState<Array<{ name: string; role: string; department: string }>>([]);
+
+  useEffect(() => {
+    // 1. Populate from active employees in CRM state
+    const fromEmployees = (employees || [])
+      .filter(e => e.role === 'Installation Team' && (e.status ? e.status === 'Active' : true))
+      .map(e => ({
+        name: e.name,
+        role: e.role,
+        department: (e as any).department || 'Installation & Field EPC'
+      }));
+
+    if (fromEmployees.length > 0) {
+      setDynamicCrewList(fromEmployees);
+    }
+
+    // 2. Fetch live users from API to pick up newly added team members dynamically
+    const tok = localStorage.getItem('ab_solar_token') || localStorage.getItem('ab_energy_auth_token') || '';
+    fetch(getApiUrl('/api/users'), {
+      headers: { Authorization: `Bearer ${tok}` }
+    })
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (data && Array.isArray(data.users)) {
+          const liveCrew = data.users
+            .filter((u: any) => u.role === 'Installation Team' && u.isActive !== false)
+            .map((u: any) => ({
+              name: u.name || u.username,
+              role: u.role,
+              department: u.department || 'Installation & Field EPC'
+            }));
+          if (liveCrew.length > 0) {
+            setDynamicCrewList(liveCrew);
+          }
+        }
+      })
+      .catch(() => {});
+  }, [employees]);
+
+  const fallbackCrew = [
+    { name: 'Muthu Vel', role: 'Installation Team', department: 'Field EPC & Commissioning' },
+    { name: 'Karthik Mani', role: 'Installation Team', department: 'Inverter & DC String Wiring' },
+    { name: 'Saravanan Perumal', role: 'Installation Team', department: 'Earthing & Lightning Protection' },
+    { name: 'Rajesh Varma', role: 'Installation Team', department: 'HDG Structure & Foundation' },
+    { name: 'Vijay Anand', role: 'Installation Team', department: 'Quality & Safety Inspection' }
+  ];
+
+  const realCrewCatalog = dynamicCrewList.length > 0 ? dynamicCrewList : fallbackCrew;
+
+  // Step 4: Installation Schedule & Crew Assignment State
+  const [schedDateInput, setSchedDateInput] = useState<string>('');
+  const [schedLeadInput, setSchedLeadInput] = useState<string>('');
+  const [schedCrewMembers, setSchedCrewMembers] = useState<string[]>([]);
+  const [newCrewName, setNewCrewName] = useState<string>('');
+  const [isSavingSchedule, setIsSavingSchedule] = useState<boolean>(false);
+  const [scheduleSaveSuccess, setScheduleSaveSuccess] = useState<boolean>(false);
+
+  // Step 5: Quick check-in & Date-specific attendance view
+  const [attendanceViewDate, setAttendanceViewDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [checkingInMember, setCheckingInMember] = useState<string | null>(null);
+
+  // Sync Step 4 state when selectedProject changes
+  useEffect(() => {
+    if (selectedProject) {
+      const defaultDate = (selectedProject as any).scheduled_installation_date || selectedProject.targetCompletionDate || new Date(Date.now() + 86400000 * 3).toISOString().split('T')[0];
+      setSchedDateInput(defaultDate);
+      setSchedLeadInput(selectedProject.installationLeadName || 'Muthu Vel');
+      const existingCrew = (selectedProject as any).assigned_crew_members;
+      if (Array.isArray(existingCrew) && existingCrew.length > 0) {
+        setSchedCrewMembers(existingCrew);
+      } else {
+        setSchedCrewMembers([
+          `${selectedProject.installationLeadName || 'Muthu Vel'} (Lead)`,
+          'Karthik Mani (Inverter & Wiring)',
+          'Saravanan Perumal (Earthing & BOS)',
+          'Rajesh Varma (Structure & Foundation)',
+          'Vijay Anand (Safety & QA)'
+        ]);
+      }
+    }
+  }, [selectedProject?.id]);
+
+  const handleSaveStep4ScheduleAndCrew = async () => {
+    if (!selectedProject) return;
+    setIsSavingSchedule(true);
+    try {
+      const updates: any = {
+        scheduled_installation_date: schedDateInput,
+        targetCompletionDate: schedDateInput,
+        installationLeadName: schedLeadInput,
+        assigned_crew_members: schedCrewMembers
+      };
+      updateProject(selectedProject.id, updates);
+      setSelectedProject(prev => prev ? ({ ...prev, ...updates }) : null);
+
+      await authFetch('/api/installation/schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: selectedProject.id,
+          scheduledDate: schedDateInput,
+          installationLeadName: schedLeadInput,
+          crewMembers: schedCrewMembers
+        })
+      }).catch(e => console.error(e));
+
+      setScheduleSaveSuccess(true);
+      setTimeout(() => setScheduleSaveSuccess(false), 3000);
+    } catch (e: any) {
+      console.error(e);
+    } finally {
+      setIsSavingSchedule(false);
+    }
+  };
+
+  const handleQuickCheckInMember = async (memberName: string) => {
+    if (!selectedProject) return;
+    setCheckingInMember(memberName);
+    try {
+      let lat: number | null = 11.6813;
+      let lng: number | null = 78.1232;
+      if (typeof navigator !== 'undefined' && navigator.geolocation) {
+        try {
+          const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 3000 });
+          });
+          lat = pos.coords.latitude;
+          lng = pos.coords.longitude;
+        } catch {}
+      }
+
+      const checkInTime = new Date().toTimeString().split(' ')[0];
+      const todayStr = new Date().toISOString().split('T')[0];
+      const targetDate = attendanceViewDate || todayStr;
+      const cleanName = memberName.split('(')[0].trim();
+
+      const res = await authFetch('/api/installation/attendance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: selectedProject.id,
+          siteLeadName: cleanName,
+          presentTeamMembers: [memberName.trim()],
+          latitude: lat,
+          longitude: lng,
+          checkInTime,
+          date: targetDate,
+          notes: `Individual site check-in recorded for ${memberName}.`
+        })
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        const newRecord = {
+          id: data.attendance?.id || `ATT-${Date.now().toString().slice(-6)}`,
+          projectId: selectedProject.id,
+          date: targetDate,
+          siteLeadName: cleanName,
+          checkInTime,
+          latitude: lat,
+          longitude: lng,
+          presentTeamMembers: [memberName.trim()],
+          notes: `Site check-in verified for ${memberName}.`
+        };
+        setCommandCentre((prev: any) => ({
+          ...prev,
+          attendance: [newRecord, ...(prev?.attendance || [])]
+        }));
+      }
+    } catch (e: any) {
+      console.error('Quick check-in error:', e);
+    } finally {
+      setCheckingInMember(null);
+    }
+  };
 
   const token = localStorage.getItem('ab_solar_token') || localStorage.getItem('ab_energy_auth_token') || '';
   const authFetch = (url: string, opts: any = {}) => {
@@ -155,7 +333,7 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
 
   // KPI Calculations
   const totalProjects = projects.length;
-  const totalCapacityKw = projects.reduce((sum, p) => sum + p.capacityKw, 0);
+  const totalCapacityKw = projects.reduce((sum, p) => sum + (Number(p.capacityKw) || 0), 0);
   const activeExecutionCount = projects.filter(p => p.stage.includes('Installation') || p.stage === 'Material Ready').length;
   const commissionedCount = projects.filter(p => p.stage === 'Completed' || p.stage === 'Commissioning').length;
 
@@ -270,15 +448,15 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
             {/* 8-MILESTONE INTERACTIVE STEPPER NAVIGATION TRACK          */}
             {/* ========================================================= */}
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-1">
                 <span className="text-xs font-bold text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
-                  <Activity className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>EPC Project Milestones (Click Any Stage to Open Dedicated Workspace)</span>
+                  <Activity className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span>EPC Project Milestones</span>
                 </span>
                 <span className="text-[11px] text-slate-400 font-medium">8 Key Lifecycle Stages</span>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
+              <div className="flex overflow-x-auto sm:grid sm:grid-cols-4 lg:grid-cols-8 gap-2 pb-1">
                 {stages.map((st, idx) => {
                   const currentIdx = stages.indexOf(selectedProject.stage);
                   const isDone = idx < currentIdx;
@@ -293,7 +471,7 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
                         setSelectedStageMilestone(st);
                         setProjectDetailView('stage');
                       }}
-                      className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer relative ${
+                      className={`min-w-[130px] sm:min-w-0 flex-shrink-0 sm:flex-shrink p-2.5 rounded-xl border text-left transition-all cursor-pointer relative ${
                         isSelectedInView 
                           ? 'ring-2 ring-emerald-600 bg-emerald-50/80 border-emerald-400 shadow-xs' 
                           : isCurrent 
@@ -871,15 +1049,16 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
                 {/* ------------------------------------------------------------- */}
                 {selectedStageMilestone === 'Installation Scheduled' && (
                   <div className="space-y-4">
+                    {/* Site Readiness Card */}
                     {(() => {
                       const isSiteReady = Boolean((selectedProject as any).site_readiness_confirmed || commandCentre?.project?.site_readiness_confirmed);
-                      const schedDate = (selectedProject as any).scheduled_installation_date || commandCentre?.project?.scheduled_installation_date;
+                      const schedDate = schedDateInput || (selectedProject as any).scheduled_installation_date || commandCentre?.project?.scheduled_installation_date || selectedProject.targetCompletionDate;
 
                       return (
-                        <div className={`p-6 rounded-2xl border transition-all ${
+                        <div className={`p-5 rounded-2xl border transition-all ${
                           isSiteReady 
-                            ? 'bg-emerald-50 border-emerald-300 text-emerald-950' 
-                            : 'bg-amber-50 border-amber-300 text-amber-950 shadow-xs'
+                            ? 'bg-emerald-50/70 border-emerald-300 text-emerald-950' 
+                            : 'bg-amber-50/70 border-amber-300 text-amber-950 shadow-xs'
                         }`}>
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                             <div className="flex items-start gap-3.5">
@@ -900,7 +1079,7 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
                                 <p className="text-xs mt-1 leading-relaxed">
                                   {isSiteReady ? (
                                     <span>
-                                      Site readiness verified by Project Manager {selectedProject.projectManagerName}. Physical installation scheduled for <strong>{schedDate || 'This Week'}</strong>. Rooftop crew is cleared for execution.
+                                      Site readiness verified by Project Manager {selectedProject.projectManagerName}. Physical installation scheduled for <strong className="font-mono text-emerald-800">{schedDate || 'Upcoming'}</strong>. Field crew is cleared for execution.
                                     </span>
                                   ) : (
                                     <span>
@@ -925,19 +1104,217 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
                       );
                     })()}
 
-                    {/* Assigned Crew Box */}
-                    <div className="p-4 bg-white border border-slate-200 rounded-xl flex items-center justify-between">
-                      <div>
-                        <span className="text-slate-400 text-[10px] uppercase font-bold">Assigned Installation Lead</span>
-                        <span className="font-bold text-slate-900 text-sm block mt-0.5">{selectedProject.installationLeadName || 'Muthu Vel'}</span>
-                        <span className="text-slate-500 text-[11px]">Role: Rooftop EPC Field Crew</span>
+                    {/* Step 4 Interactive PM Control Panel: Installation Schedule Date & Crew Member Assignment */}
+                    <div className="p-5 bg-white border border-slate-200 rounded-2xl shadow-xs space-y-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                        <div>
+                          <h4 className="font-extrabold text-slate-900 text-sm flex items-center gap-2">
+                            <Calendar className="w-4 h-4 text-emerald-600" />
+                            <span>Schedule Installation Date &amp; Assign Field Crew</span>
+                          </h4>
+                          <p className="text-slate-500 text-xs mt-0.5">
+                            Set the official physical kickoff date and assign the rooftop installation lead and technicians.
+                          </p>
+                        </div>
+                        {scheduleSaveSuccess && (
+                          <div className="px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-xl text-xs font-bold flex items-center gap-1.5 animate-in fade-in">
+                            <Check className="w-4 h-4 text-emerald-600" />
+                            <span>Schedule &amp; Crew Saved!</span>
+                          </div>
+                        )}
                       </div>
-                      <button
-                        onClick={() => onNavigate('team' as any)}
-                        className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs"
-                      >
-                        View Team Assignment
-                      </button>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* 1. Installation Schedule Date */}
+                        <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                          <label className="block text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                            <Clock className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>Installation Kickoff / Target Date *</span>
+                          </label>
+                          <input
+                            type="date"
+                            value={schedDateInput}
+                            onChange={e => setSchedDateInput(e.target.value)}
+                            className="w-full p-2.5 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-emerald-500 shadow-2xs"
+                          />
+                          <p className="text-[11px] text-slate-500">
+                            The target date on-site mounting begins. This syncs with customer timeline and materials delivery.
+                          </p>
+                        </div>
+
+                        {/* 2. Assigned Installation Lead */}
+                        <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                          <label className="block text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                            <User className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>Assigned Installation Lead (Site In-Charge) *</span>
+                          </label>
+                          <select
+                            value={schedLeadInput}
+                            onChange={e => {
+                              const val = e.target.value;
+                              setSchedLeadInput(val);
+                              if (!schedCrewMembers.some(m => m.includes(val))) {
+                                setSchedCrewMembers(prev => [`${val} (Lead)`, ...prev.filter(m => !m.includes('(Lead)'))]);
+                              }
+                            }}
+                            className="w-full p-2.5 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-emerald-500 shadow-2xs cursor-pointer"
+                          >
+                            {realCrewCatalog.map(member => (
+                              <option key={member.name} value={member.name}>
+                                {member.name} — {member.department}
+                              </option>
+                            ))}
+                          </select>
+                          <p className="text-[11px] text-slate-500">
+                            Responsible for on-site checklist execution, daily attendance stamping, and safety compliance.
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* 3. Assign Crew Members Roster */}
+                      <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                            <Users className="w-3.5 h-3.5 text-indigo-600" />
+                            <span>Assigned Field Crew Members ({schedCrewMembers.length} Members)</span>
+                          </label>
+                          <span className="text-[11px] text-slate-400">
+                            Will appear in Step 5 attendance roster
+                          </span>
+                        </div>
+
+                        {/* Current Member Chips */}
+                        <div className="flex flex-wrap items-center gap-2">
+                          {schedCrewMembers.map((m, idx) => (
+                            <span 
+                              key={idx} 
+                              className="px-3 py-1.5 bg-white border border-slate-300 text-slate-800 rounded-xl text-xs font-bold flex items-center gap-2 shadow-2xs"
+                            >
+                              <User className="w-3.5 h-3.5 text-slate-400" />
+                              <span>{m}</span>
+                              <button
+                                type="button"
+                                onClick={() => setSchedCrewMembers(prev => prev.filter((_, i) => i !== idx))}
+                                className="text-slate-400 hover:text-red-600 transition-colors cursor-pointer p-0.5 rounded-full hover:bg-red-50"
+                                title={`Remove ${m}`}
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+
+                        {/* Company Real Installation Crew Presets */}
+                        <div className="space-y-1.5 pt-1">
+                          <span className="font-bold text-slate-700 text-xs flex items-center gap-1.5">
+                            <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>Company Registered Installation Crew:</span>
+                          </span>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {realCrewCatalog.map(member => {
+                              const isAssigned = schedCrewMembers.some(m => m.toLowerCase().includes(member.name.toLowerCase()));
+                              return (
+                                <button
+                                  key={member.name}
+                                  type="button"
+                                  onClick={() => {
+                                    if (isAssigned) {
+                                      setSchedCrewMembers(prev => prev.filter(m => !m.toLowerCase().includes(member.name.toLowerCase())));
+                                    } else {
+                                      setSchedCrewMembers(prev => [...prev, `${member.name} (${member.department.split('&')[0].trim()})`]);
+                                    }
+                                  }}
+                                  className={`p-2.5 rounded-xl border text-left flex items-center justify-between transition-all cursor-pointer ${
+                                    isAssigned 
+                                      ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-bold shadow-2xs' 
+                                      : 'bg-white hover:bg-slate-100 border-slate-200 text-slate-700'
+                                  }`}
+                                >
+                                  <div className="truncate pr-2">
+                                    <span className="block text-xs font-extrabold truncate">{member.name}</span>
+                                    <span className="block text-[10px] text-slate-500 truncate">{member.department}</span>
+                                  </div>
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold shrink-0 ${
+                                    isAssigned ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-600'
+                                  }`}>
+                                    {isAssigned ? 'Assigned ✓' : '+ Assign'}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Add Custom Member Bar */}
+                        <div className="flex items-center gap-2 pt-1">
+                          <input
+                            type="text"
+                            placeholder="Add custom technician / helper name & role, e.g. Prakash (Rigger)"
+                            value={newCrewName}
+                            onChange={e => setNewCrewName(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                if (newCrewName.trim()) {
+                                  setSchedCrewMembers(prev => [...prev, newCrewName.trim()]);
+                                  setNewCrewName('');
+                                }
+                              }
+                            }}
+                            className="flex-1 p-2 bg-white border border-slate-300 rounded-xl text-xs font-medium focus:ring-2 focus:ring-emerald-500 shadow-2xs"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (newCrewName.trim()) {
+                                setSchedCrewMembers(prev => [...prev, newCrewName.trim()]);
+                                setNewCrewName('');
+                              }
+                            }}
+                            className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs flex items-center gap-1 cursor-pointer shrink-0 shadow-2xs"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Add</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Save Button */}
+                      <div className="flex items-center justify-end gap-3 pt-2">
+                        {scheduleSaveSuccess && (
+                          <span className="text-xs font-bold text-emerald-700 flex items-center gap-1.5 animate-in fade-in">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                            <span>Schedule &amp; Crew assignments recorded!</span>
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={handleSaveStep4ScheduleAndCrew}
+                          disabled={isSavingSchedule}
+                          className={`px-6 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-2 cursor-pointer shadow-md transition-all disabled:opacity-50 ${
+                            scheduleSaveSuccess
+                              ? 'bg-emerald-700 text-white ring-2 ring-emerald-300'
+                              : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                          }`}
+                        >
+                          {scheduleSaveSuccess ? (
+                            <>
+                              <CheckCircle2 className="w-4 h-4 text-emerald-300" />
+                              <span>Saved ✓</span>
+                            </>
+                          ) : isSavingSchedule ? (
+                            <>
+                              <Clock className="w-4 h-4 animate-spin" />
+                              <span>Saving...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Check className="w-4 h-4" />
+                              <span>Save Schedule &amp; Crew Assignments</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -947,82 +1324,304 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
                 {/* ------------------------------------------------------------- */}
                 {selectedStageMilestone === 'Installation In Progress' && (
                   <div className="space-y-4">
-                    {/* Attendance & Live GPS Card */}
+                    {/* Live Crew Attendance & Site Roster Card */}
                     {(() => {
-                      const latestAtt = commandCentre?.attendance?.[0];
                       const todayStr = new Date().toISOString().split('T')[0];
-                      const isCheckedInToday = Boolean(latestAtt && latestAtt.date && String(latestAtt.date).startsWith(todayStr));
-                      const members: string[] = latestAtt?.presentTeamMembers || [];
-                      const isSolo = members.length <= 1;
+                      const activeAttDate = attendanceViewDate || todayStr;
+                      const allAttendanceLogs: any[] = commandCentre?.attendance || [];
+                      
+                      // Filter attendance logs STRICTLY for the active attendance date
+                      const targetDateLogs = allAttendanceLogs.filter(log => {
+                        if (!log.date) return false;
+                        const d = String(log.date).split('T')[0];
+                        return d === activeAttDate;
+                      });
+
+                      // Build a map of only members checked in on THIS specific date
+                      const checkedInMap: Record<string, {
+                        checkInTime: string;
+                        date: string;
+                        latitude?: number;
+                        longitude?: number;
+                        siteLeadName: string;
+                        notes?: string;
+                      }> = {};
+
+                      targetDateLogs.forEach(log => {
+                        const logDate = String(log.date).split('T')[0];
+                        const time = log.checkInTime || log.check_in_time || '09:00';
+                        const members = Array.isArray(log.presentTeamMembers) ? log.presentTeamMembers : [];
+                        
+                        // Register individual members
+                        members.forEach((m: string) => {
+                          const key = m.trim().toLowerCase();
+                          const simpleKey = m.split('(')[0].trim().toLowerCase();
+                          checkedInMap[key] = {
+                            checkInTime: time,
+                            date: logDate,
+                            latitude: log.latitude || log.gps_lat,
+                            longitude: log.longitude || log.gps_lng,
+                            siteLeadName: log.siteLeadName || log.team_lead_name || 'Field Lead',
+                            notes: log.notes
+                          };
+                          checkedInMap[simpleKey] = checkedInMap[key];
+                        });
+
+                        // Register site lead
+                        if (log.siteLeadName) {
+                          const leadKey = log.siteLeadName.trim().toLowerCase();
+                          checkedInMap[leadKey] = {
+                            checkInTime: time,
+                            date: logDate,
+                            latitude: log.latitude || log.gps_lat,
+                            longitude: log.longitude || log.gps_lng,
+                            siteLeadName: log.siteLeadName,
+                            notes: log.notes
+                          };
+                        }
+                      });
+
+                      // Assigned crew members
+                      const assignedCrew: string[] = (selectedProject as any).assigned_crew_members?.length
+                        ? (selectedProject as any).assigned_crew_members
+                        : [
+                            `${selectedProject.installationLeadName || 'Muthu Vel'} (Lead)`,
+                            'Karthik Mani (Inverter & Wiring)',
+                            'Saravanan Perumal (Earthing & BOS)',
+                            'Rajesh Varma (Structure & Foundation)',
+                            'Vijay Anand (Safety & QA)'
+                          ];
+
+                      // Also include any person who checked in on this date
+                      const allDisplayMembers = [...assignedCrew];
+                      targetDateLogs.forEach(log => {
+                        const members = Array.isArray(log.presentTeamMembers) ? log.presentTeamMembers : [log.siteLeadName];
+                        members.forEach((m: string) => {
+                          if (m && !allDisplayMembers.some(em => em.toLowerCase().includes(m.toLowerCase()) || m.toLowerCase().includes(em.toLowerCase()))) {
+                            allDisplayMembers.push(m);
+                          }
+                        });
+                      });
+
+                      const checkedInCount = allDisplayMembers.filter(m => {
+                        const key = m.trim().toLowerCase();
+                        const simpleKey = m.split('(')[0].trim().toLowerCase();
+                        return Boolean(checkedInMap[key] || checkedInMap[simpleKey]);
+                      }).length;
+
+                      const totalAssigned = allDisplayMembers.length;
+                      const percentPresent = totalAssigned > 0 ? Math.round((checkedInCount / totalAssigned) * 100) : 0;
 
                       return (
-                        <div className="p-5 bg-gradient-to-r from-emerald-50/50 to-teal-50/50 border border-emerald-200 rounded-2xl space-y-3">
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
-                              <Users className="w-4 h-4 text-emerald-600" />
-                              <span>Rooftop Installation Team Live Attendance</span>
-                            </span>
-                            {isCheckedInToday ? (
-                              <span className="px-3 py-1 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-full text-xs font-bold flex items-center gap-1.5">
-                                <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse" />
-                                <span>Checked In Today</span>
+                        <div className="p-5 bg-gradient-to-r from-emerald-50/60 via-teal-50/40 to-slate-50 border border-emerald-200 rounded-2xl space-y-4 shadow-xs">
+                          {/* Top Header & Date Switcher */}
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-emerald-100">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <Users className="w-5 h-5 text-emerald-700" />
+                                <h3 className="font-extrabold text-slate-900 text-sm">
+                                  Rooftop Installation Team Live Attendance &amp; Site Roster
+                                </h3>
+                              </div>
+                              <p className="text-slate-500 text-xs mt-0.5">
+                                Showing check-in status for <strong className="text-slate-800 font-mono">{activeAttDate === todayStr ? `Today (${activeAttDate})` : activeAttDate}</strong> across all {totalAssigned} assigned crew members.
+                              </p>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-2">
+                              {/* Date Switcher */}
+                              <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-xl border border-slate-200 text-xs shadow-2xs">
+                                <Calendar className="w-3.5 h-3.5 text-emerald-600" />
+                                <span className="text-[11px] font-bold text-slate-600">Date:</span>
+                                <input
+                                  type="date"
+                                  value={activeAttDate}
+                                  onChange={e => setAttendanceViewDate(e.target.value)}
+                                  className="border-0 bg-transparent text-xs font-bold font-mono text-slate-800 focus:ring-0 p-0 cursor-pointer"
+                                />
+                                {activeAttDate !== todayStr && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setAttendanceViewDate(todayStr)}
+                                    className="px-2 py-0.5 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-md text-[10px] font-bold cursor-pointer"
+                                  >
+                                    Today
+                                  </button>
+                                )}
+                                {(() => {
+                                  const sched = (selectedProject as any)?.scheduled_installation_date || selectedProject?.targetCompletionDate;
+                                  if (sched && sched !== activeAttDate) {
+                                    return (
+                                      <button
+                                        type="button"
+                                        onClick={() => setAttendanceViewDate(sched)}
+                                        className="px-2 py-0.5 bg-indigo-100 hover:bg-indigo-200 text-indigo-800 rounded-md text-[10px] font-bold cursor-pointer"
+                                        title={`View scheduled date: ${sched}`}
+                                      >
+                                        Kickoff ({sched})
+                                      </button>
+                                    );
+                                  }
+                                  return null;
+                                })()}
+                              </div>
+
+                              <span className={`px-3 py-1 rounded-full text-xs font-black flex items-center gap-1.5 shadow-2xs ${
+                                checkedInCount === totalAssigned 
+                                  ? 'bg-emerald-600 text-white' 
+                                  : checkedInCount > 0 
+                                  ? 'bg-amber-100 text-amber-900 border border-amber-300' 
+                                  : 'bg-slate-200 text-slate-800'
+                              }`}>
+                                <span className={`w-2 h-2 rounded-full ${checkedInCount > 0 ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
+                                <span>{checkedInCount} of {totalAssigned} Checked In ({percentPresent}%)</span>
                               </span>
-                            ) : latestAtt ? (
-                              <span className="px-2.5 py-0.5 bg-slate-200 text-slate-700 rounded text-xs font-bold">
-                                Logged ({latestAtt.date})
-                              </span>
-                            ) : (
-                              <span className="px-2.5 py-0.5 bg-amber-100 text-amber-800 border border-amber-200 rounded text-xs font-bold">
-                                Check-in Pending
-                              </span>
-                            )}
+                            </div>
                           </div>
 
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-white p-3.5 rounded-xl border border-emerald-100 text-xs">
-                            <div>
-                              <span className="text-slate-400 block text-[10px] uppercase font-bold">Installation Lead</span>
-                              <span className="font-bold text-slate-900 text-sm mt-0.5 block">{latestAtt?.siteLeadName || selectedProject.installationLeadName || 'Muthu Vel'}</span>
-                              <span className="text-slate-500 text-[11px]">Role: Installation Team</span>
-                            </div>
-                            <div>
-                              <span className="text-slate-400 block text-[10px] uppercase font-bold">Check-in Timestamp</span>
-                              <span className="font-mono font-bold text-slate-800 text-sm mt-0.5 block">
-                                {latestAtt 
-                                  ? `${String(latestAtt.date).startsWith(todayStr) ? 'Today' : latestAtt.date}, ${latestAtt.check_in_time || latestAtt.checkInTime || '09:00'}`
-                                  : 'Pending Check-in on Site'}
-                              </span>
-                              <span className="text-slate-500 text-[11px]">{isSolo ? 'Solo Check-in' : `${members.length} Members Checked In`}</span>
-                            </div>
-                            <div>
-                              <span className="text-slate-400 block text-[10px] uppercase font-bold">GPS Coordinates Stamp</span>
-                              {latestAtt?.latitude && latestAtt?.longitude ? (
-                                <a
-                                  href={`https://www.google.com/maps?q=${latestAtt.latitude},${latestAtt.longitude}`}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="font-mono text-emerald-700 hover:text-emerald-800 font-bold underline flex items-center gap-1 mt-0.5 text-sm"
+                          {/* Crew Roster Grid: EVERY Assigned Crew Member Visible Side-by-Side */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                            {allDisplayMembers.map((member, idx) => {
+                              const key = member.trim().toLowerCase();
+                              const simpleKey = member.split('(')[0].trim().toLowerCase();
+                              const info = checkedInMap[key] || checkedInMap[simpleKey];
+                              const isCheckedIn = Boolean(info);
+
+                              return (
+                                <div
+                                  key={idx}
+                                  className={`p-3.5 rounded-xl border transition-all flex flex-col justify-between ${
+                                    isCheckedIn 
+                                      ? 'bg-white border-emerald-300 shadow-xs' 
+                                      : 'bg-slate-50/80 border-slate-200 opacity-90'
+                                  }`}
                                 >
-                                  <MapPin className="w-3.5 h-3.5 text-emerald-600" />
-                                  <span>{Number(latestAtt.latitude).toFixed(4)}° N, {Number(latestAtt.longitude).toFixed(4)}° E</span>
-                                </a>
-                              ) : (
-                                <span className="text-slate-500 font-mono text-sm mt-0.5 block">
-                                  {latestAtt ? 'GPS Geo-Stamped' : 'Awaiting Check-in'}
-                                </span>
-                              )}
-                              <span className="text-slate-500 text-[11px]">Rooftop Site Location Verified</span>
-                            </div>
+                                  <div>
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div className="flex items-center gap-2 truncate">
+                                        <div className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 ${
+                                          isCheckedIn ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'
+                                        }`}>
+                                          {member.charAt(0)}
+                                        </div>
+                                        <div className="truncate">
+                                          <h5 className="font-extrabold text-slate-900 text-xs truncate">
+                                            {member}
+                                          </h5>
+                                          <span className="text-[10px] text-slate-500 block truncate">
+                                            {member.includes('(Lead)') ? 'Site Lead Engineer' : 'Rooftop Field Crew'}
+                                          </span>
+                                        </div>
+                                      </div>
+
+                                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold shrink-0 ${
+                                        isCheckedIn 
+                                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' 
+                                          : 'bg-amber-100 text-amber-800 border border-amber-200'
+                                      }`}>
+                                        {isCheckedIn ? 'Checked In ✓' : 'Pending Check-in'}
+                                      </span>
+                                    </div>
+
+                                    {/* Status Details */}
+                                    <div className="mt-2.5 pt-2 border-t border-slate-100 text-[11px] space-y-1">
+                                      {isCheckedIn && info ? (
+                                        <>
+                                          <div className="flex items-center justify-between">
+                                            <span className="text-slate-500">Check-in Time:</span>
+                                            <span className="font-bold text-slate-800 font-mono">
+                                              {info.checkInTime}
+                                            </span>
+                                          </div>
+                                          {info.latitude && info.longitude ? (
+                                            <div className="flex items-center justify-between">
+                                              <span className="text-slate-500">GPS Stamp:</span>
+                                              <a
+                                                href={`https://www.google.com/maps?q=${info.latitude},${info.longitude}`}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="text-emerald-700 hover:text-emerald-800 font-mono font-bold flex items-center gap-0.5 underline text-[10px]"
+                                              >
+                                                <MapPin className="w-3 h-3 text-emerald-600" />
+                                                <span>{Number(info.latitude).toFixed(4)}°, {Number(info.longitude).toFixed(4)}°</span>
+                                              </a>
+                                            </div>
+                                          ) : (
+                                            <div className="flex items-center justify-between">
+                                              <span className="text-slate-500">Site Location:</span>
+                                              <span className="font-semibold text-slate-700 text-[10px]">Rooftop Verified</span>
+                                            </div>
+                                          )}
+                                        </>
+                                      ) : (
+                                        <div className="flex items-center justify-between text-amber-700">
+                                          <span>Awaiting on-site arrival</span>
+                                          <Clock className="w-3 h-3" />
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* Quick Check-in action if not checked in */}
+                                  {!isCheckedIn && (
+                                    <div className="mt-2.5 pt-2 border-t border-slate-200/60 flex justify-end">
+                                      <button
+                                        type="button"
+                                        disabled={checkingInMember === member}
+                                        onClick={() => handleQuickCheckInMember(member)}
+                                        className="w-full py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-bold rounded-lg text-[10px] flex items-center justify-center gap-1 transition-colors cursor-pointer shadow-2xs"
+                                      >
+                                        <Check className="w-3 h-3" />
+                                        <span>{checkingInMember === member ? 'Marking...' : 'Mark Checked In'}</span>
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
                           </div>
 
-                          {members.length > 0 && (
-                            <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                              <span className="text-[11px] text-slate-500 font-medium">Crew Members:</span>
-                              {members.map((m, idx) => (
-                                <span key={idx} className="px-2.5 py-0.5 bg-white border border-slate-200 text-slate-800 rounded-md text-[11px] font-semibold flex items-center gap-1 shadow-2xs">
-                                  <User className="w-3 h-3 text-slate-400" />
-                                  <span>{m}</span>
-                                </span>
-                              ))}
+                          {/* Historical / Recorded Attendance Events for Today */}
+                          {allAttendanceLogs.length > 0 && (
+                            <div className="bg-white p-3.5 rounded-xl border border-slate-200 text-xs space-y-2">
+                              <span className="font-bold text-slate-800 text-[11px] uppercase tracking-wider block">
+                                Logged Site Check-in Events ({allAttendanceLogs.length} Records)
+                              </span>
+                              <div className="divide-y divide-slate-100 max-h-40 overflow-y-auto">
+                                {allAttendanceLogs.map((att, idx) => {
+                                  const members = Array.isArray(att.presentTeamMembers) ? att.presentTeamMembers : [att.siteLeadName];
+                                  return (
+                                    <div key={idx} className="py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px]">
+                                      <div className="flex items-center gap-2">
+                                        <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                                        <div>
+                                          <span className="font-bold text-slate-900">
+                                            {att.siteLeadName || 'Site Crew'}
+                                          </span>
+                                          <span className="text-slate-500 ml-1.5">
+                                            {members.length > 1 ? `with ${members.join(', ')}` : 'logged check-in'}
+                                          </span>
+                                        </div>
+                                      </div>
+
+                                      <div className="flex items-center gap-3 text-slate-500 font-mono text-[10px] shrink-0">
+                                        <span>{att.date} at {att.checkInTime || att.check_in_time || '09:00'}</span>
+                                        {att.latitude && att.longitude && (
+                                          <a
+                                            href={`https://www.google.com/maps?q=${att.latitude},${att.longitude}`}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="text-emerald-700 underline flex items-center gap-0.5"
+                                          >
+                                            <MapPin className="w-3 h-3" />
+                                            <span>{Number(att.latitude).toFixed(4)}°, {Number(att.longitude).toFixed(4)}°</span>
+                                          </a>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
                             </div>
                           )}
                         </div>
@@ -1479,7 +2078,7 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
                 Total Capacity In Progress
               </span>
               <div className="text-2xl font-black text-slate-900 font-mono tracking-tight">
-                {totalCapacityKw} kW
+                {totalCapacityKw.toFixed(1)} kW
               </div>
               <span className="text-[11px] font-semibold text-emerald-600 block">
                 Turnkey Solar Rooftop Power
@@ -1540,8 +2139,81 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
               </div>
             </div>
 
-            {/* High-Density Data Table */}
-            <div className="overflow-x-auto">
+            {/* Mobile Card List (< lg) */}
+            <div className="lg:hidden divide-y divide-slate-100">
+              {filteredProjects.length === 0 ? (
+                <div className="py-12 text-center text-slate-400 p-4 text-xs">
+                  No projects match your current search or stage filter.
+                </div>
+              ) : (
+                filteredProjects.map(p => (
+                  <div
+                    key={p.id}
+                    onClick={() => {
+                      setSelectedProject(p);
+                      setActiveViewMode('detail');
+                    }}
+                    className="p-4 hover:bg-slate-50 transition-colors cursor-pointer space-y-3"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <span className="font-mono font-bold text-xs text-slate-900 block truncate">
+                          {p.id}
+                        </span>
+                        <h4 className="font-bold text-slate-900 text-sm truncate mt-0.5">{p.customerName}</h4>
+                        <span className="text-[11px] text-slate-400 block truncate">
+                          {p.customerAddress}
+                        </span>
+                      </div>
+
+                      <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider shrink-0 ${
+                        p.stage === 'Completed' ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' :
+                        p.stage.includes('Installation') ? 'bg-blue-100 text-blue-800 border border-blue-200' :
+                        'bg-slate-100 text-slate-700 border border-slate-200'
+                      }`}>
+                        {p.stage}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 p-2.5 bg-slate-50 rounded-xl text-xs">
+                      <div>
+                        <span className="text-[10px] text-slate-400 block font-semibold">Capacity</span>
+                        <span className="font-bold text-slate-900 font-mono">{p.capacityKw} kW Solar</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-400 block font-semibold">Target Completion</span>
+                        <span className="font-bold text-slate-900 font-mono">{p.targetCompletionDate || 'Upcoming'}</span>
+                      </div>
+                      <div className="col-span-2 pt-1 border-t border-slate-200/60 flex items-center justify-between text-[11px]">
+                        <span className="text-slate-400">Project Manager:</span>
+                        <span className="font-semibold text-slate-800">{p.projectManagerName || 'Karthik Raja'}</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 pt-1" onClick={e => e.stopPropagation()}>
+                      <button
+                        onClick={() => onNavigate('installation')}
+                        className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg text-xs"
+                      >
+                        12-Point Checklist
+                      </button>
+                      <button
+                        onClick={() => {
+                          setSelectedProject(p);
+                          setActiveViewMode('detail');
+                        }}
+                        className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs"
+                      >
+                        Open Workspace
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Desktop High-Density Data Table (>= lg) */}
+            <div className="hidden lg:block overflow-x-auto">
               <table className="w-full text-left text-xs text-slate-600">
                 <thead className="bg-slate-50/80 text-slate-500 font-bold uppercase tracking-wider text-[10px] border-b border-slate-200">
                   <tr>

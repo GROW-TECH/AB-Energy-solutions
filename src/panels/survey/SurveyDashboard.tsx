@@ -14,12 +14,28 @@ interface SurveyDashboardProps {
 export const SurveyDashboard: React.FC<SurveyDashboardProps> = ({
   onNavigateToTab,
 }) => {
-  const { surveys, leads } = useCrm();
+  const { surveys, leads, currentUser, activeRole } = useCrm();
 
-  const totalSurveys = surveys.length;
-  const completedSurveys = surveys.filter(s => s.status === 'Completed' || s.status === 'Approved');
-  const pendingSurveys = surveys.filter(s => s.status !== 'Completed' && s.status !== 'Approved');
-  const totalCapacitySurveyed = surveys.reduce((sum, s) => sum + (s.recommendedKw || 0), 0);
+  const isEngineerUser = (currentUser?.role === 'Survey Engineer' || activeRole === 'Survey Engineer');
+  const relevantSurveys = surveys.filter(s => {
+    if (!isEngineerUser) return true;
+    if (!currentUser) return true;
+    const myId = currentUser.employeeId || currentUser.id;
+    const myName = (currentUser.name || currentUser.username || '').toLowerCase().trim();
+    if (s.engineerId && myId && (s.engineerId === myId || s.engineerId === currentUser.id)) return true;
+    if (s.engineerName && myName) {
+      const eng = s.engineerName.toLowerCase().trim();
+      if (eng === myName || eng.includes(myName) || myName.includes(eng)) return true;
+      const first = myName.split(' ')[0];
+      if (first && first.length > 2 && eng.includes(first)) return true;
+    }
+    return false;
+  });
+
+  const totalSurveys = relevantSurveys.length;
+  const completedSurveys = relevantSurveys.filter(s => s.status === 'Completed' || s.status === 'Approved');
+  const pendingSurveys = relevantSurveys.filter(s => s.status !== 'Completed' && s.status !== 'Approved');
+  const totalCapacitySurveyed = relevantSurveys.reduce((sum, s) => sum + (s.recommendedKw || 0), 0);
 
   return (
     <div className="space-y-6">
@@ -121,13 +137,13 @@ export const SurveyDashboard: React.FC<SurveyDashboardProps> = ({
                 onClick={() => onNavigateToTab('surveys')}
                 className="text-xs font-bold text-teal-700 hover:text-teal-800 flex items-center gap-1 cursor-pointer"
               >
-                <span>Full List ({surveys.length})</span>
+                <span>Full List ({relevantSurveys.length})</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </div>
 
             <div className="divide-y divide-slate-100 mt-3">
-              {surveys.slice(0, 5).map(survey => (
+              {relevantSurveys.slice(0, 5).map(survey => (
                 <div key={survey.id} className="py-3 flex items-center justify-between gap-4">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
