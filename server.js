@@ -2,12 +2,12 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import dotenv3 from "dotenv";
-import path7 from "path";
+import path9 from "path";
 import { fileURLToPath } from "url";
-import fs6 from "fs";
+import fs9 from "fs";
 
 // server/routes/index.ts
-import { Router as Router19 } from "express";
+import { Router as Router20 } from "express";
 
 // server/db.ts
 import mysql from "mysql2/promise";
@@ -27,6 +27,56 @@ var pool = mysql.createPool({
 // server/controllers/surveys.controller.ts
 import fs from "fs";
 import path from "path";
+var cachedSurveyColumns = null;
+async function getSurveyColumns() {
+  if (cachedSurveyColumns) return cachedSurveyColumns;
+  try {
+    const [cols] = await pool.query("SHOW COLUMNS FROM `site_surveys`");
+    cachedSurveyColumns = new Set(cols.map((c) => c.Field));
+    return cachedSurveyColumns;
+  } catch (e) {
+    return /* @__PURE__ */ new Set();
+  }
+}
+async function ensureSurveyCableColumns() {
+  try {
+    const cols = await getSurveyColumns();
+    if (!cols.has("measured_dc_cable_meters")) {
+      await pool.query("ALTER TABLE `site_surveys` ADD COLUMN `measured_dc_cable_meters` DECIMAL(10, 2) NULL");
+      cols.add("measured_dc_cable_meters");
+    }
+    if (!cols.has("measured_ac_cable_meters")) {
+      await pool.query("ALTER TABLE `site_surveys` ADD COLUMN `measured_ac_cable_meters` DECIMAL(10, 2) NULL");
+      cols.add("measured_ac_cable_meters");
+    }
+    if (!cols.has("client_signature_data")) {
+      await pool.query("ALTER TABLE `site_surveys` ADD COLUMN `client_signature_data` LONGTEXT NULL");
+      cols.add("client_signature_data");
+    }
+    if (!cols.has("client_signed_at")) {
+      await pool.query("ALTER TABLE `site_surveys` ADD COLUMN `client_signed_at` VARCHAR(50) NULL");
+      cols.add("client_signed_at");
+    }
+    if (!cols.has("client_signer_name")) {
+      await pool.query("ALTER TABLE `site_surveys` ADD COLUMN `client_signer_name` VARCHAR(150) NULL");
+      cols.add("client_signer_name");
+    }
+    if (!cols.has("client_approval_doc_url")) {
+      await pool.query("ALTER TABLE `site_surveys` ADD COLUMN `client_approval_doc_url` TEXT NULL");
+      cols.add("client_approval_doc_url");
+    }
+    if (!cols.has("latitude")) {
+      await pool.query("ALTER TABLE `site_surveys` ADD COLUMN `latitude` DECIMAL(10, 7) NULL");
+      cols.add("latitude");
+    }
+    if (!cols.has("longitude")) {
+      await pool.query("ALTER TABLE `site_surveys` ADD COLUMN `longitude` DECIMAL(10, 7) NULL");
+      cols.add("longitude");
+    }
+  } catch (err) {
+    console.warn("[Surveys] Auto schema migration notice:", err.message);
+  }
+}
 function formatPhoto(p) {
   return {
     id: p.id,
@@ -125,6 +175,21 @@ function formatSurvey(s, photos = [], history = []) {
     reviewComments: s.review_comments || null,
     quotationId: s.quotation_id || null,
     isDraft: Boolean(s.is_draft),
+    // GPS Coordinates and Client Approval
+    latitude: s.latitude !== null && s.latitude !== void 0 ? Number(s.latitude) : null,
+    longitude: s.longitude !== null && s.longitude !== void 0 ? Number(s.longitude) : null,
+    clientSignatureData: s.client_signature_data || null,
+    clientSignedAt: s.client_signed_at || null,
+    clientSignerName: s.client_signer_name || null,
+    clientApprovalDocUrl: s.client_approval_doc_url || null,
+    // On-Site Cable Measurements
+    measuredDcCableMeters: s.measured_dc_cable_meters !== null && s.measured_dc_cable_meters !== void 0 ? Number(s.measured_dc_cable_meters) : null,
+    measuredAcCableMeters: s.measured_ac_cable_meters !== null && s.measured_ac_cable_meters !== void 0 ? Number(s.measured_ac_cable_meters) : null,
+    // Edit Tracking
+    lastModifiedBy: s.last_modified_by || void 0,
+    lastModifiedRole: s.last_modified_role || void 0,
+    lastModifiedAt: s.last_modified_at || void 0,
+    editHistory: typeof s.edit_history === "string" ? JSON.parse(s.edit_history) : s.edit_history || [],
     // Custom Fields added by Survey Engineer
     customFields: typeof s.custom_fields === "string" ? JSON.parse(s.custom_fields) : s.custom_fields || [],
     // Attached photos and audit review history
@@ -432,8 +497,42 @@ var updateSurvey = async (req, res) => {
       unresolved_technical_issues: s.unresolvedTechnicalIssues !== void 0 ? s.unresolvedTechnicalIssues : current.unresolved_technical_issues,
       engineer_recommendations: s.engineerRecommendations !== void 0 ? s.engineerRecommendations : current.engineer_recommendations,
       custom_fields: s.customFields !== void 0 ? typeof s.customFields === "string" ? s.customFields : JSON.stringify(s.customFields) : current.custom_fields,
+      // GPS Coordinates and Client Approval
+      latitude: s.latitude !== void 0 ? s.latitude !== null ? Number(s.latitude) : null : current.latitude,
+      longitude: s.longitude !== void 0 ? s.longitude !== null ? Number(s.longitude) : null : current.longitude,
+      client_signature_data: s.clientSignatureData !== void 0 ? s.clientSignatureData : current.client_signature_data,
+      client_signed_at: s.clientSignedAt !== void 0 ? s.clientSignedAt : current.client_signed_at,
+      client_signer_name: s.clientSignerName !== void 0 ? s.clientSignerName : current.client_signer_name,
+      client_approval_doc_url: s.clientApprovalDocUrl !== void 0 ? s.clientApprovalDocUrl : current.client_approval_doc_url,
+      // On-Site Measured Cable Run Lengths
+      measured_dc_cable_meters: s.measuredDcCableMeters !== void 0 ? s.measuredDcCableMeters !== null ? Number(s.measuredDcCableMeters) : null : current.measured_dc_cable_meters,
+      measured_ac_cable_meters: s.measuredAcCableMeters !== void 0 ? s.measuredAcCableMeters !== null ? Number(s.measuredAcCableMeters) : null : current.measured_ac_cable_meters,
       is_draft: s.isDraft !== void 0 ? s.isDraft ? 1 : 0 : 1
     };
+    const user = req.user;
+    if (user?.role === "Super Admin" || user?.role === "CEO" || s.lastModifiedRole === "Super Admin") {
+      const modifierName = user?.name || s.lastModifiedBy || "Super Admin";
+      const modifierRole = user?.role || s.lastModifiedRole || "Super Admin";
+      const modifiedAt = (/* @__PURE__ */ new Date()).toISOString();
+      updateMap.last_modified_by = modifierName;
+      updateMap.last_modified_role = modifierRole;
+      updateMap.last_modified_at = modifiedAt;
+      try {
+        let history2 = [];
+        if (current.edit_history) {
+          history2 = typeof current.edit_history === "string" ? JSON.parse(current.edit_history) : current.edit_history;
+        }
+        history2.push({
+          timestamp: modifiedAt,
+          editedBy: modifierName,
+          editorRole: modifierRole,
+          changesSummary: "Updated site survey details"
+        });
+        updateMap.edit_history = JSON.stringify(history2);
+      } catch (e) {
+        console.warn("Could not update survey edit history:", e);
+      }
+    }
     if (s.status !== void 0) {
       updateMap.status = s.status;
     } else if (current.status === "Scheduled") {
@@ -442,14 +541,20 @@ var updateSurvey = async (req, res) => {
     if (s.completedAt !== void 0) {
       updateMap.completed_at = s.completedAt;
     }
+    await ensureSurveyCableColumns();
+    const existingCols = await getSurveyColumns();
     const setClauses = [];
     const values = [];
     for (const [key, val] of Object.entries(updateMap)) {
-      setClauses.push(`${key} = ?`);
-      values.push(val);
+      if (existingCols.size === 0 || existingCols.has(key)) {
+        setClauses.push(`\`${key}\` = ?`);
+        values.push(val);
+      }
     }
     values.push(id);
-    await pool.query(`UPDATE site_surveys SET ${setClauses.join(", ")} WHERE id = ?`, values);
+    if (setClauses.length > 0) {
+      await pool.query(`UPDATE site_surveys SET ${setClauses.join(", ")} WHERE id = ?`, values);
+    }
     const [updated] = await pool.query("SELECT * FROM site_surveys WHERE id = ?", [id]);
     const [photos] = await pool.query("SELECT * FROM survey_photos WHERE survey_id = ? ORDER BY uploaded_at ASC", [id]);
     const [history] = await pool.query("SELECT * FROM survey_review_history WHERE survey_id = ? ORDER BY created_at ASC", [id]);
@@ -629,16 +734,32 @@ var submitSurveyForReview = async (req, res) => {
         cable_specification: s.cableSpecification !== void 0 ? s.cableSpecification : current.cable_specification,
         unresolved_technical_issues: s.unresolvedTechnicalIssues !== void 0 ? s.unresolvedTechnicalIssues : current.unresolved_technical_issues,
         engineer_recommendations: s.engineerRecommendations !== void 0 ? s.engineerRecommendations : current.engineer_recommendations,
-        custom_fields: s.customFields !== void 0 ? typeof s.customFields === "string" ? s.customFields : JSON.stringify(s.customFields) : current.custom_fields
+        custom_fields: s.customFields !== void 0 ? typeof s.customFields === "string" ? s.customFields : JSON.stringify(s.customFields) : current.custom_fields,
+        // GPS Coordinates and Client Approval
+        latitude: s.latitude !== void 0 ? s.latitude !== null ? Number(s.latitude) : null : current.latitude,
+        longitude: s.longitude !== void 0 ? s.longitude !== null ? Number(s.longitude) : null : current.longitude,
+        client_signature_data: s.clientSignatureData !== void 0 ? s.clientSignatureData : current.client_signature_data,
+        client_signed_at: s.clientSignedAt !== void 0 ? s.clientSignedAt : current.client_signed_at,
+        client_signer_name: s.clientSignerName !== void 0 ? s.clientSignerName : current.client_signer_name,
+        client_approval_doc_url: s.clientApprovalDocUrl !== void 0 ? s.clientApprovalDocUrl : current.client_approval_doc_url,
+        // On-Site Measured Cable Run Lengths
+        measured_dc_cable_meters: s.measuredDcCableMeters !== void 0 ? s.measuredDcCableMeters !== null ? Number(s.measuredDcCableMeters) : null : current.measured_dc_cable_meters,
+        measured_ac_cable_meters: s.measuredAcCableMeters !== void 0 ? s.measuredAcCableMeters !== null ? Number(s.measuredAcCableMeters) : null : current.measured_ac_cable_meters
       };
+      await ensureSurveyCableColumns();
+      const existingCols = await getSurveyColumns();
       const setClauses = [];
       const values = [];
       for (const [key, val] of Object.entries(updateMap)) {
-        setClauses.push(`${key} = ?`);
-        values.push(val);
+        if (existingCols.size === 0 || existingCols.has(key)) {
+          setClauses.push(`\`${key}\` = ?`);
+          values.push(val);
+        }
       }
       values.push(id);
-      await pool.query(`UPDATE site_surveys SET ${setClauses.join(", ")} WHERE id = ?`, values);
+      if (setClauses.length > 0) {
+        await pool.query(`UPDATE site_surveys SET ${setClauses.join(", ")} WHERE id = ?`, values);
+      }
     }
     const [freshRows] = await pool.query("SELECT * FROM site_surveys WHERE id = ?", [id]);
     const survey = freshRows[0];
@@ -651,6 +772,9 @@ var submitSurveyForReview = async (req, res) => {
     }
     if (!survey.recommended_kw || Number(survey.recommended_kw) <= 0) {
       errors.push("Recommended system capacity must be calculated and greater than 0 kW");
+    }
+    if (!survey.client_signature_data || !survey.client_signature_data.toString().trim()) {
+      errors.push("Client digital signature is required before submitting for review");
     }
     const [photos] = await pool.query("SELECT category FROM survey_photos WHERE survey_id = ?", [id]);
     const categories = new Set(photos.map((p) => p.category));
@@ -990,30 +1114,40 @@ var getBootstrapData = async (req, res) => {
         })),
         leads: leads.map((l) => ({
           id: l.id,
-          name: l.name,
-          email: l.email,
-          phone: l.phone,
-          city: l.city,
-          state: l.state,
-          address: l.address,
-          pincode: l.pincode,
-          source: l.source,
-          status: l.status,
-          priority: l.priority,
-          assignedToId: l.assigned_to_id,
-          assignedToName: l.assigned_to_name,
+          name: l.name || "",
+          email: l.email || "",
+          phone: l.phone || "",
+          city: l.city || "",
+          state: l.state || "Tamil Nadu",
+          address: l.address || "",
+          pincode: l.pincode || "",
+          source: l.source || "Direct",
+          status: l.status || "New",
+          priority: l.priority || "Medium",
+          recommendedPriority: l.recommended_priority,
+          priorityOverrideReason: l.priority_override_reason,
+          buyingIntent: l.buying_intent,
+          assignedToId: l.assigned_to_id || "",
+          assignedToName: l.assigned_to_name || "",
           monthlyBill: Number(l.monthly_bill) || 0,
           sanctionLoad: Number(l.sanction_load) || 0,
           roofAreaSqFt: Number(l.roof_area_sqft) || 0,
           roofType: l.roof_type,
+          connectionSpace: l.connection_space || "Single Space",
           customerType: l.customer_type || "Residential",
           systemType: l.system_type || "On-Grid",
           recommendedKw: Number(l.recommended_kw) || 0,
           estimatedBudget: Number(l.estimated_budget) || 0,
+          consumerNumberDiscom: l.consumer_number_discom || l.eb_service_number || "",
+          ebServiceNumber: l.eb_service_number || l.consumer_number_discom || "",
           notes: l.notes || "",
           createdAt: l.created_at,
           updatedAt: l.updated_at,
-          lastContactedAt: l.last_contacted_at
+          lastContactedAt: l.last_contacted_at,
+          lastModifiedBy: l.last_modified_by || void 0,
+          lastModifiedRole: l.last_modified_role || void 0,
+          lastModifiedAt: l.last_modified_at || void 0,
+          editHistory: typeof l.edit_history === "string" ? JSON.parse(l.edit_history) : l.edit_history || []
         })),
         customers: customers.map((c) => formatCustomer(c, role, custUserMap[c.id])),
         surveys: surveys.map((s) => formatSurvey(s, photosBySurvey[s.id] || [], historyBySurvey[s.id] || [])),
@@ -1028,6 +1162,7 @@ var getBootstrapData = async (req, res) => {
           currentVersion: Number(q.current_version) || 1,
           versions: typeof q.versions === "string" ? JSON.parse(q.versions) : q.versions || [],
           status: q.status,
+          priority: q.priority || "Medium",
           sentDate: q.sent_date,
           validUntil: q.valid_until,
           salespersonId: q.salesperson_id,
@@ -1045,7 +1180,11 @@ var getBootstrapData = async (req, res) => {
           pdfUrl: q.pdf_url,
           convertedToProjectId: q.converted_to_project_id,
           surveyId: q.survey_id,
-          createdAt: q.created_at
+          createdAt: q.created_at,
+          lastModifiedBy: q.last_modified_by || void 0,
+          lastModifiedRole: q.last_modified_role || void 0,
+          lastModifiedAt: q.last_modified_at || void 0,
+          editHistory: typeof q.edit_history === "string" ? JSON.parse(q.edit_history) : q.edit_history || []
         })),
         projects: projects.map((p) => formatProject(p, role)),
         products: products.map((pr) => formatProduct(pr, role)),
@@ -1070,7 +1209,10 @@ var getBootstrapData = async (req, res) => {
           assignedToId: f.assigned_to_id,
           assignedToName: f.assigned_to_name,
           notes: f.notes || "",
-          completedAt: f.completed_at
+          completedAt: f.completed_at,
+          isStruckOut: Boolean(f.is_struck_out),
+          outcome: f.outcome || "",
+          createdAt: f.created_at || ""
         })),
         suppliers: suppliers.map((su) => ({
           id: su.id,
@@ -1109,24 +1251,24 @@ function formatCustomer(c, role, portalUsername) {
   const isInstallation = role === "Installation Team";
   return {
     id: c.id,
-    name: c.name,
-    email: c.email,
-    phone: c.phone,
-    alternatePhone: c.alternate_phone,
-    address: c.address,
-    city: c.city,
-    state: c.state,
-    pincode: c.pincode,
-    consumerNumberDiscom: c.consumer_number_discom,
-    discomName: c.discom_name,
-    gstin: c.gstin,
-    convertedFromLeadId: c.converted_from_lead_id,
+    name: c.name || "",
+    email: c.email || "",
+    phone: c.phone || "",
+    alternatePhone: c.alternate_phone || "",
+    address: c.address || "",
+    city: c.city || "",
+    state: c.state || "",
+    pincode: c.pincode || "",
+    consumerNumberDiscom: c.consumer_number_discom || "",
+    discomName: c.discom_name || "",
+    gstin: c.gstin || "",
+    convertedFromLeadId: c.converted_from_lead_id || "",
     totalSystemKw: Number(c.total_system_kw) || 0,
     totalOrderValue: isInstallation ? 0 : Number(c.total_order_value) || 0,
     paidAmount: isInstallation ? 0 : Number(c.paid_amount) || 0,
     balanceAmount: isInstallation ? 0 : Number(c.balance_amount) || 0,
-    status: c.status,
-    createdAt: c.created_at,
+    status: c.status || "Active",
+    createdAt: c.created_at || "",
     portalUsername: portalUsername || c.portal_username || null
   };
 }
@@ -1166,7 +1308,58 @@ function formatProject(p, role) {
     warrantyActivated: Boolean(p.warranty_activated),
     amcInitiated: Boolean(p.amc_initiated),
     discomSanctionNumber: p.discom_sanction_number,
-    notes: p.notes || ""
+    notes: p.notes || "",
+    lastModifiedBy: p.last_modified_by || void 0,
+    lastModifiedRole: p.last_modified_role || void 0,
+    lastModifiedAt: p.last_modified_at || void 0,
+    editHistory: typeof p.edit_history === "string" ? JSON.parse(p.edit_history) : p.edit_history || [],
+    // Advance Payment Gate
+    advancePaymentReceived: Boolean(p.advance_payment_received),
+    advancePaymentAmount: p.advance_payment_amount ? Number(p.advance_payment_amount) : void 0,
+    advancePaymentMode: p.advance_payment_mode || void 0,
+    advancePaymentRef: p.advance_payment_ref || void 0,
+    advancePaymentDate: p.advance_payment_date || void 0,
+    advancePaymentNotes: p.advance_payment_notes || void 0,
+    // DISCOM Net Metering Paperwork
+    discomNetMeteringFee: p.discom_net_metering_fee ? Number(p.discom_net_metering_fee) : void 0,
+    discomFeeReceiptUrl: p.discom_fee_receipt_url || void 0,
+    discomAgreementSigned: Boolean(p.discom_agreement_signed),
+    discomAgreementDocUrl: p.discom_agreement_doc_url || void 0,
+    // Installation Target Days Commitment & 4-Step Coordinated Workflow
+    installationTargetDays: p.installation_target_days ? Number(p.installation_target_days) : 3,
+    installationDurationDays: p.installation_duration_days ? Number(p.installation_duration_days) : 2,
+    materialArrivedOnSite: Boolean(p.material_arrived_on_site || p.checklist?.materialArrivedOnSite),
+    materialArrivedConfirmedAt: p.material_arrived_confirmed_at || p.checklist?.materialArrivedConfirmedAt || void 0,
+    materialArrivedConfirmedBy: p.material_arrived_confirmed_by || p.checklist?.materialArrivedConfirmedBy || void 0,
+    siteSurveyVerified: Boolean(p.site_survey_verified || p.checklist?.siteSurveyVerified),
+    siteSurveyVerifiedAt: p.site_survey_verified_at || p.checklist?.siteSurveyVerifiedAt || void 0,
+    siteSurveyVerifiedBy: p.site_survey_verified_by || p.checklist?.siteSurveyVerifiedBy || void 0,
+    attendancePhotoUrl: p.attendance_photo_url || p.checklist?.attendancePhotoUrl || void 0,
+    arrivedMaterialIds: (typeof p.checklist === "string" ? (() => {
+      try {
+        return JSON.parse(p.checklist)?.arrivedMaterialIds;
+      } catch {
+        return [];
+      }
+    })() : p.checklist?.arrivedMaterialIds) || [],
+    // Post-Installation Geotagged Photos & 20-Sec Live Video Gate
+    postInstallPhotos: typeof p.post_install_photos === "string" ? (() => {
+      try {
+        return JSON.parse(p.post_install_photos);
+      } catch {
+        return void 0;
+      }
+    })() : p.post_install_photos || void 0,
+    commissioningVideoUrl: p.commissioning_video_url || void 0,
+    pmClearanceStatus: p.pm_clearance_status || "Pending",
+    pmClearedBy: p.pm_cleared_by || void 0,
+    pmClearedAt: p.pm_cleared_at || void 0,
+    // DISCOM Grid Synchronization & AMC
+    ebInspectionCleared: Boolean(p.eb_inspection_cleared),
+    solarMeterFixed: Boolean(p.solar_meter_fixed),
+    solarMeterInitialReading: p.solar_meter_initial_reading ? Number(p.solar_meter_initial_reading) : void 0,
+    gridLiveDate: p.grid_live_date || void 0,
+    amcWarrantyYears: p.amc_warranty_years ? Number(p.amc_warranty_years) : 5
   };
 }
 function formatProduct(pr, role) {
@@ -1223,7 +1416,12 @@ function formatPayment(py) {
     transactionReference: py.transaction_reference,
     bankName: py.bank_name,
     status: py.status,
-    recordedBy: py.recorded_by
+    recordedBy: py.recorded_by,
+    isAdvance: Boolean(py.is_advance),
+    quotationId: py.quotation_id || void 0,
+    reconciled: Boolean(py.reconciled),
+    reconciledAt: py.reconciled_at || void 0,
+    reconciledBy: py.reconciled_by || void 0
   };
 }
 function formatWarranty(w) {
@@ -1706,6 +1904,7 @@ var createLead = async (req, res) => {
     }
     const customerType = l.customerType || l.customer_type || "Residential";
     const systemType = l.systemType || l.system_type || "On-Grid";
+    const connectionSpace = l.connectionSpace || l.connection_space || "Single Space";
     let finalAssignedId = l.assignedToId;
     let finalAssignedName = l.assignedToName;
     if (!finalAssignedId || finalAssignedId === "auto" || !finalAssignedName) {
@@ -1734,8 +1933,8 @@ var createLead = async (req, res) => {
     l.assignedToId = finalAssignedId;
     l.assignedToName = finalAssignedName;
     await pool.query(
-      `INSERT INTO leads (id, name, email, phone, city, state, address, pincode, source, status, priority, recommended_priority, priority_override_reason, buying_intent, assigned_to_id, assigned_to_name, monthly_bill, sanction_load, roof_area_sqft, roof_type, recommended_kw, estimated_budget, notes, customer_type, system_type, created_at, updated_at, last_contacted_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO leads (id, name, email, phone, city, state, address, pincode, source, status, priority, recommended_priority, priority_override_reason, buying_intent, assigned_to_id, assigned_to_name, monthly_bill, sanction_load, roof_area_sqft, roof_type, connection_space, recommended_kw, estimated_budget, notes, customer_type, system_type, created_at, updated_at, last_contacted_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         l.id,
         l.name.trim(),
@@ -1757,6 +1956,7 @@ var createLead = async (req, res) => {
         l.sanctionLoad || 0,
         l.roofAreaSqFt || 0,
         l.roofType || null,
+        connectionSpace,
         l.recommendedKw || 0,
         l.estimatedBudget || 0,
         l.notes || "",
@@ -1769,6 +1969,7 @@ var createLead = async (req, res) => {
     );
     l.customerType = customerType;
     l.systemType = systemType;
+    l.connectionSpace = connectionSpace;
     res.json({ success: true, lead: l });
   } catch (err) {
     console.error("Error creating lead:", err);
@@ -1779,6 +1980,7 @@ var updateLead = async (req, res) => {
   try {
     const { id } = req.params;
     const updates = req.body;
+    const user = req.user;
     const fields = [];
     const values = [];
     if (updates.name !== void 0) {
@@ -1821,6 +2023,10 @@ var updateLead = async (req, res) => {
       fields.push("system_type = ?");
       values.push(updates.systemType || updates.system_type);
     }
+    if (updates.connectionSpace !== void 0 || updates.connection_space !== void 0) {
+      fields.push("connection_space = ?");
+      values.push(updates.connectionSpace || updates.connection_space);
+    }
     if (updates.notes !== void 0) {
       fields.push("notes = ?");
       values.push(updates.notes);
@@ -1836,6 +2042,34 @@ var updateLead = async (req, res) => {
     if (updates.assignedToName !== void 0) {
       fields.push("assigned_to_name = ?");
       values.push(updates.assignedToName);
+    }
+    if (user?.role === "Super Admin" || user?.role === "CEO" || updates.lastModifiedRole === "Super Admin") {
+      const modifierName = user?.name || updates.lastModifiedBy || "Super Admin";
+      const modifierRole = user?.role || updates.lastModifiedRole || "Super Admin";
+      const modifiedAt = (/* @__PURE__ */ new Date()).toISOString();
+      fields.push("last_modified_by = ?");
+      values.push(modifierName);
+      fields.push("last_modified_role = ?");
+      values.push(modifierRole);
+      fields.push("last_modified_at = ?");
+      values.push(modifiedAt);
+      try {
+        const [currLead] = await pool.query("SELECT edit_history FROM leads WHERE id = ? LIMIT 1", [id]);
+        let history = [];
+        if (currLead && currLead.length > 0 && currLead[0].edit_history) {
+          history = typeof currLead[0].edit_history === "string" ? JSON.parse(currLead[0].edit_history) : currLead[0].edit_history;
+        }
+        history.push({
+          timestamp: modifiedAt,
+          editedBy: modifierName,
+          editorRole: modifierRole,
+          changesSummary: Object.keys(updates).filter((k) => !["lastModifiedBy", "lastModifiedRole", "lastModifiedAt", "editHistory"].includes(k)).join(", ") || "Lead details updated"
+        });
+        fields.push("edit_history = ?");
+        values.push(JSON.stringify(history));
+      } catch (histErr) {
+        console.warn("Could not update lead edit history:", histErr);
+      }
     }
     if (fields.length > 0) {
       values.push(id);
@@ -1890,6 +2124,7 @@ surveysRouter.delete("/:id", authenticateToken, requireRole(["Survey Engineer", 
 import { Router as Router4 } from "express";
 
 // server/controllers/quotations.controller.ts
+import fs3 from "fs";
 import path3 from "path";
 
 // src/utils/quotationEngine.ts
@@ -2066,7 +2301,7 @@ function calculateQuotation(input) {
   const bosDesc = "ACDB & DCDB with Type-II SPDs, Polycab Solar DC/AC Cables, Chemical Earthing Pits & ESE Lightning Arrester";
   const installRatePerKw = tier === "Premium Bifacial" ? 4200 : 4e3;
   const installTotal = Math.round(capacityKw * installRatePerKw);
-  const installDesc = "Complete civil mounting, cable routing in conduits, safety labeling, DISCOM net-metering liaison and synchronization";
+  const installDesc = "Complete pre-engineered structural mounting, cable routing in conduits, safety labeling, DISCOM net-metering liaison and synchronization";
   let rawItems = [];
   if (input.customItems && input.customItems.length > 0) {
     rawItems = input.customItems.map((ci, idx) => {
@@ -2167,7 +2402,7 @@ function calculateQuotation(input) {
         id: "QI-5",
         category: "Installation & Commissioning",
         description: installDesc,
-        specification: "Civil mounting & liaison",
+        specification: "Structural mounting & liaison",
         make: "AB Energy Solutions",
         makeModel: "AB Energy Solutions Certified EPC Crew",
         hsnSacCode: QUOTATION_CONFIG.DEFAULT_HSN_CODES.INSTALLATION,
@@ -2260,18 +2495,18 @@ function calculateQuotation(input) {
     subsidyEligible = true;
     if (capacityKw <= 1) {
       subsidyAmount = QUOTATION_CONFIG.RESIDENTIAL_SUBSIDY.SLAB_1KW_MAX;
-      subsidyNotes = "PM Surya Ghar: \u20B930,000 for 1 kW residential rooftop";
+      subsidyNotes = "Govt. Subsidy: \u20B930,000 for 1 kW residential rooftop";
     } else if (capacityKw <= 2) {
       subsidyAmount = QUOTATION_CONFIG.RESIDENTIAL_SUBSIDY.SLAB_2KW_MAX;
-      subsidyNotes = "PM Surya Ghar: \u20B960,000 for 2 kW residential rooftop";
+      subsidyNotes = "Govt. Subsidy: \u20B960,000 for 2 kW residential rooftop";
     } else {
       subsidyAmount = QUOTATION_CONFIG.RESIDENTIAL_SUBSIDY.SLAB_3KW_AND_ABOVE_MAX;
-      subsidyNotes = "PM Surya Ghar: \u20B978,000 maximum capped central subsidy for \u2265 3 kW";
+      subsidyNotes = "Govt. Subsidy: \u20B978,000 maximum capped central subsidy for \u2265 3 kW";
     }
   } else {
     subsidyEligible = false;
     subsidyAmount = 0;
-    subsidyNotes = "Commercial / Industrial / Institutional installations are not eligible for PM Surya Ghar residential central subsidy.";
+    subsidyNotes = "Commercial / Industrial / Institutional installations are not eligible for residential central DBT subsidy.";
   }
   const indicativeNetCustomerCost = Math.max(0, finalContractAmount - subsidyAmount);
   const annualGenerationKwh = Math.round(actualCapacityKwp * QUOTATION_CONFIG.SPECIFIC_YIELD_KWH_PER_KWP);
@@ -2335,7 +2570,7 @@ function calculateQuotation(input) {
       "50% upon material dispatch against warehouse delivery challan.",
       "10% upon successful DISCOM net-metering synchronization and commissioning sign-off.",
       "Quotation valid for 14 calendar days from date of issuance.",
-      "Central subsidy under PM Surya Ghar is credited directly by the Government to the customer bank account post DISCOM inspection via DBT.",
+      "Central Govt. subsidy support is credited directly to the customer bank account post DISCOM inspection via DBT.",
       "Standard 25-Year linear performance warranty on Tier-1 ALMM solar panels."
     ],
     warranties: {
@@ -2566,7 +2801,7 @@ The quotation includes the complete supply, installation, testing, and commissio
       p4Y += 16;
       doc.font("Helvetica").fontSize(8.5).fillColor(bodyDark).text("We will execute the complete following turnkey EPC activities:", 40, p4Y);
       p4Y += 15;
-      const scopeCol1 = ["Site Survey", "Engineering Support", "Supply of Material"];
+      const scopeCol1 = ["Site Survey", "Engineering Support", "Supply of Material", "Subsidy Support"];
       const scopeCol2 = ["Complete Installation", "Testing & Commissioning", "Service Support"];
       let scY1 = p4Y;
       scopeCol1.forEach((sc) => {
@@ -2583,8 +2818,8 @@ The quotation includes the complete supply, installation, testing, and commissio
       p4Y = Math.max(scY1, scY2) + 20;
       doc.font("Helvetica-Bold").fontSize(11).fillColor(headingNavy).text("Bill Of Materials", 40, p4Y);
       p4Y += 16;
-      const colX = [40, 75, 185, 360, 455, 500];
-      const colW = [35, 110, 175, 95, 45, 55];
+      const colX = [40, 80, 220, 430, 485];
+      const colW = [40, 140, 210, 55, 70];
       const tableW = 515;
       const drawBOMTableHeader = (y, isContinued = false) => {
         doc.rect(40, y, tableW, 20).fillAndStroke("#0F172A", "#0F172A");
@@ -2592,9 +2827,8 @@ The quotation includes the complete supply, installation, testing, and commissio
         doc.text("S.NO", colX[0], y + 6, { width: colW[0], align: "center" });
         doc.text(isContinued ? "MATERIALS (Contd.)" : "MATERIALS", colX[1], y + 6, { width: colW[1], align: "left" });
         doc.text("SPECIFICATION", colX[2], y + 6, { width: colW[2], align: "left" });
-        doc.text("MAKE", colX[3], y + 6, { width: colW[3], align: "left" });
-        doc.text("UNITS", colX[4], y + 6, { width: colW[4], align: "center" });
-        doc.text("QUANTITY", colX[5], y + 6, { width: colW[5], align: "center" });
+        doc.text("UNITS", colX[3], y + 6, { width: colW[3], align: "center" });
+        doc.text("QUANTITY", colX[4], y + 6, { width: colW[4], align: "center" });
       };
       drawBOMTableHeader(p4Y);
       p4Y += 20;
@@ -2602,7 +2836,6 @@ The quotation includes the complete supply, installation, testing, and commissio
       bomItems.forEach((item, idx) => {
         const materialName = item.category || item.description || "Solar Component";
         const spec = item.specification || item.description || item.makeModel || "Standard";
-        const make = item.make || item.makeModel?.split(" ")[0] || "Reputed Tier-1";
         const unit = item.unit || "Nos";
         const qty = item.quantity || 1;
         const rowHeight = 19;
@@ -2619,9 +2852,8 @@ The quotation includes the complete supply, installation, testing, and commissio
         doc.text(String(idx + 1), colX[0], p4Y + 5, { width: colW[0], align: "center" });
         doc.font("Helvetica-Bold").text(materialName, colX[1], p4Y + 5, { width: colW[1], ellipsis: true });
         doc.font("Helvetica").text(spec, colX[2], p4Y + 5, { width: colW[2], ellipsis: true });
-        doc.text(make, colX[3], p4Y + 5, { width: colW[3], ellipsis: true });
-        doc.text(unit, colX[4], p4Y + 5, { width: colW[4], align: "center" });
-        doc.font("Helvetica-Bold").text(String(qty), colX[5], p4Y + 5, { width: colW[5], align: "center" });
+        doc.text(unit, colX[3], p4Y + 5, { width: colW[3], align: "center" });
+        doc.font("Helvetica-Bold").text(String(qty), colX[4], p4Y + 5, { width: colW[4], align: "center" });
         p4Y += rowHeight;
       });
       p4Y += 12;
@@ -2639,7 +2871,7 @@ The quotation includes the complete supply, installation, testing, and commissio
       p5Y += 16;
       const clientScopeCol1 = [
         "Provide a shadow-free installation area.",
-        "Minor civil works, if required.",
+        "Rooftop access and electricity/water for testing.",
         "Statutory charges for Bi-Directional Net Meter."
       ];
       const clientScopeCol2 = [
@@ -2688,29 +2920,32 @@ The quotation includes the complete supply, installation, testing, and commissio
         ftY2 += 15;
       });
       p5Y = Math.max(ftY1, ftY2) + 24;
-      doc.font("Helvetica-Bold").fontSize(11).fillColor(headingNavy).text("System Capacity & Pricing", 40, p5Y);
+      doc.font("Helvetica-Bold").fontSize(11).fillColor(headingNavy).text("System Capacity & Subsidy Details", 40, p5Y);
       p5Y += 16;
       const priceW = 515;
-      const hasSubsidy = data.subsidyEligible && data.subsidyAmount > 0;
+      const subsidyAmt = data.subsidyAmount || (data.systemCapacityKw >= 3 ? 78e3 : data.systemCapacityKw * 3e4);
+      const netCustomerCost = Math.max(0, data.finalContractAmount - subsidyAmt);
       doc.rect(40, p5Y, priceW, 22).fillAndStroke("#0F172A", "#0F172A");
-      doc.font("Helvetica-Bold").fontSize(8).fillColor("#FFFFFF");
-      doc.text("System Capacity", 45, p5Y + 6, { width: 145, align: "center" });
-      doc.text("Domestic Price (Including GST)", 195, p5Y + 6, { width: 165, align: "center" });
-      doc.text(hasSubsidy ? "Govt Subsidy / Net Cost" : "Estimated ROI", 365, p5Y + 6, { width: 185, align: "center" });
+      doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#FFFFFF");
+      doc.text("System Capacity", 42, p5Y + 6, { width: 120, align: "center" });
+      doc.text("Domestic Price (Incl. GST)", 165, p5Y + 6, { width: 120, align: "center" });
+      doc.text("Govt. Subsidy Support", 290, p5Y + 6, { width: 120, align: "center" });
+      doc.text("Net Customer Cost", 415, p5Y + 6, { width: 135, align: "center" });
       p5Y += 22;
       const finalPriceStr = `\u20B9${Math.round(data.finalContractAmount).toLocaleString("en-IN")}/-`;
       doc.rect(40, p5Y, priceW, 36).fillAndStroke("#FFFFFF", "#CBD5E1");
-      doc.font("Helvetica-Bold").fontSize(9).fillColor(bodyDark);
-      doc.text(`${data.systemCapacityKw}KW On-grid Solar System`, 45, p5Y + 13, { width: 145, align: "center" });
-      doc.font("Helvetica-Bold").fontSize(12).fillColor(headingNavy);
-      doc.text(finalPriceStr, 195, p5Y + 11, { width: 165, align: "center" });
-      if (hasSubsidy) {
-        const netCost = data.indicativeNetCustomerCost || data.finalContractAmount - data.subsidyAmount;
-        doc.font("Helvetica-Bold").fontSize(8).fillColor(greenAccent).text(`Subsidy: \u20B9${Math.round(data.subsidyAmount).toLocaleString("en-IN")}`, 365, p5Y + 7, { width: 185, align: "center" });
-        doc.font("Helvetica-Bold").fontSize(9.5).fillColor(headingNavy).text(`Net Cost: \u20B9${Math.round(netCost).toLocaleString("en-IN")}/-`, 365, p5Y + 20, { width: 185, align: "center" });
-      } else {
-        doc.font("Helvetica-Bold").fontSize(9.5).fillColor(headingNavy).text("3.5 - 4.0 Years", 365, p5Y + 12, { width: 185, align: "center" });
-      }
+      doc.font("Helvetica-Bold").fontSize(8.5).fillColor(bodyDark);
+      doc.text(`${data.systemCapacityKw} kW On-Grid Solar`, 42, p5Y + 13, { width: 120, align: "center" });
+      doc.font("Helvetica-Bold").fontSize(10.5).fillColor(headingNavy);
+      doc.text(finalPriceStr, 165, p5Y + 12, { width: 120, align: "center" });
+      doc.font("Helvetica-Bold").fontSize(10.5).fillColor(greenAccent);
+      doc.text(`\u20B9${Math.round(subsidyAmt).toLocaleString("en-IN")}`, 290, p5Y + 8, { width: 120, align: "center" });
+      doc.font("Helvetica").fontSize(6.5).fillColor(textMuted);
+      doc.text("(Direct DBT Support)", 290, p5Y + 22, { width: 120, align: "center" });
+      doc.font("Helvetica-Bold").fontSize(10.5).fillColor(headingNavy);
+      doc.text(`\u20B9${Math.round(netCustomerCost).toLocaleString("en-IN")}/-`, 415, p5Y + 8, { width: 135, align: "center" });
+      doc.font("Helvetica").fontSize(6.5).fillColor(textMuted);
+      doc.text("(Net Payable Investment)", 415, p5Y + 22, { width: 135, align: "center" });
       p5Y += 46;
       doc.font("Helvetica-Bold").fontSize(11).fillColor(headingNavy).text("Payment Terms", 40, p5Y);
       p5Y += 16;
@@ -2725,11 +2960,11 @@ The quotation includes the complete supply, installation, testing, and commissio
       const termsList = [
         "Quotation Validity: 7 Days from issue date.",
         "GST is included in the above quoted price.",
-        "Additional civil work will be charged extra 800/kW.",
+        "Custom structural elevations beyond standard height will be charged extra.",
         "Net Meter approval is subject to TANGEDCO / DISCOM regulations.",
         "Delivery is subject to material readiness and site access.",
-        "Any additional civil or electrical work outside the quoted scope will be charged extra.",
-        "Elevated above 4 Feet mounting structures will be charged extra 2500 per kW.",
+        "Any additional cabling or elevated structure work outside the quoted scope will be charged extra.",
+        "Pre-engineered HDG solar mounting structures included in scope.",
         "Force majeure conditions and DISCOM grid outages are excluded."
       ];
       termsList.forEach((tm) => {
@@ -2738,14 +2973,6 @@ The quotation includes the complete supply, installation, testing, and commissio
         p6Y += 16;
       });
       p6Y += 18;
-      doc.rect(40, p6Y, 515, 36).fillAndStroke(greenLight, "#A7F3D0");
-      doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#065F46").text(
-        "Thank you for your valuable opportunity. We look forward to delivering a reliable solar solution and building a long-term partnership with you.",
-        55,
-        p6Y + 11,
-        { width: 485, align: "center" }
-      );
-      p6Y += 52;
       doc.font("Helvetica-Bold").fontSize(11).fillColor(headingNavy).text("Contact Details", 40, p6Y);
       p6Y += 16;
       const cardHeight = 96;
@@ -2759,6 +2986,14 @@ The quotation includes the complete supply, installation, testing, and commissio
       doc.font("Helvetica-Bold").fontSize(8).fillColor(headingNavy).text("For AB ENERGY SOLUTIONS", 380, p6Y + 18, { width: 160, align: "center" });
       doc.moveTo(395, p6Y + 60).lineTo(525, p6Y + 60).lineWidth(0.5).strokeColor("#94A3B8").stroke();
       doc.font("Helvetica").fontSize(7.5).fillColor("#64748B").text("Authorized Signatory", 380, p6Y + 65, { width: 160, align: "center" });
+      p6Y += cardHeight + 20;
+      doc.rect(40, p6Y, 515, 36).fillAndStroke(greenLight, "#A7F3D0");
+      doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#065F46").text(
+        "Thank you for your valuable opportunity. We look forward to delivering a reliable solar solution and building a long-term partnership with you.",
+        55,
+        p6Y + 11,
+        { width: 485, align: "center" }
+      );
       const range = doc.bufferedPageRange();
       for (let i = range.start; i < range.start + range.count; i++) {
         doc.switchToPage(i);
@@ -2810,9 +3045,22 @@ function formatQuotation(q) {
     totalSgst: Number(q.total_sgst) || 0,
     totalIgst: Number(q.total_igst) || 0,
     amountInWords: q.amount_in_words || "",
+    priority: q.priority || "Medium",
+    lastModifiedBy: q.last_modified_by || void 0,
+    lastModifiedRole: q.last_modified_role || void 0,
+    lastModifiedAt: q.last_modified_at || void 0,
+    editHistory: typeof q.edit_history === "string" ? JSON.parse(q.edit_history) : q.edit_history || [],
     surveyId: q.survey_id,
     pdfUrl: q.pdf_url,
     convertedToProjectId: q.converted_to_project_id,
+    advancePaymentReceived: Boolean(q.advance_payment_received),
+    advancePaymentAmount: Number(q.advance_payment_amount) || 0,
+    advancePaymentDate: q.advance_payment_date || void 0,
+    advancePaymentMode: q.advance_payment_mode || void 0,
+    advancePaymentRef: q.advance_payment_ref || void 0,
+    materialsPurchasedConfirmed: Boolean(q.materials_purchased_confirmed),
+    materialsPurchasedAt: q.materials_purchased_at || void 0,
+    materialsPurchasedBy: q.materials_purchased_by || void 0,
     createdAt: q.created_at
   };
 }
@@ -3397,6 +3645,10 @@ var updateQuotation = async (req, res) => {
         }
       }
     }
+    if (updates.priority !== void 0) {
+      fields.push("priority = ?");
+      values.push(updates.priority);
+    }
     if (updates.approvalStatus !== void 0) {
       fields.push("approval_status = ?");
       values.push(updates.approvalStatus);
@@ -3406,6 +3658,34 @@ var updateQuotation = async (req, res) => {
       values.push("Approved");
       fields.push("discount_approved_by = ?");
       values.push(user?.name || "Sales Manager");
+    }
+    if (user?.role === "Super Admin" || user?.role === "CEO" || updates.lastModifiedRole === "Super Admin") {
+      const modifierName = user?.name || updates.lastModifiedBy || "Super Admin";
+      const modifierRole = user?.role || updates.lastModifiedRole || "Super Admin";
+      const modifiedAt = (/* @__PURE__ */ new Date()).toISOString();
+      fields.push("last_modified_by = ?");
+      values.push(modifierName);
+      fields.push("last_modified_role = ?");
+      values.push(modifierRole);
+      fields.push("last_modified_at = ?");
+      values.push(modifiedAt);
+      try {
+        const [currQ] = await pool.query("SELECT edit_history FROM quotations WHERE id = ? LIMIT 1", [id]);
+        let history = [];
+        if (currQ && currQ.length > 0 && currQ[0].edit_history) {
+          history = typeof currQ[0].edit_history === "string" ? JSON.parse(currQ[0].edit_history) : currQ[0].edit_history;
+        }
+        history.push({
+          timestamp: modifiedAt,
+          editedBy: modifierName,
+          editorRole: modifierRole,
+          changesSummary: Object.keys(updates).filter((k) => !["lastModifiedBy", "lastModifiedRole", "lastModifiedAt", "editHistory"].includes(k)).join(", ") || "Quotation updated"
+        });
+        fields.push("edit_history = ?");
+        values.push(JSON.stringify(history));
+      } catch (histErr) {
+        console.warn("Could not update quotation edit history:", histErr);
+      }
     }
     if (fields.length > 0) {
       values.push(id);
@@ -3815,6 +4095,54 @@ var acceptQuotation = async (req, res) => {
     }
     await conn.commit();
     conn.release();
+    try {
+      const capKw = Number(capacityKw) || 3;
+      const isRes = capKw <= 10;
+      const subAmount = isRes ? capKw <= 1 ? 3e4 : capKw <= 2 ? 6e4 : 78e3 : 0;
+      const subsidiesFile = path3.resolve(process.cwd(), "data", "subsidies.json");
+      let currentSubsidies = [];
+      if (fs3.existsSync(subsidiesFile)) {
+        try {
+          currentSubsidies = JSON.parse(fs3.readFileSync(subsidiesFile, "utf-8"));
+        } catch (_) {
+        }
+      }
+      if (!currentSubsidies.some((s) => s.project_id === projectId)) {
+        currentSubsidies.unshift({
+          id: `SUB-${projectId.replace("PROJECT-", "").replace("PRJ-", "")}`,
+          project_id: projectId,
+          project_number: projectId,
+          customer_name: customerName,
+          customer_phone: customerPhone,
+          customer_type: isRes ? "residential" : "commercial",
+          is_eligible: isRes,
+          site_address: customerAddress,
+          discom_name: "TANGEDCO",
+          consumer_number: "Pending Consumer No",
+          sanctioned_load_kw: capKw,
+          system_capacity_kw: capKw,
+          subsidy_applicable_amount: subAmount,
+          dcr_modules_used: isRes,
+          panel_make_and_model: isRes ? "Tata Power Solar / Waaree 545W Mono PERC (DCR)" : "Tier-1 High Efficiency Panels",
+          inverter_make_and_model: `${capKw}kW On-Grid Solar Inverter`,
+          portal_application_no: isRes ? `PMS-TN-${(/* @__PURE__ */ new Date()).getFullYear()}-${projectId.replace(/\D/g, "").slice(-5) || Math.floor(1e4 + Math.random() * 9e4)}` : "N/A (Commercial Project)",
+          application_submission_date: (/* @__PURE__ */ new Date()).toISOString().split("T")[0],
+          current_stage: isRes ? 1 : 0,
+          current_stage_name: isRes ? "Portal Registration Submitted" : "Not Eligible (Commercial Project)",
+          stage_status: "in_progress",
+          days_in_current_stage: 1,
+          is_delayed: false,
+          documents: { electricity_bill: true, aadhaar_card: isRes, cancelled_cheque: false, roof_photo_geotagged: true, dcr_certificate: isRes, tfr_letter: false, wcr_copy: false, net_meter_test_report: false, commissioning_cert: false },
+          notes: `Auto-generated on acceptance of Quotation ${quote.quotation_number}`,
+          last_updated: (/* @__PURE__ */ new Date()).toISOString().split("T")[0]
+        });
+        const sDir = path3.dirname(subsidiesFile);
+        if (!fs3.existsSync(sDir)) fs3.mkdirSync(sDir, { recursive: true });
+        fs3.writeFileSync(subsidiesFile, JSON.stringify(currentSubsidies, null, 2), "utf-8");
+      }
+    } catch (subErr) {
+      console.warn("[Subsidy Auto-Sync] Non-blocking notice:", subErr);
+    }
     const [projRows] = await pool.query("SELECT * FROM projects WHERE id = ? LIMIT 1", [projectId]);
     res.json({
       success: true,
@@ -4125,6 +4453,10 @@ customersRouter.put("/:id", authenticateToken, requireCustomerOwnership(), updat
 // server/routes/projects.routes.ts
 import { Router as Router6 } from "express";
 
+// server/controllers/projects.controller.ts
+import fs4 from "fs";
+import path4 from "path";
+
 // server/controllers/notifications.controller.ts
 async function createNotification(params) {
   try {
@@ -4209,6 +4541,53 @@ var createProject = async (req, res) => {
         p.notes || ""
       ]
     );
+    try {
+      const capKw = Number(p.capacityKw) || 3;
+      const isRes = capKw <= 10;
+      const subAmount = isRes ? capKw <= 1 ? 3e4 : capKw <= 2 ? 6e4 : 78e3 : 0;
+      const subsidiesFile = path4.resolve(process.cwd(), "data", "subsidies.json");
+      let currentSubsidies = [];
+      if (fs4.existsSync(subsidiesFile)) {
+        try {
+          currentSubsidies = JSON.parse(fs4.readFileSync(subsidiesFile, "utf-8"));
+        } catch (_) {
+        }
+      }
+      if (!currentSubsidies.some((s) => s.project_id === p.id)) {
+        currentSubsidies.unshift({
+          id: `SUB-${String(p.id).replace("PROJECT-", "").replace("PRJ-", "")}`,
+          project_id: p.id,
+          project_number: p.id,
+          customer_name: p.customerName || "Customer",
+          customer_phone: p.customerPhone || "",
+          customer_type: isRes ? "residential" : "commercial",
+          is_eligible: isRes,
+          site_address: p.customerAddress || "",
+          discom_name: "TANGEDCO",
+          consumer_number: p.discomSanctionNumber || "Pending Consumer No",
+          sanctioned_load_kw: capKw,
+          system_capacity_kw: capKw,
+          subsidy_applicable_amount: subAmount,
+          dcr_modules_used: isRes,
+          panel_make_and_model: isRes ? "Tata Power Solar / Waaree 545W Mono PERC (DCR)" : "Tier-1 High Efficiency Panels",
+          inverter_make_and_model: `${capKw}kW On-Grid Solar Inverter`,
+          portal_application_no: isRes ? `PMS-TN-${(/* @__PURE__ */ new Date()).getFullYear()}-${String(p.id).replace(/\D/g, "").slice(-5) || Math.floor(1e4 + Math.random() * 9e4)}` : "N/A (Commercial Project)",
+          application_submission_date: (/* @__PURE__ */ new Date()).toISOString().split("T")[0],
+          current_stage: isRes ? 1 : 0,
+          current_stage_name: isRes ? "Portal Registration Submitted" : "Not Eligible (Commercial Project)",
+          stage_status: "in_progress",
+          days_in_current_stage: 1,
+          is_delayed: false,
+          documents: { electricity_bill: true, aadhaar_card: isRes, cancelled_cheque: false, roof_photo_geotagged: true, dcr_certificate: isRes, tfr_letter: false, wcr_copy: false, net_meter_test_report: false, commissioning_cert: false },
+          notes: `Auto-generated for Project ${p.id}`,
+          last_updated: (/* @__PURE__ */ new Date()).toISOString().split("T")[0]
+        });
+        const sDir = path4.dirname(subsidiesFile);
+        if (!fs4.existsSync(sDir)) fs4.mkdirSync(sDir, { recursive: true });
+        fs4.writeFileSync(subsidiesFile, JSON.stringify(currentSubsidies, null, 2), "utf-8");
+      }
+    } catch (_) {
+    }
     res.json({ success: true, project: p });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -4223,10 +4602,6 @@ var updateProject = async (req, res) => {
     if (updates.stage !== void 0) {
       baseFields.push("stage = ?");
       baseValues.push(updates.stage);
-    }
-    if (updates.checklist !== void 0) {
-      baseFields.push("checklist = ?");
-      baseValues.push(JSON.stringify(updates.checklist));
     }
     if (updates.tasks !== void 0) {
       baseFields.push("tasks = ?");
@@ -4248,6 +4623,10 @@ var updateProject = async (req, res) => {
       baseFields.push("site_readiness_notes = ?");
       baseValues.push(updates.siteReadinessNotes);
     }
+    if (updates.startDate !== void 0 || updates.start_date !== void 0) {
+      baseFields.push("start_date = ?");
+      baseValues.push(updates.startDate || updates.start_date);
+    }
     if (updates.targetCompletionDate !== void 0 || updates.target_completion_date !== void 0) {
       baseFields.push("target_completion_date = ?");
       baseValues.push(updates.targetCompletionDate || updates.target_completion_date);
@@ -4260,6 +4639,64 @@ var updateProject = async (req, res) => {
       baseFields.push("notes = ?");
       baseValues.push(updates.notes);
     }
+    let checklistToSave = updates.checklist;
+    if (checklistToSave === void 0) {
+      try {
+        const [currRows] = await pool.query("SELECT checklist FROM projects WHERE id = ? LIMIT 1", [id]);
+        if (currRows && currRows.length > 0 && currRows[0].checklist) {
+          checklistToSave = typeof currRows[0].checklist === "string" ? JSON.parse(currRows[0].checklist) : currRows[0].checklist;
+        }
+      } catch (_) {
+      }
+    }
+    if (!checklistToSave || typeof checklistToSave !== "object") {
+      checklistToSave = {};
+    }
+    if (updates.arrivedMaterialIds !== void 0) checklistToSave.arrivedMaterialIds = updates.arrivedMaterialIds;
+    if (updates.materialArrivedOnSite !== void 0) checklistToSave.materialArrivedOnSite = updates.materialArrivedOnSite;
+    if (updates.materialArrivedConfirmedAt !== void 0) checklistToSave.materialArrivedConfirmedAt = updates.materialArrivedConfirmedAt;
+    if (updates.materialArrivedConfirmedBy !== void 0) checklistToSave.materialArrivedConfirmedBy = updates.materialArrivedConfirmedBy;
+    if (updates.installationDurationDays !== void 0) checklistToSave.installationDurationDays = updates.installationDurationDays;
+    if (updates.targetCompletionDate !== void 0 || updates.target_completion_date !== void 0) {
+      checklistToSave.targetCompletionDate = updates.targetCompletionDate || updates.target_completion_date;
+    }
+    if (updates.startDate !== void 0 || updates.start_date !== void 0) {
+      checklistToSave.startDate = updates.startDate || updates.start_date;
+    }
+    if (updates.siteSurveyVerified !== void 0) checklistToSave.siteSurveyVerified = updates.siteSurveyVerified;
+    if (updates.siteSurveyVerifiedAt !== void 0) checklistToSave.siteSurveyVerifiedAt = updates.siteSurveyVerifiedAt;
+    if (updates.siteSurveyVerifiedBy !== void 0) checklistToSave.siteSurveyVerifiedBy = updates.siteSurveyVerifiedBy;
+    baseFields.push("checklist = ?");
+    baseValues.push(JSON.stringify(checklistToSave));
+    const user = req.user;
+    if (user?.role === "Super Admin" || user?.role === "CEO" || updates.lastModifiedRole === "Super Admin") {
+      const modifierName = user?.name || updates.lastModifiedBy || "Super Admin";
+      const modifierRole = user?.role || updates.lastModifiedRole || "Super Admin";
+      const modifiedAt = (/* @__PURE__ */ new Date()).toISOString();
+      baseFields.push("last_modified_by = ?");
+      baseValues.push(modifierName);
+      baseFields.push("last_modified_role = ?");
+      baseValues.push(modifierRole);
+      baseFields.push("last_modified_at = ?");
+      baseValues.push(modifiedAt);
+      try {
+        const [currP] = await pool.query("SELECT edit_history FROM projects WHERE id = ? LIMIT 1", [id]);
+        let history = [];
+        if (currP && currP.length > 0 && currP[0].edit_history) {
+          history = typeof currP[0].edit_history === "string" ? JSON.parse(currP[0].edit_history) : currP[0].edit_history;
+        }
+        history.push({
+          timestamp: modifiedAt,
+          editedBy: modifierName,
+          editorRole: modifierRole,
+          changesSummary: Object.keys(updates).filter((k) => !["lastModifiedBy", "lastModifiedRole", "lastModifiedAt", "editHistory"].includes(k)).join(", ") || "Project updated"
+        });
+        baseFields.push("edit_history = ?");
+        baseValues.push(JSON.stringify(history));
+      } catch (histErr) {
+        console.warn("Could not update project edit history:", histErr);
+      }
+    }
     const extendedFields = [...baseFields];
     const extendedValues = [...baseValues];
     if (updates.scheduledInstallationDate !== void 0 || updates.scheduled_installation_date !== void 0) {
@@ -4270,6 +4707,175 @@ var updateProject = async (req, res) => {
       extendedFields.push("assigned_crew_members = ?");
       const crewVal = updates.assignedCrewMembers || updates.assigned_crew_members;
       extendedValues.push(Array.isArray(crewVal) ? JSON.stringify(crewVal) : crewVal);
+    }
+    if (updates.advancePaymentReceived !== void 0) {
+      extendedFields.push("advance_payment_received = ?");
+      extendedValues.push(updates.advancePaymentReceived ? 1 : 0);
+    }
+    if (updates.advancePaymentAmount !== void 0) {
+      extendedFields.push("advance_payment_amount = ?");
+      extendedValues.push(updates.advancePaymentAmount);
+    }
+    if (updates.advancePaymentMode !== void 0) {
+      extendedFields.push("advance_payment_mode = ?");
+      extendedValues.push(updates.advancePaymentMode);
+    }
+    if (updates.advancePaymentRef !== void 0) {
+      extendedFields.push("advance_payment_ref = ?");
+      extendedValues.push(updates.advancePaymentRef);
+    }
+    if (updates.advancePaymentDate !== void 0) {
+      extendedFields.push("advance_payment_date = ?");
+      extendedValues.push(updates.advancePaymentDate);
+    }
+    if (updates.advancePaymentNotes !== void 0) {
+      extendedFields.push("advance_payment_notes = ?");
+      extendedValues.push(updates.advancePaymentNotes);
+    }
+    if (updates.discomNetMeteringFee !== void 0) {
+      extendedFields.push("discom_net_metering_fee = ?");
+      extendedValues.push(updates.discomNetMeteringFee);
+    }
+    if (updates.discomFeeReceiptUrl !== void 0) {
+      extendedFields.push("discom_fee_receipt_url = ?");
+      extendedValues.push(updates.discomFeeReceiptUrl);
+    }
+    if (updates.discomAgreementSigned !== void 0) {
+      extendedFields.push("discom_agreement_signed = ?");
+      extendedValues.push(updates.discomAgreementSigned ? 1 : 0);
+    }
+    if (updates.discomAgreementDocUrl !== void 0) {
+      extendedFields.push("discom_agreement_doc_url = ?");
+      extendedValues.push(updates.discomAgreementDocUrl);
+    }
+    if (updates.installationTargetDays !== void 0) {
+      extendedFields.push("installation_target_days = ?");
+      extendedValues.push(updates.installationTargetDays);
+    }
+    if (updates.installationDurationDays !== void 0) {
+      extendedFields.push("installation_duration_days = ?");
+      extendedValues.push(updates.installationDurationDays);
+    }
+    if (updates.materialArrivedOnSite !== void 0) {
+      extendedFields.push("material_arrived_on_site = ?");
+      extendedValues.push(updates.materialArrivedOnSite ? 1 : 0);
+    }
+    if (updates.materialArrivedConfirmedAt !== void 0) {
+      extendedFields.push("material_arrived_confirmed_at = ?");
+      extendedValues.push(updates.materialArrivedConfirmedAt);
+    }
+    if (updates.materialArrivedConfirmedBy !== void 0) {
+      extendedFields.push("material_arrived_confirmed_by = ?");
+      extendedValues.push(updates.materialArrivedConfirmedBy);
+    }
+    if (updates.siteSurveyVerified !== void 0) {
+      extendedFields.push("site_survey_verified = ?");
+      extendedValues.push(updates.siteSurveyVerified ? 1 : 0);
+    }
+    if (updates.siteSurveyVerifiedAt !== void 0) {
+      extendedFields.push("site_survey_verified_at = ?");
+      extendedValues.push(updates.siteSurveyVerifiedAt);
+    }
+    if (updates.siteSurveyVerifiedBy !== void 0) {
+      extendedFields.push("site_survey_verified_by = ?");
+      extendedValues.push(updates.siteSurveyVerifiedBy);
+    }
+    if (updates.attendancePhotoUrl !== void 0) {
+      extendedFields.push("attendance_photo_url = ?");
+      extendedValues.push(updates.attendancePhotoUrl);
+    }
+    if (updates.postInstallPhotos !== void 0) {
+      extendedFields.push("post_install_photos = ?");
+      extendedValues.push(typeof updates.postInstallPhotos === "string" ? updates.postInstallPhotos : JSON.stringify(updates.postInstallPhotos));
+    }
+    if (updates.commissioningVideoUrl !== void 0) {
+      extendedFields.push("commissioning_video_url = ?");
+      extendedValues.push(updates.commissioningVideoUrl);
+    }
+    if (updates.pmClearanceStatus !== void 0) {
+      extendedFields.push("pm_clearance_status = ?");
+      extendedValues.push(updates.pmClearanceStatus);
+    }
+    if (updates.pmClearedBy !== void 0) {
+      extendedFields.push("pm_cleared_by = ?");
+      extendedValues.push(updates.pmClearedBy);
+    }
+    if (updates.pmClearedAt !== void 0) {
+      extendedFields.push("pm_cleared_at = ?");
+      extendedValues.push(updates.pmClearedAt);
+    }
+    if (updates.ebInspectionCleared !== void 0) {
+      extendedFields.push("eb_inspection_cleared = ?");
+      extendedValues.push(updates.ebInspectionCleared ? 1 : 0);
+    }
+    if (updates.solarMeterFixed !== void 0) {
+      extendedFields.push("solar_meter_fixed = ?");
+      extendedValues.push(updates.solarMeterFixed ? 1 : 0);
+    }
+    if (updates.solarMeterInitialReading !== void 0) {
+      extendedFields.push("solar_meter_initial_reading = ?");
+      extendedValues.push(updates.solarMeterInitialReading);
+    }
+    if (updates.gridLiveDate !== void 0) {
+      extendedFields.push("grid_live_date = ?");
+      extendedValues.push(updates.gridLiveDate);
+    }
+    if (updates.amcWarrantyYears !== void 0) {
+      extendedFields.push("amc_warranty_years = ?");
+      extendedValues.push(updates.amcWarrantyYears);
+    }
+    if (updates.recordAdvancePayment && updates.advancePaymentAmount) {
+      try {
+        const payId = `PAY-ADV-${Date.now().toString().slice(-6)}`;
+        await pool.query(
+          `INSERT INTO payments (id, payment_number, invoice_id, project_id, customer_id, customer_name, amount, payment_date, payment_mode, transaction_reference, status, recorded_by, is_advance, quotation_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Verified', ?, 1, ?)`,
+          [
+            payId,
+            payId,
+            "",
+            id,
+            updates.customerId || "",
+            updates.customerName || "",
+            updates.advancePaymentAmount,
+            updates.advancePaymentDate || (/* @__PURE__ */ new Date()).toISOString().split("T")[0],
+            updates.advancePaymentMode || "NEFT/RTGS",
+            updates.advancePaymentRef || "ADV-REF",
+            updates.recordedBy || user?.name || "Sales Manager",
+            updates.quotationId || ""
+          ]
+        );
+      } catch (payErr) {
+        console.warn("Could not auto-insert advance into payments table:", payErr);
+      }
+    }
+    if (updates.activateGridLive) {
+      try {
+        const amcYears = Number(updates.amcWarrantyYears) || 5;
+        const startDate = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+        const endYear = (/* @__PURE__ */ new Date()).getFullYear() + amcYears;
+        const endDate = `${endYear}-${((/* @__PURE__ */ new Date()).getMonth() + 1).toString().padStart(2, "0")}-${(/* @__PURE__ */ new Date()).getDate().toString().padStart(2, "0")}`;
+        const amcId = `AMC-${(/* @__PURE__ */ new Date()).getFullYear()}-${Math.floor(1e3 + Math.random() * 9e3)}`;
+        await pool.query(
+          `INSERT INTO amc_contracts (id, customer_id, customer_name, customer_phone, customer_address, project_id, capacity_kw, plan_name, warranty_years, start_date, end_date, status, visits_per_year)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active', 2)`,
+          [
+            amcId,
+            updates.customerId || "",
+            updates.customerName || "",
+            updates.customerPhone || "",
+            updates.customerAddress || "",
+            id,
+            updates.capacityKw || 5,
+            `${amcYears}-Year EPC Care`,
+            amcYears,
+            startDate,
+            endDate
+          ]
+        );
+      } catch (amcErr) {
+        console.warn("Could not auto-insert AMC contract:", amcErr);
+      }
     }
     if (extendedFields.length > 0) {
       try {
@@ -4624,7 +5230,7 @@ var getUsers = async (req, res) => {
     `;
     const params = [];
     if (currentUser.role === "Sales Manager") {
-      query += ` WHERE u.role = 'Sales Executive'`;
+      query += ` WHERE u.role IN ('Sales Executive', 'Survey Engineer')`;
     } else if (currentUser.role === "Project Manager") {
       query += ` WHERE u.role = 'Installation Team'`;
     } else if (currentUser.role !== "Super Admin") {
@@ -4666,8 +5272,8 @@ var createUser = async (req, res) => {
     if (!username || !password || !name || !role) {
       return res.status(400).json({ success: false, error: "Username, password, full name, and role are required" });
     }
-    if (currentUser.role === "Sales Manager" && role !== "Sales Executive") {
-      return res.status(403).json({ success: false, error: "Sales Managers may only create Sales Executive accounts" });
+    if (currentUser.role === "Sales Manager" && role !== "Sales Executive" && role !== "Survey Engineer") {
+      return res.status(403).json({ success: false, error: "Sales Managers may only create Sales Executive or Survey Engineer accounts" });
     }
     if (currentUser.role === "Project Manager" && role !== "Installation Team") {
       return res.status(403).json({ success: false, error: "Project Managers may only create Installation Team accounts" });
@@ -4728,8 +5334,8 @@ var updateUser = async (req, res) => {
       return res.status(404).json({ success: false, error: "User account not found" });
     }
     const target = existing[0];
-    if (currentUser.role === "Sales Manager" && target.role !== "Sales Executive") {
-      return res.status(403).json({ success: false, error: "Sales Manager can only update Sales Executive accounts" });
+    if (currentUser.role === "Sales Manager" && target.role !== "Sales Executive" && target.role !== "Survey Engineer") {
+      return res.status(403).json({ success: false, error: "Sales Manager can only update Sales Executive or Survey Engineer accounts" });
     }
     if (currentUser.role === "Project Manager" && target.role !== "Installation Team") {
       return res.status(403).json({ success: false, error: "Project Manager can only update Installation Team accounts" });
@@ -4789,7 +5395,7 @@ var toggleUserStatus = async (req, res) => {
       return res.status(404).json({ success: false, error: "User account not found" });
     }
     const target = existing[0];
-    if (currentUser.role === "Sales Manager" && target.role !== "Sales Executive") {
+    if (currentUser.role === "Sales Manager" && target.role !== "Sales Executive" && target.role !== "Survey Engineer") {
       return res.status(403).json({ success: false, error: "Permission denied" });
     }
     if (currentUser.role === "Project Manager" && target.role !== "Installation Team") {
@@ -4885,6 +5491,58 @@ var importUsers = async (req, res) => {
     res.status(500).json({ success: false, error: error.message || "Bulk import failed" });
   }
 };
+var deleteUser = async (req, res) => {
+  try {
+    const currentUser = req.user;
+    if (!currentUser) {
+      return res.status(401).json({ success: false, error: "Authentication required" });
+    }
+    const { id } = req.params;
+    let [existing] = await pool.query("SELECT * FROM user_accounts WHERE id = ? LIMIT 1", [id]);
+    if (!existing || existing.length === 0) {
+      const [byUsername] = await pool.query("SELECT * FROM user_accounts WHERE username = ? OR employee_id = ? LIMIT 1", [id, id]);
+      if (!byUsername || byUsername.length === 0) {
+        return res.status(404).json({ success: false, error: "User account not found" });
+      }
+      existing = byUsername;
+    }
+    const target = existing[0];
+    if (currentUser.role === "Sales Manager" && target.role !== "Sales Executive" && target.role !== "Survey Engineer") {
+      return res.status(403).json({ success: false, error: "Permission denied: Sales Manager can only delete Sales Executives or Survey Engineers" });
+    }
+    if (currentUser.role === "Project Manager" && target.role !== "Installation Team") {
+      return res.status(403).json({ success: false, error: "Permission denied: Project Manager can only delete Installation Team accounts" });
+    }
+    if (currentUser.role !== "Super Admin" && currentUser.role !== "Sales Manager" && currentUser.role !== "Project Manager") {
+      return res.status(403).json({ success: false, error: "Permission denied: Unauthorized to delete user accounts" });
+    }
+    if (target.id === currentUser.userId || target.username === currentUser.username) {
+      return res.status(400).json({ success: false, error: "Cannot delete your own active account session" });
+    }
+    if (target.username.toLowerCase() === "admin" && currentUser.role !== "Super Admin") {
+      return res.status(400).json({ success: false, error: "Cannot delete master system administrator account" });
+    }
+    await pool.query("DELETE FROM user_accounts WHERE id = ? OR username = ?", [target.id, target.username]);
+    await pool.query("DELETE FROM employees WHERE id = ? OR username = ? OR id = ?", [target.id, target.username, target.employee_id || ""]);
+    try {
+      await pool.query("UPDATE leads SET assigned_to = NULL WHERE assigned_to = ? OR assigned_to = ?", [target.name, target.username]);
+    } catch (_) {
+    }
+    try {
+      await pool.query("UPDATE projects SET installation_lead_id = NULL, installation_lead_name = NULL WHERE installation_lead_id = ? OR installation_lead_name = ?", [target.id, target.name]);
+    } catch (_) {
+    }
+    res.json({
+      success: true,
+      message: `User account ${target.username} (${target.name}) deleted successfully`,
+      deletedId: target.id,
+      deletedUsername: target.username
+    });
+  } catch (error) {
+    console.error("deleteUser error:", error);
+    res.status(500).json({ success: false, error: error.message || "Failed to delete user" });
+  }
+};
 
 // server/routes/users.routes.ts
 var usersRouter = Router10();
@@ -4894,6 +5552,7 @@ usersRouter.post("/", createUser);
 usersRouter.post("/import", importUsers);
 usersRouter.put("/:id", updateUser);
 usersRouter.post("/:id/toggle-status", toggleUserStatus);
+usersRouter.delete("/:id", deleteUser);
 
 // server/routes/audit.routes.ts
 import { Router as Router11 } from "express";
@@ -5027,12 +5686,12 @@ auditRouter.post("/", authenticateToken, createAuditLog);
 import { Router as Router12 } from "express";
 
 // server/controllers/documents.controller.ts
-import path4 from "path";
-import fs3 from "fs";
-var SECURE_DOCS_DIR = path4.resolve(process.cwd(), "storage", "secure_documents");
+import path5 from "path";
+import fs5 from "fs";
+var SECURE_DOCS_DIR = path5.resolve(process.cwd(), "storage", "secure_documents");
 function ensureSecureDir() {
-  if (!fs3.existsSync(SECURE_DOCS_DIR)) {
-    fs3.mkdirSync(SECURE_DOCS_DIR, { recursive: true });
+  if (!fs5.existsSync(SECURE_DOCS_DIR)) {
+    fs5.mkdirSync(SECURE_DOCS_DIR, { recursive: true });
   }
 }
 function saveBase64File(base64Data, prefix) {
@@ -5049,8 +5708,8 @@ function saveBase64File(base64Data, prefix) {
     buffer = Buffer.from(base64Data, "base64");
   }
   const safeFileName = `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
-  const fullDiskPath = path4.join(SECURE_DOCS_DIR, safeFileName);
-  fs3.writeFileSync(fullDiskPath, buffer);
+  const fullDiskPath = path5.join(SECURE_DOCS_DIR, safeFileName);
+  fs5.writeFileSync(fullDiskPath, buffer);
   return { fileName: safeFileName, filePath: fullDiskPath };
 }
 var uploadCustomerDocument = async (req, res) => {
@@ -5166,8 +5825,8 @@ var streamSecureDocumentFile = async (req, res) => {
     if (!fileName) {
       return res.status(404).json({ success: false, error: `File for type '${fileType}' not present in this record.` });
     }
-    const fullDiskPath = path4.join(SECURE_DOCS_DIR, fileName);
-    if (!fs3.existsSync(fullDiskPath)) {
+    const fullDiskPath = path5.join(SECURE_DOCS_DIR, fileName);
+    if (!fs5.existsSync(fullDiskPath)) {
       return res.status(404).json({ success: false, error: "File not found on storage server." });
     }
     let contentType = "image/jpeg";
@@ -5176,7 +5835,7 @@ var streamSecureDocumentFile = async (req, res) => {
     else if (fileName.endsWith(".pdf")) contentType = "application/pdf";
     res.setHeader("Content-Type", contentType);
     res.setHeader("Cache-Control", "private, no-cache, no-store, must-revalidate");
-    const readStream = fs3.createReadStream(fullDiskPath);
+    const readStream = fs5.createReadStream(fullDiskPath);
     readStream.pipe(res);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -5535,8 +6194,8 @@ import crypto2 from "crypto";
 
 // server/services/grn-pdf-generator.ts
 import PDFDocument2 from "pdfkit";
-import fs4 from "fs";
-import path5 from "path";
+import fs6 from "fs";
+import path6 from "path";
 async function generateGrnPdf(data) {
   return new Promise((resolve, reject) => {
     try {
@@ -5550,12 +6209,12 @@ async function generateGrnPdf(data) {
         }
       });
       const fileName = `grn_${data.grnNumber.replace(/[^a-zA-Z0-9_-]/g, "_")}.pdf`;
-      const publicDir = path5.resolve(process.cwd(), "public", "documents");
-      if (!fs4.existsSync(publicDir)) {
-        fs4.mkdirSync(publicDir, { recursive: true });
+      const publicDir = path6.resolve(process.cwd(), "public", "documents");
+      if (!fs6.existsSync(publicDir)) {
+        fs6.mkdirSync(publicDir, { recursive: true });
       }
-      const filePath = path5.join(publicDir, fileName);
-      const writeStream = fs4.createWriteStream(filePath);
+      const filePath = path6.join(publicDir, fileName);
+      const writeStream = fs6.createWriteStream(filePath);
       doc.pipe(writeStream);
       const PAGE_W = 595.28;
       const PAGE_H = 841.89;
@@ -6171,13 +6830,38 @@ async function createGoodsReceiptNote(req, res) {
     res.status(500).json({ success: false, error: error.message });
   }
 }
+var hasCheckedProcurementCols = false;
+async function ensureProcurementColumns() {
+  if (hasCheckedProcurementCols) return;
+  try {
+    const [cols] = await pool.query("SHOW COLUMNS FROM quotations");
+    const colSet = new Set(cols.map((c) => c.Field));
+    if (!colSet.has("materials_purchased_confirmed")) {
+      await pool.query("ALTER TABLE quotations ADD COLUMN materials_purchased_confirmed TINYINT(1) DEFAULT 0");
+    }
+    if (!colSet.has("materials_purchased_at")) {
+      await pool.query("ALTER TABLE quotations ADD COLUMN materials_purchased_at DATETIME NULL");
+    }
+    if (!colSet.has("materials_purchased_by")) {
+      await pool.query("ALTER TABLE quotations ADD COLUMN materials_purchased_by VARCHAR(100) NULL");
+    }
+    if (!colSet.has("materials_purchased_notes")) {
+      await pool.query("ALTER TABLE quotations ADD COLUMN materials_purchased_notes TEXT NULL");
+    }
+    hasCheckedProcurementCols = true;
+  } catch (err) {
+    console.warn("[Procurement] Migration check notice:", err.message);
+  }
+}
 async function getPendingIndents(req, res) {
   try {
+    await ensureProcurementColumns();
     const [quotations] = await pool.query(`
       SELECT q.id as quotation_id, q.quotation_number, q.lead_name as customer_name,
              q.customer_phone, q.customer_address, q.system_capacity_kw, q.total_amount,
              q.status as quotation_status, q.survey_id, q.converted_to_project_id,
              q.versions,
+             q.materials_purchased_confirmed, q.materials_purchased_at, q.materials_purchased_by,
              p.stage as project_stage
       FROM quotations q
       LEFT JOIN projects p ON p.id = q.converted_to_project_id
@@ -6264,6 +6948,8 @@ async function getPendingIndents(req, res) {
       let procurementStatus = "Pending Indent";
       if (isProjectCompleted) {
         procurementStatus = "Project Completed (Procurement Closed)";
+      } else if (q.materials_purchased_confirmed) {
+        procurementStatus = "Materials Purchased (Ready for PM)";
       } else if (hasSignedGrn && isDelivered && !isPartial) {
         procurementStatus = "Materials Delivered & Signed";
       } else if (isPartial) {
@@ -6311,6 +6997,9 @@ async function getPendingIndents(req, res) {
         project_stage: q.project_stage || null,
         is_completed: isProjectCompleted,
         has_signed_grn: hasSignedGrn,
+        materials_purchased_confirmed: Boolean(q.materials_purchased_confirmed),
+        materials_purchased_at: q.materials_purchased_at || null,
+        materials_purchased_by: q.materials_purchased_by || null,
         signed_grn: grns[0] || null,
         purchase_orders: pos,
         goods_receipt_notes: grns,
@@ -6360,6 +7049,48 @@ async function clearClosedIndents(req, res) {
     res.status(500).json({ success: false, error: error.message });
   }
 }
+async function confirmMaterialsPurchased(req, res) {
+  try {
+    const { quotationId, notes } = req.body;
+    if (!quotationId) {
+      res.status(400).json({ success: false, error: "Quotation ID is required" });
+      return;
+    }
+    await ensureProcurementColumns();
+    const [qRows] = await pool.query("SELECT * FROM quotations WHERE id = ?", [quotationId]);
+    if (!qRows || qRows.length === 0) {
+      res.status(404).json({ success: false, error: "Quotation not found" });
+      return;
+    }
+    const quote = qRows[0];
+    const buyerName = req.user?.name || "Purchase Team";
+    await pool.query(
+      `UPDATE quotations 
+       SET materials_purchased_confirmed = 1,
+           materials_purchased_at = NOW(),
+           materials_purchased_by = ?,
+           materials_purchased_notes = ?
+       WHERE id = ?`,
+      [buyerName, notes || "Materials purchased and confirmed by Purchase Team", quotationId]
+    );
+    await createNotification({
+      recipientRole: "Project Manager",
+      title: `Materials Purchased Confirmed (${quote.quotation_number || quote.id})`,
+      message: `Purchase Team has confirmed material procurement for ${quote.lead_name} (${quote.system_capacity_kw} kW). Deal is now ready for PM to convert to EPC execution.`,
+      type: "success"
+    });
+    res.json({
+      success: true,
+      message: `Materials purchase confirmed for ${quote.quotation_number || quote.id}. Handed over to Project Manager for EPC conversion.`,
+      materials_purchased_confirmed: true,
+      materials_purchased_at: (/* @__PURE__ */ new Date()).toISOString(),
+      materials_purchased_by: buyerName
+    });
+  } catch (error) {
+    console.error("Error in confirmMaterialsPurchased:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+}
 async function convertToEpcProject(req, res) {
   const conn = await pool.getConnection();
   try {
@@ -6396,11 +7127,13 @@ async function convertToEpcProject(req, res) {
        ORDER BY g.created_at DESC LIMIT 1`,
       [quotationId, quotationId]
     );
-    if (!grnRows || grnRows.length === 0) {
+    const hasMaterialsPurchased = Boolean(quote.materials_purchased_confirmed);
+    const hasSignedGrn = grnRows && grnRows.length > 0;
+    if (!hasSignedGrn && !hasMaterialsPurchased) {
       conn.release();
       return res.status(400).json({
         success: false,
-        error: "Cannot convert to EPC project: Required material receipt and customer digital signature conditions are not satisfied. Please ensure the Purchase Team records material arrival at site and captures the customer signature first."
+        error: "Cannot convert to EPC project: Purchase Team must click Material Purchased Confirmation first before Project Manager can convert to EPC project."
       });
     }
     const grn = grnRows[0];
@@ -6944,6 +7677,7 @@ router.post("/grn/:id/resend-link", authenticateToken, requireRole(["Purchase Te
 router.post("/grn/:id/revoke-link", authenticateToken, requireRole(["Purchase Team", "Project Manager", "Super Admin"]), revokeSigningLink);
 router.get("/pending-indents", authenticateToken, getPendingIndents);
 router.get("/indents", authenticateToken, getPendingIndents);
+router.post("/confirm-materials-purchased", authenticateToken, requireRole(["Purchase Team", "Project Manager", "Super Admin"]), confirmMaterialsPurchased);
 router.delete("/indents-closed/all", authenticateToken, requireRole(["Purchase Team", "Project Manager", "Super Admin", "Sales Manager"]), clearClosedIndents);
 router.delete("/indents/:id", authenticateToken, requireRole(["Purchase Team", "Project Manager", "Super Admin", "Sales Manager"]), deleteIndent);
 router.post("/convert-to-project", authenticateToken, requireRole(["Purchase Team", "Project Manager", "Super Admin"]), convertToEpcProject);
@@ -6951,6 +7685,9 @@ var procurement_routes_default = router;
 
 // server/routes/installation.routes.ts
 import { Router as Router15 } from "express";
+import multer from "multer";
+import fs7 from "fs";
+import path7 from "path";
 
 // server/controllers/installation.controller.ts
 async function recordAttendance(req, res) {
@@ -7167,17 +7904,75 @@ async function getProjectCommandCentre(req, res) {
     }
     let bom = null;
     let bomItems = [];
-    if (project.bom_id) {
-      try {
-        const [bRows] = await pool.query("SELECT * FROM project_boms WHERE id = ?", [project.bom_id]);
-        if (bRows.length > 0) {
-          bom = bRows[0];
-          const [iRows] = await pool.query("SELECT * FROM bom_items WHERE bom_id = ?", [bom.id]);
-          bomItems = iRows;
-        }
-      } catch (bomErr) {
-        console.error("Error fetching BOM in CC:", bomErr);
+    try {
+      let bRows = [];
+      if (project.bom_id) {
+        const [res2] = await pool.query("SELECT * FROM project_boms WHERE id = ?", [project.bom_id]);
+        bRows = res2 || [];
       }
+      if (bRows.length === 0 && project.id) {
+        const [res2] = await pool.query("SELECT * FROM project_boms WHERE project_id = ? ORDER BY version DESC LIMIT 1", [project.id]);
+        bRows = res2 || [];
+      }
+      if (bRows.length === 0 && survey?.id) {
+        const [res2] = await pool.query("SELECT * FROM project_boms WHERE survey_id = ? ORDER BY version DESC LIMIT 1", [survey.id]);
+        bRows = res2 || [];
+      }
+      if (bRows.length === 0 && project.quotation_id) {
+        const [res2] = await pool.query(
+          "SELECT pb.* FROM project_boms pb JOIN quotations q ON (pb.survey_id = q.survey_id OR pb.id = q.bom_id) WHERE q.id = ? ORDER BY pb.version DESC LIMIT 1",
+          [project.quotation_id]
+        );
+        bRows = res2 || [];
+      }
+      if (bRows.length === 0 && project.customer_name) {
+        const [res2] = await pool.query(
+          "SELECT * FROM project_boms WHERE customer_name LIKE ? ORDER BY version DESC LIMIT 1",
+          [`%${project.customer_name}%`]
+        );
+        bRows = res2 || [];
+      }
+      if (bRows.length === 0) {
+        const [res2] = await pool.query('SELECT * FROM project_boms WHERE status = "Approved" ORDER BY version DESC, id DESC LIMIT 1');
+        bRows = res2 || [];
+      }
+      if (bRows.length > 0) {
+        bom = bRows[0];
+        const [iRows] = await pool.query("SELECT * FROM bom_items WHERE bom_id = ? ORDER BY id ASC", [bom.id]);
+        bomItems = (iRows || []).map((it) => ({
+          id: String(it.id),
+          bomId: it.bom_id,
+          category: it.category || "General",
+          itemName: it.item_name || it.name || "",
+          technicalSpecification: it.technical_specification || it.specification || "",
+          brandMake: it.brand_make || "",
+          quantity: Number(it.quantity) || 1,
+          uom: it.uom || it.unit || "Nos",
+          unit: it.uom || it.unit || "Nos",
+          remarks: it.remarks || ""
+        }));
+      }
+      if (bomItems.length === 0) {
+        const cap = Number(project.capacity_kw || 5);
+        bomItems = [
+          { id: "1", category: "Solar Panels", itemName: "solar panels", technicalSpecification: "600 630Wp N Topcon", unit: "kWp", quantity: cap, remarks: "Tier-1 Mono PERC / N Topcon (DCR Compliant)" },
+          { id: "2", category: "Electrical", itemName: "MC4 Connector", technicalSpecification: "1000V DC, IP68", unit: "Sets", quantity: 3, remarks: "Waterproof crimp connector sets" },
+          { id: "3", category: "Cabling", itemName: "DC cable", technicalSpecification: "6sqmm copper cable", unit: "Mtrs", quantity: 15, remarks: "Tinned copper solar grade DC cable" },
+          { id: "4", category: "Cabling", itemName: "AC Cable", technicalSpecification: "3.5 Core \xD7 6 Sq.mm Copper Cable", unit: "Mtrs", quantity: 10, remarks: "Armoured grid interconnection cable" },
+          { id: "5", category: "Hardware", itemName: "SS Bolt &Nuts", technicalSpecification: "M8x25 SS203 grade", unit: "Sets", quantity: 1, remarks: "Stainless steel module and structure fastening hardware" },
+          { id: "6", category: "Accessories", itemName: "Other Accessories", technicalSpecification: "As Required", unit: "Sets", quantity: 1, remarks: "Cable ties, ferrules, caution signages, and accessories" },
+          { id: "7", category: "Inverter", itemName: "Inverter", technicalSpecification: `${cap}KW/3 Phase`, unit: "Nos", quantity: 1, remarks: "On-Grid 3 Phase MPPT with WIFI remote monitoring" },
+          { id: "8", category: "Structure", itemName: "Structure", technicalSpecification: "GP Structure", unit: "Set", quantity: 1, remarks: "Pre-Galvanized / Mini Rail rooftop mounting structure" },
+          { id: "9", category: "Protection", itemName: "DCDB", technicalSpecification: "32A MCB With SPD", unit: "Nos", quantity: 1, remarks: "1000V DC protection box with Type-II SPD" },
+          { id: "10", category: "Protection", itemName: "ACDB", technicalSpecification: "3PN/32A MCB with SPD", unit: "Nos", quantity: 1, remarks: "Bi-directional utility grid isolator with SPD" },
+          { id: "11", category: "Earthing", itemName: "Earth Electrode", technicalSpecification: "Copper Bonded 100 Micron, 19mm dia, 1Mtr", unit: "Nos", quantity: 1, remarks: "Chemical compound earthing electrode (< 2 Ohms)" },
+          { id: "12", category: "Earthing", itemName: "Earthing Wire", technicalSpecification: "4 Sq mm Copper wire", unit: "Mtrs", quantity: 60, remarks: "Insulated copper grounding conductor" },
+          { id: "13", category: "Protection", itemName: "Lightning Arrester", technicalSpecification: "Copper Bonded 100 Micron, 19mm dia, 1Mtr", unit: "Nos", quantity: 1, remarks: "ESE Lightning protection rod mounted elevated" },
+          { id: "14", category: "Accessories", itemName: "PVC pipe", technicalSpecification: "1 inch", unit: "Nos", quantity: 1, remarks: "Heavy duty UV resistant conduit" }
+        ];
+      }
+    } catch (bomErr) {
+      console.error("Error fetching BOM in CC:", bomErr);
     }
     let poRows = [];
     let grnRows = [];
@@ -7312,6 +8107,39 @@ async function scheduleInstallation(req, res) {
 
 // server/routes/installation.routes.ts
 var router2 = Router15();
+var uploadsDir = path7.join(process.cwd(), "uploads", "media");
+if (!fs7.existsSync(uploadsDir)) {
+  fs7.mkdirSync(uploadsDir, { recursive: true });
+}
+var storage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    cb(null, uploadsDir);
+  },
+  filename: (_req, file, cb) => {
+    const ext = path7.extname(file.originalname) || (file.mimetype.includes("video") ? ".mp4" : ".jpg");
+    const safeName = `media-${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
+    cb(null, safeName);
+  }
+});
+var upload = multer({
+  storage,
+  limits: { fileSize: 250 * 1024 * 1024 }
+  // 250MB allows videos up to 5 minutes or more
+});
+router2.post("/upload-media", upload.single("file"), (req, res) => {
+  if (!req.file) {
+    res.status(400).json({ success: false, error: "No file uploaded" });
+    return;
+  }
+  const publicUrl = `/uploads/media/${req.file.filename}`;
+  res.json({
+    success: true,
+    url: publicUrl,
+    filename: req.file.filename,
+    mimetype: req.file.mimetype,
+    size: req.file.size
+  });
+});
 router2.post("/schedule", authenticateToken, scheduleInstallation);
 router2.post("/attendance", authenticateToken, recordAttendance);
 router2.get("/attendance/:projectId", authenticateToken, getProjectAttendance);
@@ -7713,8 +8541,8 @@ telephonyRouter.delete("/calls/:id", authenticateToken, deleteCallLog);
 
 // server/routes/subsidies.routes.ts
 import { Router as Router18 } from "express";
-import fs5 from "fs";
-import path6 from "path";
+import fs8 from "fs";
+import path8 from "path";
 var subsidiesRouter = Router18();
 var initialSubsidies = [
   {
@@ -7900,11 +8728,11 @@ var initialSubsidies = [
     last_updated: "2026-10-20"
   }
 ];
-var DATA_FILE = path6.resolve(process.cwd(), "data", "subsidies.json");
+var DATA_FILE = path8.resolve(process.cwd(), "data", "subsidies.json");
 function loadSubsidies() {
   try {
-    if (fs5.existsSync(DATA_FILE)) {
-      const raw = fs5.readFileSync(DATA_FILE, "utf-8");
+    if (fs8.existsSync(DATA_FILE)) {
+      const raw = fs8.readFileSync(DATA_FILE, "utf-8");
       return JSON.parse(raw);
     }
   } catch (err) {
@@ -7914,15 +8742,155 @@ function loadSubsidies() {
 }
 function saveSubsidies(records) {
   try {
-    const dir = path6.dirname(DATA_FILE);
-    if (!fs5.existsSync(dir)) fs5.mkdirSync(dir, { recursive: true });
-    fs5.writeFileSync(DATA_FILE, JSON.stringify(records, null, 2), "utf-8");
+    const dir = path8.dirname(DATA_FILE);
+    if (!fs8.existsSync(dir)) fs8.mkdirSync(dir, { recursive: true });
+    fs8.writeFileSync(DATA_FILE, JSON.stringify(records, null, 2), "utf-8");
   } catch (err) {
     console.error("Error writing subsidies.json:", err);
   }
 }
-subsidiesRouter.get("/", (_req, res) => {
-  const data = loadSubsidies();
+function mapProjectStageToSubsidyStage(projStage) {
+  switch (projStage) {
+    case "Booking":
+      return { stage: 1, stageName: "Portal Registration Submitted" };
+    case "Site Survey":
+    case "Engineering & Design":
+      return { stage: 2, stageName: "DISCOM Feasibility (TFR) Pending" };
+    case "Material Procurement":
+      return { stage: 3, stageName: "Vendor Allocated (AB Energy Solutions)" };
+    case "Installation":
+      return { stage: 4, stageName: "Installation Complete (WCR Uploaded)" };
+    case "Testing & Commissioning":
+      return { stage: 5, stageName: "DISCOM Joint Inspection Scheduled" };
+    case "Net Metering & Handover":
+      return { stage: 6, stageName: "Net Meter Commissioned & Grid Synchronized" };
+    case "Completed":
+      return { stage: 7, stageName: "DBT Subsidy Credited to Customer Bank" };
+    default:
+      return { stage: 1, stageName: "Portal Registration Submitted" };
+  }
+}
+async function syncLiveProjectsWithSubsidies(cached) {
+  try {
+    const [projects] = await pool.query(`
+      SELECT 
+        p.id, p.customer_id, p.customer_name, p.customer_phone, p.customer_address, 
+        p.capacity_kw, p.stage, p.discom_sanction_number, p.net_meter_installed_date, 
+        p.commissioning_date, p.created_at,
+        c.consumer_number_discom, c.discom_name as customer_discom
+      FROM projects p
+      LEFT JOIN customers c ON p.customer_id = c.id
+      ORDER BY p.created_at DESC
+    `);
+    if (!Array.isArray(projects) || projects.length === 0) {
+      return cached;
+    }
+    const updatedList = [...cached];
+    let hasChanges = false;
+    for (const p of projects) {
+      const cleanId = String(p.id);
+      const existingIdx = updatedList.findIndex(
+        (s) => s.project_id === cleanId || s.id === `SUB-${cleanId.replace("PROJECT-", "").replace("PRJ-", "")}`
+      );
+      const capKw = Number(p.capacity_kw) || 3;
+      const isResidential = capKw <= 10;
+      let applicableSubsidy = 0;
+      if (isResidential) {
+        if (capKw <= 1) applicableSubsidy = 3e4;
+        else if (capKw <= 2) applicableSubsidy = 6e4;
+        else applicableSubsidy = 78e3;
+      }
+      const stageInfo = mapProjectStageToSubsidyStage(p.stage || "Booking");
+      if (existingIdx === -1) {
+        const subId = `SUB-${cleanId.replace("PROJECT-", "").replace("PRJ-", "")}`;
+        const newRecord = {
+          id: subId,
+          project_id: cleanId,
+          project_number: cleanId,
+          customer_name: p.customer_name || "Valued Customer",
+          customer_phone: p.customer_phone || "",
+          customer_type: isResidential ? "residential" : "commercial",
+          is_eligible: isResidential,
+          ineligibility_reason: isResidential ? void 0 : "Commercial/Industrial installation: 40% tax depreciation applicable in lieu of residential subsidy.",
+          site_address: p.customer_address || "Tamil Nadu, India",
+          discom_name: p.customer_discom || "TANGEDCO",
+          discom_section_office: "Local Section Office",
+          consumer_number: p.consumer_number_discom || p.discom_sanction_number || "Pending Consumer No",
+          sanctioned_load_kw: capKw,
+          system_capacity_kw: capKw,
+          subsidy_applicable_amount: applicableSubsidy,
+          dcr_modules_used: isResidential,
+          panel_make_and_model: isResidential ? "Tata Power Solar / Waaree 545W Mono PERC (DCR)" : "Tier-1 High Efficiency Panels",
+          inverter_make_and_model: `${capKw}kW On-Grid Solar Inverter`,
+          portal_application_no: isResidential ? `PMS-TN-${(/* @__PURE__ */ new Date()).getFullYear()}-${cleanId.replace(/\D/g, "").slice(-5) || Math.floor(1e4 + Math.random() * 9e4)}` : "N/A (Commercial Project)",
+          application_submission_date: p.created_at ? new Date(p.created_at).toISOString().split("T")[0] : (/* @__PURE__ */ new Date()).toISOString().split("T")[0],
+          current_stage: isResidential ? stageInfo.stage : 0,
+          current_stage_name: isResidential ? stageInfo.stageName : "Not Eligible (Commercial Project)",
+          stage_status: p.stage === "Completed" ? "completed" : "in_progress",
+          days_in_current_stage: 1,
+          is_delayed: false,
+          net_meter_number: p.discom_sanction_number || void 0,
+          net_meter_install_date: p.net_meter_installed_date || void 0,
+          commissioning_certificate_date: p.commissioning_date || void 0,
+          documents: {
+            electricity_bill: true,
+            aadhaar_card: isResidential,
+            cancelled_cheque: false,
+            roof_photo_geotagged: true,
+            dcr_certificate: isResidential,
+            tfr_letter: Boolean(p.discom_sanction_number),
+            wcr_copy: p.stage === "Testing & Commissioning" || p.stage === "Net Metering & Handover" || p.stage === "Completed",
+            net_meter_test_report: Boolean(p.net_meter_installed_date),
+            commissioning_cert: Boolean(p.commissioning_date)
+          },
+          notes: `Auto-linked from live Project ${cleanId}. Workflow synchronized with PM Surya Ghar portal.`,
+          last_updated: (/* @__PURE__ */ new Date()).toISOString().split("T")[0]
+        };
+        updatedList.unshift(newRecord);
+        hasChanges = true;
+      } else {
+        const existing = { ...updatedList[existingIdx] };
+        let recordChanged = false;
+        if (p.customer_name && existing.customer_name !== p.customer_name) {
+          existing.customer_name = p.customer_name;
+          recordChanged = true;
+        }
+        if (p.customer_phone && existing.customer_phone !== p.customer_phone) {
+          existing.customer_phone = p.customer_phone;
+          recordChanged = true;
+        }
+        if (p.customer_address && existing.site_address !== p.customer_address) {
+          existing.site_address = p.customer_address;
+          recordChanged = true;
+        }
+        if (p.discom_sanction_number && !existing.net_meter_number && !existing.tfr_number) {
+          existing.net_meter_number = p.discom_sanction_number;
+          recordChanged = true;
+        }
+        if (p.stage === "Completed" && existing.current_stage < 7 && existing.is_eligible) {
+          existing.current_stage = 7;
+          existing.current_stage_name = "DBT Subsidy Credited to Customer Bank";
+          existing.stage_status = "completed";
+          recordChanged = true;
+        }
+        if (recordChanged) {
+          updatedList[existingIdx] = existing;
+          hasChanges = true;
+        }
+      }
+    }
+    if (hasChanges) {
+      saveSubsidies(updatedList);
+    }
+    return updatedList;
+  } catch (err) {
+    console.warn("[Subsidies] Live project sync fallback to local store:", err);
+    return cached;
+  }
+}
+subsidiesRouter.get("/", async (_req, res) => {
+  const cached = loadSubsidies();
+  const data = await syncLiveProjectsWithSubsidies(cached);
   const activeEligible = data.filter((d) => d.is_eligible);
   const totalPipelineSubsidy = activeEligible.reduce((acc, curr) => acc + (curr.subsidy_applicable_amount || 0), 0);
   const totalDisbursed = data.filter((d) => d.current_stage === 7).reduce((acc, curr) => acc + (curr.dbt_disbursal_amount || curr.subsidy_applicable_amount || 0), 0);
@@ -7952,7 +8920,7 @@ subsidiesRouter.get("/project/:projectId", (req, res) => {
   }
   return res.json({ success: true, subsidy: record });
 });
-subsidiesRouter.put("/:id", (req, res) => {
+subsidiesRouter.put("/:id", async (req, res) => {
   const { id } = req.params;
   const updates = req.body;
   const data = loadSubsidies();
@@ -7967,6 +8935,16 @@ subsidiesRouter.put("/:id", (req, res) => {
   };
   data[index] = updatedRecord;
   saveSubsidies(data);
+  if (updatedRecord.project_id && (updates.net_meter_number || updates.tfr_number)) {
+    try {
+      const sanctionOrMeter = updates.net_meter_number || updates.tfr_number;
+      await pool.query(
+        "UPDATE projects SET discom_sanction_number = COALESCE(discom_sanction_number, ?) WHERE id = ?",
+        [sanctionOrMeter, updatedRecord.project_id]
+      );
+    } catch (_) {
+    }
+  }
   return res.json({
     success: true,
     message: "Subsidy record updated successfully",
@@ -8034,8 +9012,222 @@ subsidiesRouter.post("/", (req, res) => {
   });
 });
 
+// server/routes/followups.routes.ts
+import { Router as Router19 } from "express";
+var followupsRouter = Router19();
+followupsRouter.get("/", authenticateToken, async (_req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT 
+        id, lead_id, lead_name, customer_id, customer_name,
+        quotation_id, title, due_date, due_time, type,
+        status, priority, assigned_to_id, assigned_to_name,
+        notes, completed_at, is_struck_out, outcome, created_at
+      FROM follow_ups 
+      ORDER BY due_date DESC, id DESC
+    `);
+    const formatted = rows.map((f) => ({
+      id: f.id,
+      leadId: f.lead_id,
+      leadName: f.lead_name,
+      customerId: f.customer_id,
+      customerName: f.customer_name,
+      quotationId: f.quotation_id,
+      title: f.title,
+      dueDate: f.due_date,
+      dueTime: f.due_time,
+      type: f.type,
+      status: f.status,
+      priority: f.priority,
+      assignedToId: f.assigned_to_id,
+      assignedToName: f.assigned_to_name,
+      notes: f.notes || "",
+      completedAt: f.completed_at,
+      isStruckOut: Boolean(f.is_struck_out),
+      outcome: f.outcome || "",
+      createdAt: f.created_at || ""
+    }));
+    res.json({ success: true, followUps: formatted });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+followupsRouter.post("/", authenticateToken, async (req, res) => {
+  try {
+    const {
+      leadId,
+      leadName,
+      customerId,
+      customerName,
+      title,
+      dueDate,
+      dueTime,
+      type,
+      status,
+      priority,
+      assignedToId,
+      assignedToName,
+      notes,
+      outcome
+    } = req.body;
+    const id = `FUP-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1e3)}`;
+    const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+    const actualDueDate = dueDate || today;
+    const actualStatus = status || "Pending";
+    const isStruckOut = actualStatus === "Completed";
+    await pool.query(`
+      INSERT INTO follow_ups (
+        id, lead_id, lead_name, customer_id, customer_name,
+        title, due_date, due_time, type, status, priority,
+        assigned_to_id, assigned_to_name, notes, is_struck_out,
+        outcome, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      id,
+      leadId || null,
+      leadName || null,
+      customerId || null,
+      customerName || null,
+      title || "Follow-up Call",
+      actualDueDate,
+      dueTime || "11:00 AM",
+      type || "Call",
+      actualStatus,
+      priority || "Medium",
+      assignedToId || req.user?.employeeId || "EMP-001",
+      assignedToName || req.user?.name || "Sales Executive",
+      notes || "",
+      isStruckOut ? 1 : 0,
+      outcome || null,
+      today
+    ]);
+    if (leadId) {
+      await pool.query(`
+        UPDATE leads SET
+          last_contacted_at = ?,
+          notes = COALESCE(NULLIF(?, ''), notes)
+        WHERE id = ?
+      `, [today, notes || null, leadId]);
+    }
+    res.status(201).json({
+      success: true,
+      followUp: {
+        id,
+        leadId,
+        leadName,
+        customerId,
+        customerName,
+        title: title || "Follow-up Call",
+        dueDate: actualDueDate,
+        dueTime: dueTime || "11:00 AM",
+        type: type || "Call",
+        status: actualStatus,
+        priority: priority || "Medium",
+        assignedToId: assignedToId || req.user?.employeeId || "EMP-001",
+        assignedToName: assignedToName || req.user?.name || "Sales Executive",
+        notes: notes || "",
+        isStruckOut,
+        outcome: outcome || "",
+        createdAt: today
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+followupsRouter.put("/:id", authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, dueDate, dueTime, type, status, priority, notes, isStruckOut, outcome } = req.body;
+    const updates = [];
+    const values = [];
+    if (title !== void 0) {
+      updates.push("title = ?");
+      values.push(title);
+    }
+    if (dueDate !== void 0) {
+      updates.push("due_date = ?");
+      values.push(dueDate);
+    }
+    if (dueTime !== void 0) {
+      updates.push("due_time = ?");
+      values.push(dueTime);
+    }
+    if (type !== void 0) {
+      updates.push("type = ?");
+      values.push(type);
+    }
+    if (status !== void 0) {
+      updates.push("status = ?");
+      values.push(status);
+    }
+    if (priority !== void 0) {
+      updates.push("priority = ?");
+      values.push(priority);
+    }
+    if (notes !== void 0) {
+      updates.push("notes = ?");
+      values.push(notes);
+    }
+    if (isStruckOut !== void 0) {
+      updates.push("is_struck_out = ?");
+      values.push(isStruckOut ? 1 : 0);
+      if (isStruckOut && status === void 0) {
+        updates.push("status = 'Completed'");
+        updates.push("completed_at = ?");
+        values.push((/* @__PURE__ */ new Date()).toISOString().split("T")[0]);
+      } else if (!isStruckOut && status === void 0) {
+        updates.push("status = 'Pending'");
+      }
+    }
+    if (outcome !== void 0) {
+      updates.push("outcome = ?");
+      values.push(outcome);
+    }
+    if (updates.length === 0) {
+      res.json({ success: true, message: "No updates provided" });
+      return;
+    }
+    values.push(id);
+    await pool.query(`UPDATE follow_ups SET ${updates.join(", ")} WHERE id = ?`, values);
+    res.json({ success: true, message: "Follow-up updated successfully" });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+followupsRouter.put("/:id/toggle-strike", authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const [rows] = await pool.query("SELECT is_struck_out FROM follow_ups WHERE id = ?", [id]);
+    if (rows.length === 0) {
+      res.status(404).json({ success: false, error: "Follow-up not found" });
+      return;
+    }
+    const currentStruck = Boolean(rows[0].is_struck_out);
+    const nextStruck = !currentStruck;
+    const nextStatus = nextStruck ? "Completed" : "Pending";
+    const completedAt = nextStruck ? (/* @__PURE__ */ new Date()).toISOString().split("T")[0] : null;
+    await pool.query(
+      "UPDATE follow_ups SET is_struck_out = ?, status = ?, completed_at = ? WHERE id = ?",
+      [nextStruck ? 1 : 0, nextStatus, completedAt, id]
+    );
+    res.json({ success: true, isStruckOut: nextStruck, status: nextStatus });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+followupsRouter.delete("/:id", authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query("DELETE FROM follow_ups WHERE id = ?", [id]);
+    res.json({ success: true, message: "Follow-up deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // server/routes/index.ts
-var apiRouter = Router19();
+var apiRouter = Router20();
 apiRouter.use("/auth", authRouter);
 apiRouter.get("/bootstrap", authenticateToken, getBootstrapData);
 apiRouter.use("/leads", leadsRouter);
@@ -8056,36 +9248,128 @@ apiRouter.use("/installation", installation_routes_default);
 apiRouter.use("/notifications", notificationsRouter);
 apiRouter.use("/telephony", telephonyRouter);
 apiRouter.use("/subsidies", subsidiesRouter);
+apiRouter.use("/follow-ups", followupsRouter);
+
+// server/migrations/project-lifecycle-updates.ts
+async function addColumnSafely(table, column, columnDef) {
+  try {
+    const [cols] = await pool.query(`SHOW COLUMNS FROM \`${table}\` LIKE ?`, [column]);
+    if (!cols || cols.length === 0) {
+      await pool.query(`ALTER TABLE \`${table}\` ADD COLUMN \`${column}\` ${columnDef}`);
+      console.log(`[Migration] Added column ${column} to ${table}`);
+    }
+  } catch (e) {
+    console.warn(`[Migration] Column ${column} check/add notice for ${table}:`, e.message);
+  }
+}
+async function runProjectLifecycleMigration() {
+  console.log("Running project lifecycle updates migration...");
+  await addColumnSafely("site_surveys", "measured_dc_cable_meters", "DECIMAL(10, 2) NULL");
+  await addColumnSafely("site_surveys", "measured_ac_cable_meters", "DECIMAL(10, 2) NULL");
+  await addColumnSafely("site_surveys", "client_signature_data", "LONGTEXT NULL");
+  await addColumnSafely("site_surveys", "client_signed_at", "VARCHAR(50) NULL");
+  await addColumnSafely("site_surveys", "client_signer_name", "VARCHAR(150) NULL");
+  await addColumnSafely("site_surveys", "client_approval_doc_url", "TEXT NULL");
+  await addColumnSafely("site_surveys", "latitude", "DECIMAL(10, 7) NULL");
+  await addColumnSafely("site_surveys", "longitude", "DECIMAL(10, 7) NULL");
+  await addColumnSafely("projects", "advance_payment_received", "TINYINT(1) DEFAULT 0");
+  await addColumnSafely("projects", "advance_payment_amount", "DECIMAL(15, 2) NULL");
+  await addColumnSafely("projects", "advance_payment_mode", "VARCHAR(50) NULL");
+  await addColumnSafely("projects", "advance_payment_ref", "VARCHAR(100) NULL");
+  await addColumnSafely("projects", "advance_payment_date", "VARCHAR(50) NULL");
+  await addColumnSafely("projects", "advance_payment_notes", "TEXT NULL");
+  await addColumnSafely("projects", "discom_net_metering_fee", "DECIMAL(12, 2) NULL");
+  await addColumnSafely("projects", "discom_fee_receipt_url", "TEXT NULL");
+  await addColumnSafely("projects", "discom_agreement_signed", "TINYINT(1) DEFAULT 0");
+  await addColumnSafely("projects", "discom_agreement_doc_url", "TEXT NULL");
+  await addColumnSafely("projects", "installation_target_days", "INT DEFAULT 3");
+  await addColumnSafely("projects", "material_arrived_on_site", "TINYINT(1) DEFAULT 0");
+  await addColumnSafely("projects", "material_arrived_confirmed_at", "VARCHAR(50) NULL");
+  await addColumnSafely("projects", "material_arrived_confirmed_by", "VARCHAR(150) NULL");
+  await addColumnSafely("projects", "site_survey_verified", "TINYINT(1) DEFAULT 0");
+  await addColumnSafely("projects", "site_survey_verified_at", "VARCHAR(50) NULL");
+  await addColumnSafely("projects", "site_survey_verified_by", "VARCHAR(150) NULL");
+  await addColumnSafely("projects", "installation_duration_days", "INT DEFAULT 2");
+  await addColumnSafely("projects", "attendance_photo_url", "TEXT NULL");
+  await addColumnSafely("projects", "post_install_photos", "JSON NULL");
+  await addColumnSafely("projects", "commissioning_video_url", "TEXT NULL");
+  await addColumnSafely("projects", "pm_clearance_status", "VARCHAR(50) DEFAULT 'Pending'");
+  await addColumnSafely("projects", "pm_cleared_by", "VARCHAR(150) NULL");
+  await addColumnSafely("projects", "pm_cleared_at", "VARCHAR(50) NULL");
+  await addColumnSafely("projects", "eb_inspection_cleared", "TINYINT(1) DEFAULT 0");
+  await addColumnSafely("projects", "solar_meter_fixed", "TINYINT(1) DEFAULT 0");
+  await addColumnSafely("projects", "solar_meter_initial_reading", "DECIMAL(12, 2) NULL");
+  await addColumnSafely("projects", "grid_live_date", "VARCHAR(50) NULL");
+  await addColumnSafely("projects", "amc_warranty_years", "INT DEFAULT 5");
+  await addColumnSafely("payments", "is_advance", "TINYINT(1) DEFAULT 0");
+  await addColumnSafely("payments", "quotation_id", "VARCHAR(50) NULL");
+  await addColumnSafely("payments", "reconciled", "TINYINT(1) DEFAULT 0");
+  await addColumnSafely("payments", "reconciled_at", "VARCHAR(50) NULL");
+  await addColumnSafely("payments", "reconciled_by", "VARCHAR(150) NULL");
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS amc_contracts (
+        id VARCHAR(50) PRIMARY KEY,
+        customer_id VARCHAR(50) NOT NULL,
+        customer_name VARCHAR(150) NOT NULL,
+        customer_phone VARCHAR(50) NULL,
+        customer_address TEXT NULL,
+        project_id VARCHAR(50) NOT NULL,
+        capacity_kw DECIMAL(10, 2) DEFAULT 0,
+        plan_name VARCHAR(100) DEFAULT 'Standard Solar Care',
+        warranty_years INT DEFAULT 5,
+        annual_price DECIMAL(12, 2) DEFAULT 0,
+        visits_per_year INT DEFAULT 2,
+        completed_visits INT DEFAULT 0,
+        start_date VARCHAR(50) NOT NULL,
+        end_date VARCHAR(50) NOT NULL,
+        status VARCHAR(50) DEFAULT 'Active',
+        next_scheduled_visit VARCHAR(50) NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+  } catch (e) {
+    console.warn(`AMC Contracts table creation warning:`, e.message);
+  }
+  console.log("Project lifecycle migration completed successfully.");
+}
+if (process.argv[1]?.includes("project-lifecycle-updates")) {
+  runProjectLifecycleMigration().then(() => process.exit(0)).catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
 
 // server.ts
 dotenv3.config();
 var __filename = fileURLToPath(import.meta.url);
-var __dirname = path7.dirname(__filename);
-var uploadsDir = path7.join(process.cwd(), "uploads", "surveys");
-if (!fs6.existsSync(uploadsDir)) {
-  fs6.mkdirSync(uploadsDir, { recursive: true });
+var __dirname = path9.dirname(__filename);
+var uploadsDir2 = path9.join(process.cwd(), "uploads", "surveys");
+if (!fs9.existsSync(uploadsDir2)) {
+  fs9.mkdirSync(uploadsDir2, { recursive: true });
 }
 var app = express();
 var PORT = process.env.PORT || 3e3;
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
-app.use(["/uploads", "*/uploads"], express.static(path7.join(process.cwd(), "uploads")));
-app.use(["/documents", "*/documents"], express.static(path7.join(process.cwd(), "public", "documents")));
+app.use(["/uploads", "*/uploads"], express.static(path9.join(process.cwd(), "uploads")));
+app.use(["/documents", "*/documents"], express.static(path9.join(process.cwd(), "public", "documents")));
 app.use(["/api", "*/api"], apiRouter);
 async function startServer() {
-  const distCandidate1 = path7.resolve(__dirname, "dist");
-  const distCandidate2 = path7.resolve(process.cwd(), "dist");
+  const distCandidate1 = path9.resolve(__dirname, "dist");
+  const distCandidate2 = path9.resolve(process.cwd(), "dist");
   const rootCandidate = process.cwd();
   let distPath = distCandidate1;
-  let hasDist = fs6.existsSync(path7.resolve(distCandidate1, "index.html"));
-  if (!hasDist && fs6.existsSync(path7.resolve(distCandidate2, "index.html"))) {
+  let hasDist = fs9.existsSync(path9.resolve(distCandidate1, "index.html"));
+  if (!hasDist && fs9.existsSync(path9.resolve(distCandidate2, "index.html"))) {
     distPath = distCandidate2;
     hasDist = true;
-  } else if (!hasDist && fs6.existsSync(path7.resolve(rootCandidate, "assets"))) {
+  } else if (!hasDist && fs9.existsSync(path9.resolve(rootCandidate, "assets"))) {
     distPath = rootCandidate;
     hasDist = true;
   }
-  const isProd = process.env.NODE_ENV === "production" || hasDist;
+  const hasSrc = fs9.existsSync(path9.resolve(process.cwd(), "src", "App.tsx"));
+  const isProd = process.env.NODE_ENV === "production" || !hasSrc && hasDist;
   if (!isProd) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -8095,23 +9379,29 @@ async function startServer() {
   } else {
     console.log(`Serving static production build from ${distPath}`);
     app.use(express.static(distPath));
-    app.use("/assets", express.static(path7.resolve(distPath, "assets")));
-    app.use("*/assets", express.static(path7.resolve(distPath, "assets")));
+    app.use("/assets", express.static(path9.resolve(distPath, "assets")));
+    app.use("*/assets", express.static(path9.resolve(distPath, "assets")));
     app.get(["/logo.png", "*/logo.png"], (_req, res) => {
-      res.sendFile(path7.resolve(distPath, "logo.png"));
+      const p = fs9.existsSync(path9.resolve(distPath, "logo.png")) ? path9.resolve(distPath, "logo.png") : path9.resolve(process.cwd(), "public", "logo.png");
+      res.sendFile(p);
     });
     app.get(["/logo.jpg", "*/logo.jpg"], (_req, res) => {
-      res.sendFile(path7.resolve(distPath, "logo.jpg"));
+      const p = fs9.existsSync(path9.resolve(distPath, "logo.jpg")) ? path9.resolve(distPath, "logo.jpg") : path9.resolve(process.cwd(), "public", "logo.jpg");
+      res.sendFile(p);
     });
     app.get(["/favicon.ico", "*/favicon.ico"], (_req, res) => {
-      res.sendFile(path7.resolve(distPath, "logo.png"));
+      const p = fs9.existsSync(path9.resolve(distPath, "favicon.ico")) ? path9.resolve(distPath, "favicon.ico") : fs9.existsSync(path9.resolve(distPath, "logo.png")) ? path9.resolve(distPath, "logo.png") : path9.resolve(process.cwd(), "public", "logo.png");
+      res.sendFile(p);
     });
     app.get("*", (_req, res) => {
-      res.sendFile(path7.resolve(distPath, "index.html"));
+      res.sendFile(path9.resolve(distPath, "index.html"));
     });
   }
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`AB Energy Solutions CRM server running at http://0.0.0.0:${PORT}`);
+    runProjectLifecycleMigration().catch((err) => {
+      console.warn("[Startup Migration Notice]:", err.message);
+    });
   });
 }
 startServer();

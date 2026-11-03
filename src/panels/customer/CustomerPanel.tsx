@@ -4,9 +4,10 @@ import { CustomerPortalView } from '../../components/portal/CustomerPortalView';
 
 interface CustomerPanelProps {
   onBackToAdmin?: () => void;
+  onBackToDashboard?: () => void;
 }
 
-export const CustomerPanel: React.FC<CustomerPanelProps> = ({ onBackToAdmin }) => {
+export const CustomerPanel: React.FC<CustomerPanelProps> = ({ onBackToAdmin, onBackToDashboard }) => {
   return (
     <div className="space-y-6">
       {/* Customer Portal Header */}
@@ -39,7 +40,7 @@ export const CustomerPanel: React.FC<CustomerPanelProps> = ({ onBackToAdmin }) =
       </div>
 
       {/* Main Customer Portal View */}
-      <CustomerPortalView onBackToAdmin={onBackToAdmin} />
+      <CustomerPortalView onBackToAdmin={onBackToAdmin} onBackToDashboard={onBackToDashboard} />
     </div>
   );
 };

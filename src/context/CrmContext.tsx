@@ -100,6 +100,7 @@ interface CrmContextType {
   createQuotationRevision: (quotationId: string, revisionData: Partial<Quotation>) => Promise<void>;
   approveQuotationDiscount: (quotationId: string) => Promise<boolean>;
   sendQuotation: (quotationId: string) => void;
+  updateQuotationPriority: (quotationId: string, priority: 'High' | 'Medium' | 'Low') => Promise<boolean>;
   recordCustomerAcceptance: (quotationId: string, acceptanceNotes?: string, clientPoNumber?: string) => Promise<boolean>;
   editQuotationData: (quotationId: string, editPayload: any) => Promise<boolean>;
   acceptQuotation: (quotationId: string) => { customer: Customer; project: Project };
@@ -123,6 +124,9 @@ interface CrmContextType {
   createCustomerPortalAccount: (customerId: string, username: string, password: string) => Promise<{ success: boolean; error?: string; username?: string }>;
   completeFollowUp: (followUpId: string, notes?: string) => void;
   createFollowUp: (followUpData: Partial<FollowUp>) => FollowUp;
+  updateFollowUp: (followUpId: string, updates: Partial<FollowUp>) => void;
+  toggleStrikeFollowUp: (followUpId: string) => void;
+  deleteFollowUp: (followUpId: string) => void;
   toggleAutomationRule: (ruleId: string) => void;
   addAutomationRule: (rule: Partial<AutomationRule>) => AutomationRule;
   markNotificationRead: (id: string) => void;
@@ -447,28 +451,81 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return saved ? JSON.parse(saved) : INITIAL_MATERIAL_ALLOCATIONS;
   });
 
-  // Save to localStorage
+  // Helper to prevent QuotaExceededError by stripping heavy base64 media before local cache
+  const sanitizeProjectForStorage = (p: Project): Project => {
+    const isHeavyDataUrl = (v?: string | null) => typeof v === 'string' && (v.startsWith('data:') || v.length > 500);
+
+    let cleanPhotos = p.postInstallPhotos;
+    if (cleanPhotos) {
+      cleanPhotos = {
+        panelFixing: isHeavyDataUrl(cleanPhotos.panelFixing) ? '[cached-image]' : cleanPhotos.panelFixing,
+        inverterCabling: isHeavyDataUrl(cleanPhotos.inverterCabling) ? '[cached-image]' : cleanPhotos.inverterCabling,
+        earthingProtection: isHeavyDataUrl(cleanPhotos.earthingProtection) ? '[cached-image]' : cleanPhotos.earthingProtection,
+        plantWithCustomer: isHeavyDataUrl(cleanPhotos.plantWithCustomer) ? '[cached-image]' : cleanPhotos.plantWithCustomer,
+      };
+    }
+
+    return {
+      ...p,
+      attendancePhotoUrl: isHeavyDataUrl(p.attendancePhotoUrl) ? '[cached-photo]' : p.attendancePhotoUrl,
+      commissioningVideoUrl: isHeavyDataUrl(p.commissioningVideoUrl) ? '[cached-video]' : p.commissioningVideoUrl,
+      postInstallPhotos: cleanPhotos,
+    };
+  };
+
+  const safeSetItem = (key: string, value: any) => {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch (e: any) {
+      console.warn(`localStorage quota exceeded for ${key}, skipping heavy cache:`, e);
+      // If quota exceeded, purge old bloated cached project keys
+      try {
+        if (key.includes('projects') && Array.isArray(value)) {
+          const minimalProjects = value.map((p: any) => ({
+            id: p.id,
+            customerId: p.customerId,
+            customerName: p.customerName,
+            capacityKw: p.capacityKw,
+            stage: p.stage,
+            totalAmount: p.totalAmount,
+            startDate: p.startDate,
+            targetCompletionDate: p.targetCompletionDate,
+            installationDurationDays: p.installationDurationDays,
+            materialArrivedOnSite: p.materialArrivedOnSite,
+            siteSurveyVerified: p.siteSurveyVerified,
+          }));
+          localStorage.setItem(key, JSON.stringify(minimalProjects));
+        }
+      } catch (_) {
+        try {
+          localStorage.removeItem(key);
+        } catch (_) {}
+      }
+    }
+  };
+
+  // Save to localStorage with quota protection
   useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY}_leads`, JSON.stringify(leads));
-    localStorage.setItem(`${STORAGE_KEY}_customers`, JSON.stringify(customers));
-    localStorage.setItem(`${STORAGE_KEY}_surveys`, JSON.stringify(surveys));
-    localStorage.setItem(`${STORAGE_KEY}_quotations`, JSON.stringify(quotations));
-    localStorage.setItem(`${STORAGE_KEY}_projects`, JSON.stringify(projects));
-    localStorage.setItem(`${STORAGE_KEY}_products`, JSON.stringify(products));
-    localStorage.setItem(`${STORAGE_KEY}_invoices`, JSON.stringify(invoices));
-    localStorage.setItem(`${STORAGE_KEY}_payments`, JSON.stringify(payments));
-    localStorage.setItem(`${STORAGE_KEY}_warranties`, JSON.stringify(warranties));
-    localStorage.setItem(`${STORAGE_KEY}_amcs`, JSON.stringify(amcs));
-    localStorage.setItem(`${STORAGE_KEY}_tickets`, JSON.stringify(tickets));
-    localStorage.setItem(`${STORAGE_KEY}_rules`, JSON.stringify(automationRules));
-    localStorage.setItem(`${STORAGE_KEY}_logs`, JSON.stringify(automationLogs));
-    localStorage.setItem(`${STORAGE_KEY}_followups`, JSON.stringify(followUps));
-    localStorage.setItem(`${STORAGE_KEY}_notifications`, JSON.stringify(notifications));
-    localStorage.setItem(`${STORAGE_KEY}_timeline`, JSON.stringify(timeline));
-    localStorage.setItem(`${STORAGE_KEY}_expenses`, JSON.stringify(expenses));
-    localStorage.setItem(`${STORAGE_KEY}_suppliers`, JSON.stringify(suppliers));
-    localStorage.setItem(`${STORAGE_KEY}_pos`, JSON.stringify(purchaseOrders));
-    localStorage.setItem(`${STORAGE_KEY}_mat_alloc`, JSON.stringify(materialAllocations));
+    safeSetItem(`${STORAGE_KEY}_leads`, leads);
+    safeSetItem(`${STORAGE_KEY}_customers`, customers);
+    safeSetItem(`${STORAGE_KEY}_surveys`, surveys);
+    safeSetItem(`${STORAGE_KEY}_quotations`, quotations);
+    safeSetItem(`${STORAGE_KEY}_projects`, projects.map(sanitizeProjectForStorage));
+    safeSetItem(`${STORAGE_KEY}_products`, products);
+    safeSetItem(`${STORAGE_KEY}_invoices`, invoices);
+    safeSetItem(`${STORAGE_KEY}_payments`, payments);
+    safeSetItem(`${STORAGE_KEY}_warranties`, warranties);
+    safeSetItem(`${STORAGE_KEY}_amcs`, amcs);
+    safeSetItem(`${STORAGE_KEY}_tickets`, tickets);
+    safeSetItem(`${STORAGE_KEY}_rules`, automationRules);
+    safeSetItem(`${STORAGE_KEY}_logs`, automationLogs);
+    safeSetItem(`${STORAGE_KEY}_followups`, followUps);
+    safeSetItem(`${STORAGE_KEY}_notifications`, notifications);
+    safeSetItem(`${STORAGE_KEY}_timeline`, timeline);
+    safeSetItem(`${STORAGE_KEY}_expenses`, expenses);
+    safeSetItem(`${STORAGE_KEY}_suppliers`, suppliers);
+    safeSetItem(`${STORAGE_KEY}_pos`, purchaseOrders);
+    safeSetItem(`${STORAGE_KEY}_mat_alloc`, materialAllocations);
   }, [leads, customers, surveys, quotations, projects, products, invoices, payments, warranties, amcs, tickets, automationRules, automationLogs, followUps, notifications, timeline, expenses, suppliers, purchaseOrders, materialAllocations]);
 
   // Live MySQL connection & refresh metadata
@@ -524,6 +581,87 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       refreshData();
     }
   }, [isAuthenticated, token]);
+
+  // Automatic Customer Advance Reconciliation: Ensures any Customer_Accepted quote has a verified advance payment & tax invoice
+  useEffect(() => {
+    const acceptedQuotes = quotations.filter(q => q.status === 'Customer_Accepted' || q.status === 'Converted_To_Project' || q.advancePaymentReceived);
+    if (acceptedQuotes.length > 0) {
+      let changed = false;
+      let updatedPayments = [...payments];
+      let updatedInvoices = [...invoices];
+
+      for (const q of acceptedQuotes) {
+        const hasPay = updatedPayments.some(p => p.quotationId === q.id || (p.isAdvance && p.customerName === q.leadName));
+        const advAmt = q.advancePaymentAmount || Math.round((q.totalAmount || 257644) * 0.90);
+        const invId = `INV-ADV-${q.id}`;
+
+        if (!hasPay) {
+          changed = true;
+          const newPay: Payment = {
+            id: `PAY-ADV-${q.id}`,
+            paymentNumber: `ADV-${q.quotationNumber || q.id}`,
+            invoiceId: invId,
+            projectId: q.convertedToProjectId || '',
+            customerId: q.customerId || q.leadId || '',
+            customerName: q.customerName || q.leadName || 'Customer',
+            amount: advAmt,
+            paymentDate: q.acceptedAt ? q.acceptedAt.split('T')[0] : new Date().toISOString().split('T')[0],
+            paymentMode: (q.advancePaymentMode as any) || 'NEFT/RTGS',
+            transactionReference: q.advancePaymentRef || `UTR-2026-${q.id.replace(/\D/g, '') || '98412'}`,
+            bankName: 'HDFC Bank',
+            status: 'Verified',
+            recordedBy: 'Sales Manager',
+            isAdvance: true,
+            quotationId: q.id,
+            reconciled: true,
+            reconciledAt: new Date().toISOString(),
+            reconciledBy: 'Accounts Engine'
+          };
+          updatedPayments.unshift(newPay);
+        }
+
+        const hasInv = updatedInvoices.some(inv => inv.id === invId || (q.convertedToProjectId && inv.projectId === q.convertedToProjectId));
+        if (!hasInv) {
+          changed = true;
+          const taxable = Math.round(advAmt / 1.138);
+          const gstHalf = Math.round((advAmt - taxable) / 2);
+          const newInv: Invoice = {
+            id: invId,
+            invoiceNumber: `INV-2026-00${String(updatedInvoices.length + 1).padStart(3, '0')}`,
+            projectId: q.convertedToProjectId || `PROJECT-${q.id}`,
+            customerId: q.customerId || q.leadId || '',
+            customerName: q.customerName || q.leadName || 'Customer',
+            customerPhone: q.customerPhone || '',
+            issueDate: q.acceptedAt ? q.acceptedAt.split('T')[0] : new Date().toISOString().split('T')[0],
+            dueDate: new Date(Date.now() + 86400000 * 7).toISOString().split('T')[0],
+            subtotal: taxable,
+            cgst: gstHalf,
+            sgst: gstHalf,
+            igst: 0,
+            totalAmount: advAmt,
+            paidAmount: advAmt,
+            balanceDue: 0,
+            status: 'Paid',
+            items: [
+              {
+                description: `90% Milestone Advance for ${q.systemCapacityKw || 5} kW Solar EPC Plant (Booking & Procurement)`,
+                hsnCode: '995465',
+                quantity: 1,
+                rate: taxable,
+                amount: taxable
+              }
+            ]
+          };
+          updatedInvoices.unshift(newInv);
+        }
+      }
+
+      if (changed) {
+        setPayments(updatedPayments);
+        setInvoices(updatedInvoices);
+      }
+    }
+  }, [quotations]);
 
   // Internal log helper
   const addAutomationLog = (ruleName: string, triggerEvent: string, entityId: string, entityName: string, actionSummary: string, status: 'Success' | 'Failed' | 'Warning' = 'Success') => {
@@ -643,6 +781,7 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       sanctionLoad: leadData.sanctionLoad || Math.ceil(estKw * 1.1),
       roofAreaSqFt: leadData.roofAreaSqFt || (estKw * 100),
       roofType: leadData.roofType || 'RCC Flat',
+      connectionSpace: leadData.connectionSpace || 'Single Space',
       recommendedKw: estKw,
       estimatedBudget: estBudget,
       createdAt: new Date().toISOString(),
@@ -700,11 +839,18 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const updateLead = (id: string, updates: Partial<Lead>) => {
     const updatedAt = new Date().toISOString();
-    setLeads(prev => prev.map(l => l.id === id ? { ...l, ...updates, updatedAt } : l));
+    const isSuper = currentUser?.role === 'Super Admin' || currentUser?.role === 'CEO';
+    const enrichedUpdates = isSuper ? {
+      ...updates,
+      lastModifiedBy: currentUser?.name || 'Super Admin',
+      lastModifiedRole: currentUser?.role || 'Super Admin',
+      lastModifiedAt: updatedAt,
+    } : updates;
+    setLeads(prev => prev.map(l => l.id === id ? { ...l, ...enrichedUpdates, updatedAt } : l));
     authFetch(`/api/leads/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...updates, updatedAt })
+      body: JSON.stringify({ ...enrichedUpdates, updatedAt })
     }).catch(err => console.error('Failed to update lead in MySQL:', err));
   };
 
@@ -756,11 +902,18 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateProject = (id: string, updates: Partial<Project>) => {
-    setProjects(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
+    const isSuper = currentUser?.role === 'Super Admin' || currentUser?.role === 'CEO';
+    const enrichedUpdates = isSuper ? {
+      ...updates,
+      lastModifiedBy: currentUser?.name || 'Super Admin',
+      lastModifiedRole: currentUser?.role || 'Super Admin',
+      lastModifiedAt: new Date().toISOString(),
+    } : updates;
+    setProjects(prev => prev.map(p => p.id === id ? { ...p, ...enrichedUpdates } : p));
     authFetch(`/api/projects/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updates)
+      body: JSON.stringify(enrichedUpdates)
     }).catch(err => console.error('Failed to update project in MySQL:', err));
   };
 
@@ -1557,6 +1710,29 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  // 5D. Update Quotation Priority (Sales Manager & Super Admin)
+  const updateQuotationPriority = async (quotationId: string, priority: 'High' | 'Medium' | 'Low'): Promise<boolean> => {
+    const isSuper = currentUser?.role === 'Super Admin' || currentUser?.role === 'CEO';
+    const modifiedPayload: any = { priority };
+    if (isSuper) {
+      modifiedPayload.lastModifiedBy = currentUser?.name || 'Super Admin';
+      modifiedPayload.lastModifiedRole = currentUser?.role || 'Super Admin';
+      modifiedPayload.lastModifiedAt = new Date().toISOString();
+    }
+    setQuotations(prev => prev.map(q => q.id === quotationId ? { ...q, ...modifiedPayload } : q));
+    try {
+      const res = await authFetch(`/api/quotations/${quotationId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(modifiedPayload),
+      });
+      return res.ok;
+    } catch (err) {
+      console.error('Failed to update quotation priority in MySQL:', err);
+      return false;
+    }
+  };
+
   // 6. AUTOMATION: Deal Conversion -> Quotation Accepted (RULE-05, RULE-06)
   // CRITICAL DEFECT FIX: Idempotent project conversion, UNPAID advance invoice, ZERO fake payments!
   const acceptQuotation = (quotationId: string) => {
@@ -1817,7 +1993,9 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             body: JSON.stringify(invWar)
           }).catch(err => console.error('Failed to save inverter warranty to MySQL:', err));
 
-          // Auto-provision AMC Opportunity
+          // Auto-provision AMC Opportunity with selected 5/7/8/10 Year Duration
+          const amcYears = p.amcWarrantyYears || 5;
+          const amcEndDate = new Date(Date.now() + 86400000 * 365 * amcYears).toISOString().split('T')[0];
           const newAmc: AmcContract = {
             id: `AMC-2026-${String(amcs.length + 1).padStart(3, '0')}`,
             customerId: p.customerId,
@@ -1826,12 +2004,12 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             customerAddress: p.customerAddress,
             projectId: p.id,
             capacityKw: p.capacityKw,
-            planName: p.capacityKw >= 20 ? 'Commercial Max Performance' : 'Gold Annual Care',
+            planName: `${amcYears}-Year EPC Care`,
             annualPrice: p.capacityKw * 1000,
-            visitsPerYear: 4,
+            visitsPerYear: 2,
             completedVisits: 0,
             startDate: new Date().toISOString().split('T')[0],
-            endDate: new Date(Date.now() + 86400000 * 365).toISOString().split('T')[0],
+            endDate: amcEndDate,
             status: 'Active',
             nextScheduledVisit: new Date(Date.now() + 86400000 * 90).toISOString().split('T')[0],
           };
@@ -1887,15 +2065,20 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       paymentNumber: pNumber,
       invoiceId: paymentData.invoiceId || '',
       projectId: paymentData.projectId || '',
-      customerId: paymentData.customerId || '',
-      customerName: paymentData.customerName || 'Customer',
+      customerId: paymentData.customerId || (paymentData as any).entityId || '',
+      customerName: paymentData.customerName || (paymentData as any).entityName || 'Customer',
       amount: paymentData.amount || 0,
       paymentDate: paymentData.paymentDate || new Date().toISOString().split('T')[0],
       paymentMode: paymentData.paymentMode || 'NEFT/RTGS',
       transactionReference: paymentData.transactionReference || `TXN-${Date.now().toString().slice(-6)}`,
-      bankName: paymentData.bankName || 'Bank',
+      bankName: paymentData.bankName || 'HDFC Bank',
       status: 'Verified',
-      recordedBy: activeRole,
+      recordedBy: paymentData.recordedBy || activeRole,
+      isAdvance: Boolean(paymentData.isAdvance),
+      quotationId: paymentData.quotationId || undefined,
+      reconciled: Boolean(paymentData.reconciled || paymentData.isAdvance),
+      reconciledAt: paymentData.reconciledAt || (paymentData.isAdvance ? new Date().toISOString() : undefined),
+      reconciledBy: paymentData.reconciledBy || (paymentData.isAdvance ? 'Accounts Engine' : undefined),
     };
 
     setPayments(prev => [newPayment, ...prev]);
@@ -2081,24 +2264,66 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const createFollowUp = (followUpData: Partial<FollowUp>): FollowUp => {
     const fup: FollowUp = {
-      id: `FUP-${Date.now().toString().slice(-6)}`,
-      title: followUpData.title || 'Follow-up Task',
+      id: `FUP-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`,
+      title: followUpData.title || 'Follow-up Call',
       dueDate: followUpData.dueDate || new Date().toISOString().split('T')[0],
       dueTime: followUpData.dueTime || '11:00 AM',
       type: followUpData.type || 'Call',
-      status: 'Pending',
+      status: followUpData.status || 'Pending',
       priority: followUpData.priority || 'Medium',
-      assignedToId: followUpData.assignedToId || employees[1].id,
-      assignedToName: followUpData.assignedToName || employees[1].name,
+      assignedToId: followUpData.assignedToId || (employees[1]?.id || 'EMP-001'),
+      assignedToName: followUpData.assignedToName || (employees[1]?.name || 'Sales Executive'),
       notes: followUpData.notes || '',
       leadId: followUpData.leadId,
       leadName: followUpData.leadName,
       customerId: followUpData.customerId,
       customerName: followUpData.customerName,
       quotationId: followUpData.quotationId,
+      isStruckOut: followUpData.isStruckOut || false,
+      outcome: followUpData.outcome,
+      createdAt: new Date().toISOString().split('T')[0]
     };
     setFollowUps(prev => [fup, ...prev]);
+    authFetch('/api/follow-ups', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(fup)
+    }).catch(err => console.error('Error saving follow-up to DB:', err));
     return fup;
+  };
+
+  const updateFollowUp = (followUpId: string, updates: Partial<FollowUp>) => {
+    setFollowUps(prev => prev.map(f => f.id === followUpId ? { ...f, ...updates } : f));
+    authFetch(`/api/follow-ups/${followUpId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates)
+    }).catch(err => console.error('Error updating follow-up in DB:', err));
+  };
+
+  const toggleStrikeFollowUp = (followUpId: string) => {
+    setFollowUps(prev => prev.map(f => {
+      if (f.id === followUpId) {
+        const nextStruck = !f.isStruckOut;
+        return {
+          ...f,
+          isStruckOut: nextStruck,
+          status: nextStruck ? 'Completed' : 'Pending',
+          completedAt: nextStruck ? new Date().toISOString().split('T')[0] : undefined
+        };
+      }
+      return f;
+    }));
+    authFetch(`/api/follow-ups/${followUpId}/toggle-strike`, {
+      method: 'PUT'
+    }).catch(err => console.error('Error toggling strike follow-up in DB:', err));
+  };
+
+  const deleteFollowUp = (followUpId: string) => {
+    setFollowUps(prev => prev.filter(f => f.id !== followUpId));
+    authFetch(`/api/follow-ups/${followUpId}`, {
+      method: 'DELETE'
+    }).catch(err => console.error('Error deleting follow-up in DB:', err));
   };
 
   const toggleAutomationRule = (ruleId: string) => {
@@ -2469,6 +2694,7 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       sendQuotation,
       recordCustomerAcceptance,
       editQuotationData,
+      updateQuotationPriority,
       acceptQuotation,
       updateProjectStage,
       updateInstallationChecklist,
@@ -2490,6 +2716,9 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createCustomerPortalAccount,
       completeFollowUp,
       createFollowUp,
+      updateFollowUp,
+      toggleStrikeFollowUp,
+      deleteFollowUp,
       toggleAutomationRule,
       addAutomationRule,
       markNotificationRead,

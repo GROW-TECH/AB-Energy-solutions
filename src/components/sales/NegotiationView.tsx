@@ -4,7 +4,8 @@ import {
   Calendar, FileText, CheckCircle2, ArrowRight, MessageSquare, 
   Printer, Download, ShieldCheck, Clock, AlertCircle, Edit3, 
   Save, RotateCcw, Check, Sparkles, Building2, User, 
-  IndianRupee, ChevronRight, X, Layers, Truck, Package, ExternalLink
+  IndianRupee, ChevronRight, X, Layers, Truck, Package, ExternalLink,
+  Receipt
 } from 'lucide-react';
 import { useCrm } from '../../context/CrmContext';
 import { Quotation, QuotationVersion } from '../../types';
@@ -25,7 +26,10 @@ export const NegotiationView: React.FC<NegotiationViewProps> = ({
     createQuotationRevision, 
     recordCustomerAcceptance, 
     currentUser,
-    projects
+    projects,
+    payments,
+    recordPayment,
+    updateProject
   } = useCrm();
 
   const [activeTab, setActiveTab] = useState<'active' | 'in_procurement'>('active');
@@ -38,6 +42,13 @@ export const NegotiationView: React.FC<NegotiationViewProps> = ({
   const [isSubmittingRevision, setIsSubmittingRevision] = useState(false);
   const [isAccepting, setIsAccepting] = useState(false);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  // Advance Payment Recording States
+  const [advanceReceived, setAdvanceReceived] = useState<boolean>(true);
+  const [advanceAmount, setAdvanceAmount] = useState<number>(0);
+  const [advanceMode, setAdvanceMode] = useState<string>('NEFT/RTGS');
+  const [advanceRef, setAdvanceRef] = useState<string>('');
+  const [advanceDate, setAdvanceDate] = useState<string>(new Date().toISOString().split('T')[0]);
 
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
     setToastMessage({ text, type });
@@ -80,6 +91,19 @@ export const NegotiationView: React.FC<NegotiationViewProps> = ({
     setSelectedQuoteForNegotiation(q);
     setDiscountAmount(q.discountAmount || 0);
     setNegotiationNotes('');
+
+    const activeVer = q.versions?.[q.versions.length - 1] || q.versions?.[0];
+    const subtotal = activeVer?.subtotal || q.subtotal || q.totalAmount || 0;
+    const taxable = Math.max(0, subtotal - (q.discountAmount || 0));
+    const gst = Math.round(taxable * 0.138);
+    const total = taxable + gst;
+    const adv90 = Math.round(total * 0.90);
+
+    setAdvanceAmount(adv90);
+    setAdvanceReceived(true);
+    setAdvanceMode('NEFT/RTGS');
+    setAdvanceRef(`ADV-${Date.now().toString().slice(-6)}`);
+    setAdvanceDate(new Date().toISOString().split('T')[0]);
   };
 
   // Recalculate figures dynamically in negotiation drawer
@@ -125,10 +149,38 @@ export const NegotiationView: React.FC<NegotiationViewProps> = ({
     try {
       const ok = await recordCustomerAcceptance(
         selectedQuoteForNegotiation.id, 
-        `Client agreed on negotiated terms: ₹${currentTotal.toLocaleString('en-IN')} with ₹${discountAmount.toLocaleString('en-IN')} discount. 90% advance: ₹${currentAdvance90.toLocaleString('en-IN')}.`
+        negotiationNotes || `Client agreed on negotiated terms: ₹${currentTotal.toLocaleString('en-IN')} with ₹${discountAmount.toLocaleString('en-IN')} discount. 90% advance: ₹${currentAdvance90.toLocaleString('en-IN')}.`,
+        advanceRef
       );
       if (ok) {
-        showToast('🎉 Customer Agreement Recorded! Deal moved to Purchase Team panel for material procurement.', 'success');
+        if (advanceReceived && advanceAmount > 0) {
+          recordPayment({
+            id: `PAY-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            entityType: 'Customer',
+            entityId: selectedQuoteForNegotiation.customerId || selectedQuoteForNegotiation.leadId,
+            entityName: selectedQuoteForNegotiation.customerName || selectedQuoteForNegotiation.leadName,
+            quotationId: selectedQuoteForNegotiation.id,
+            amount: Number(advanceAmount),
+            paymentMode: advanceMode as any,
+            transactionReference: advanceRef || `ADV-${Date.now().toString().slice(-6)}`,
+            paymentDate: advanceDate,
+            isAdvance: true,
+            notes: `Customer Advance payment for Quotation ${selectedQuoteForNegotiation.quotationNumber || selectedQuoteForNegotiation.id}. ${negotiationNotes}`.trim(),
+          });
+          const linkedProj = projects.find(p => p.quotationId === selectedQuoteForNegotiation.id || p.leadId === selectedQuoteForNegotiation.leadId);
+          if (linkedProj) {
+            updateProject(linkedProj.id, {
+              advancePaymentReceived: true,
+              advancePaymentAmount: Number(advanceAmount),
+              advancePaymentMode: advanceMode,
+              advancePaymentRef: advanceRef,
+              advancePaymentDate: advanceDate,
+              advancePaymentNotes: negotiationNotes,
+            });
+          }
+        }
+
+        showToast('Customer Agreement & Advance Recorded! Deal moved to Purchase Team panel and recorded in Accounts.', 'success');
         setSelectedQuoteForNegotiation(null);
         setActiveTab('in_procurement');
       }
@@ -364,13 +416,35 @@ export const NegotiationView: React.FC<NegotiationViewProps> = ({
                       </div>
                       <div className="col-span-2 pt-1 border-t border-slate-200/60 flex items-center justify-between">
                         <span className="text-[10px] text-slate-500 font-medium">90% Advance Required:</span>
-                        <span className="font-mono font-bold text-emerald-800 text-xs">₹{advance90.toLocaleString('en-IN')}</span>
+                        <div className="text-right">
+                          <span className="font-mono font-bold text-emerald-800 text-xs">₹{advance90.toLocaleString('en-IN')}</span>
+                          {isAccepted && (
+                            <div className="mt-0.5">
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-emerald-100 text-emerald-800 font-extrabold text-[9px] rounded-md border border-emerald-300">
+                                <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600" />
+                                Advance Paid
+                              </span>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
 
                     <div className="flex items-center justify-end gap-2 pt-1">
                       {isAccepted ? (
                         <>
+                          <button
+                            onClick={() => {
+                              if (onNavigateToTab) {
+                                onNavigateToTab('customer-advances');
+                              }
+                            }}
+                            className="px-2.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 font-bold rounded-xl text-xs transition-colors cursor-pointer inline-flex items-center gap-1"
+                            title="View Advance Payment & Tax Receipt"
+                          >
+                            <Receipt className="w-3.5 h-3.5 text-amber-700" />
+                            <span>Receipt</span>
+                          </button>
                           <button
                             onClick={() => {
                               if (onNavigateToTab) {
@@ -460,14 +534,30 @@ export const NegotiationView: React.FC<NegotiationViewProps> = ({
                             ₹{advance90.toLocaleString('en-IN')}
                           </div>
                           <div className="text-[10px] text-slate-500 font-medium">90% on PO / Booking</div>
+                          {isAccepted && (
+                            <div className="mt-1">
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                Advance Paid: ₹{advance90.toLocaleString('en-IN')}
+                              </span>
+                            </div>
+                          )}
                         </td>
 
                         <td className="p-4">
                           {isAccepted ? (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-full text-[10px] font-bold">
-                              <Truck className="w-3.5 h-3.5 text-emerald-600" />
-                              <span>In Purchase &bull; Procurement Initiated</span>
-                            </span>
+                            <div className="space-y-1">
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-full text-[10px] font-bold">
+                                <Truck className="w-3.5 h-3.5 text-emerald-600" />
+                                <span>In Purchase &bull; Procurement Initiated</span>
+                              </span>
+                              <div>
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-600 text-white text-[9px] font-bold shadow-2xs">
+                                  <Check className="w-2.5 h-2.5" />
+                                  Advance Confirmed
+                                </span>
+                              </div>
+                            </div>
                           ) : (
                             <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-50 text-amber-800 border border-amber-300 rounded-full text-[10px] font-bold">
                               <Clock className="w-3 h-3 text-amber-600" />
@@ -479,6 +569,18 @@ export const NegotiationView: React.FC<NegotiationViewProps> = ({
                         <td className="p-4 text-right">
                           {isAccepted ? (
                             <div className="flex items-center justify-end gap-2">
+                              <button
+                                onClick={() => {
+                                  if (onNavigateToTab) {
+                                    onNavigateToTab('customer-advances');
+                                  }
+                                }}
+                                className="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 font-bold rounded-xl text-xs transition-colors cursor-pointer inline-flex items-center gap-1 shadow-2xs"
+                                title="View Customer Advance & Receipt"
+                              >
+                                <Receipt className="w-3.5 h-3.5 text-amber-700" />
+                                <span>Advance Receipt</span>
+                              </button>
                               <button
                                 onClick={() => {
                                   if (onNavigateToTab) {
@@ -637,6 +739,84 @@ export const NegotiationView: React.FC<NegotiationViewProps> = ({
                   <span className="font-mono font-bold text-slate-800">₹{currentCommissioning10.toLocaleString('en-IN')}</span>
                 </div>
               </div>
+            </div>
+
+            {/* Sales Manager Customer Advance Payment Recording */}
+            <div className="p-3.5 bg-amber-50/90 border border-amber-300 rounded-xl space-y-2.5">
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={advanceReceived}
+                    disabled={selectedQuoteForNegotiation.status === 'Customer_Accepted'}
+                    onChange={e => setAdvanceReceived(e.target.checked)}
+                    className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer"
+                  />
+                  <span className="text-xs font-bold text-amber-950">Record Customer Advance Payment</span>
+                </label>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-200 text-amber-900 border border-amber-300">
+                  Syncs to Accounts &amp; Unlocks POs
+                </span>
+              </div>
+
+              {advanceReceived && (
+                <div className="space-y-2.5 pt-1">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 mb-0.5">Advance Amount (₹)</label>
+                      <input
+                        type="number"
+                        disabled={selectedQuoteForNegotiation.status === 'Customer_Accepted'}
+                        value={advanceAmount}
+                        onChange={e => setAdvanceAmount(Number(e.target.value))}
+                        placeholder="e.g. 245629"
+                        className="w-full text-xs font-mono font-bold px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 mb-0.5">Payment Mode</label>
+                      <select
+                        disabled={selectedQuoteForNegotiation.status === 'Customer_Accepted'}
+                        value={advanceMode}
+                        onChange={e => setAdvanceMode(e.target.value)}
+                        className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-emerald-500 font-semibold"
+                      >
+                        <option value="NEFT/RTGS">NEFT / RTGS</option>
+                        <option value="UPI">UPI / QR Code</option>
+                        <option value="Cheque">Cheque</option>
+                        <option value="Net Banking">Net Banking</option>
+                        <option value="Cash Deposit">Bank Cash Deposit</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 mb-0.5">UTR / Cheque Ref #</label>
+                      <input
+                        type="text"
+                        disabled={selectedQuoteForNegotiation.status === 'Customer_Accepted'}
+                        value={advanceRef}
+                        onChange={e => setAdvanceRef(e.target.value)}
+                        placeholder="e.g. UTR-2026-98412"
+                        className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 mb-0.5">Payment Date</label>
+                      <input
+                        type="date"
+                        disabled={selectedQuoteForNegotiation.status === 'Customer_Accepted'}
+                        value={advanceDate}
+                        onChange={e => setAdvanceDate(e.target.value)}
+                        className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-amber-800 leading-tight">
+                    Confirming this advance will automatically create a verified entry under <strong>Customer Advances</strong> in the Accounts panel and unlock Purchase Orders for material procurement.
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Negotiation / Meeting Notes */}

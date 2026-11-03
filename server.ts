@@ -5,6 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { apiRouter } from './server/routes.js';
+import { runProjectLifecycleMigration } from './server/migrations/project-lifecycle-updates.js';
 
 dotenv.config();
 
@@ -43,8 +44,9 @@ async function startServer() {
     hasDist = true;
   }
 
-  // In production (or whenever compiled build exists), serve compiled static assets
-  const isProd = process.env.NODE_ENV === 'production' || hasDist;
+  // In production (or when running standalone bundle without src), serve compiled static assets
+  const hasSrc = fs.existsSync(path.resolve(process.cwd(), 'src', 'App.tsx'));
+  const isProd = process.env.NODE_ENV === 'production' || (!hasSrc && hasDist);
 
   if (!isProd) {
     const vite = await createViteServer({
@@ -58,13 +60,22 @@ async function startServer() {
     app.use('/assets', express.static(path.resolve(distPath, 'assets')));
     app.use('*/assets', express.static(path.resolve(distPath, 'assets')));
     app.get(['/logo.png', '*/logo.png'], (_req, res) => {
-      res.sendFile(path.resolve(distPath, 'logo.png'));
+      const p = fs.existsSync(path.resolve(distPath, 'logo.png'))
+        ? path.resolve(distPath, 'logo.png')
+        : path.resolve(process.cwd(), 'public', 'logo.png');
+      res.sendFile(p);
     });
     app.get(['/logo.jpg', '*/logo.jpg'], (_req, res) => {
-      res.sendFile(path.resolve(distPath, 'logo.jpg'));
+      const p = fs.existsSync(path.resolve(distPath, 'logo.jpg'))
+        ? path.resolve(distPath, 'logo.jpg')
+        : path.resolve(process.cwd(), 'public', 'logo.jpg');
+      res.sendFile(p);
     });
     app.get(['/favicon.ico', '*/favicon.ico'], (_req, res) => {
-      res.sendFile(path.resolve(distPath, 'logo.png'));
+      const p = fs.existsSync(path.resolve(distPath, 'favicon.ico'))
+        ? path.resolve(distPath, 'favicon.ico')
+        : (fs.existsSync(path.resolve(distPath, 'logo.png')) ? path.resolve(distPath, 'logo.png') : path.resolve(process.cwd(), 'public', 'logo.png'));
+      res.sendFile(p);
     });
     app.get('*', (_req, res) => {
       res.sendFile(path.resolve(distPath, 'index.html'));
@@ -73,6 +84,10 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`AB Energy Solutions CRM server running at http://0.0.0.0:${PORT}`);
+    // Run database schema updates in background on startup
+    runProjectLifecycleMigration().catch(err => {
+      console.warn('[Startup Migration Notice]:', err.message);
+    });
   });
 }
 

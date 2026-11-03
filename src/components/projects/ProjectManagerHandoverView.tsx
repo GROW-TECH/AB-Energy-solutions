@@ -20,7 +20,7 @@ export const ProjectManagerHandoverView: React.FC<ProjectManagerHandoverViewProp
   onNavigateToTab,
   onNavigateToProject,
 }) => {
-  const { quotations, projects, acceptQuotation, surveys, currentUser, refreshData } = useCrm();
+  const { quotations, projects, acceptQuotation, surveys, currentUser, refreshData, payments } = useCrm();
 
   // Group quotations by PM lifecycle
   const incomingAcceptedQuotes = quotations.filter(q => q.status === 'Customer_Accepted');
@@ -307,6 +307,13 @@ export const ProjectManagerHandoverView: React.FC<ProjectManagerHandoverViewProp
                 const linkedSurvey = surveys.find(s => s.id === q.surveyId || s.leadId === q.leadId);
                 const advanceDue = Math.round(q.totalAmount * 0.90);
                 const commissioningDue = q.totalAmount - advanceDue;
+                const isAdvancePaid = Boolean(
+                  q.advancePaymentReceived ||
+                  payments?.some(p => 
+                    (p.isAdvance || p.paymentNumber?.includes('ADV') || p.id.includes('ADV')) && 
+                    (p.quotationId === q.id || p.customerName?.toLowerCase() === q.leadName?.toLowerCase() || (q.convertedToProjectId && p.projectId === q.convertedToProjectId))
+                  )
+                );
                 const v = q.versions?.[0];
                 const lineItemsCount = v?.items?.length || 14;
 
@@ -326,6 +333,17 @@ export const ProjectManagerHandoverView: React.FC<ProjectManagerHandoverViewProp
                             <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
                             <span>BOM Approved by PM</span>
                           </span>
+                          {isAdvancePaid ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                              <span>Advance Paid (90%)</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-amber-50 text-amber-800 border border-amber-300">
+                              <Clock className="w-3 h-3 text-amber-600" />
+                              <span>Advance Pending</span>
+                            </span>
+                          )}
                           <span className={`px-2 py-0.5 text-[10px] font-bold rounded ${
                             q.status === 'Sent'
                               ? 'bg-purple-50 text-purple-700 border border-purple-200'
@@ -479,6 +497,19 @@ export const ProjectManagerHandoverView: React.FC<ProjectManagerHandoverViewProp
                 const linkedSurvey = surveys.find(s => s.id === q.surveyId || s.leadId === q.leadId);
                 const advanceDue = Math.round(q.totalAmount * 0.90);
                 const commissioningDue = q.totalAmount - advanceDue;
+                const isAdvancePaid = Boolean(
+                  q.advancePaymentReceived ||
+                  payments?.some(p => 
+                    (p.isAdvance || p.paymentNumber?.includes('ADV') || p.id.includes('ADV')) && 
+                    (p.quotationId === q.id || p.customerName?.toLowerCase() === q.leadName?.toLowerCase() || (q.convertedToProjectId && p.projectId === q.convertedToProjectId))
+                  )
+                );
+                const indent = indentsMap[q.id];
+                const isMaterialsReady = Boolean(
+                  indent?.materials_purchased_confirmed || 
+                  indent?.has_signed_grn || 
+                  q.materialsPurchasedConfirmed
+                );
 
                 return (
                   <div 
@@ -488,7 +519,7 @@ export const ProjectManagerHandoverView: React.FC<ProjectManagerHandoverViewProp
                     {/* Header Row */}
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
                       <div>
-                        <div className="flex items-center gap-2.5 mb-1.5">
+                        <div className="flex flex-wrap items-center gap-2 mb-1.5">
                           <span className="font-mono text-xs font-black px-2.5 py-1 bg-slate-900 text-white rounded-lg">
                             {q.quotationNumber}
                           </span>
@@ -496,6 +527,17 @@ export const ProjectManagerHandoverView: React.FC<ProjectManagerHandoverViewProp
                             <span className="w-2 h-2 rounded-full bg-emerald-600 animate-ping" />
                             Client Accepted &bull; Ready for EPC Kickoff
                           </span>
+                          {isAdvancePaid ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                              <span>Advance Paid (90%)</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-amber-50 text-amber-800 border border-amber-300">
+                              <Clock className="w-3 h-3 text-amber-600" />
+                              <span>Advance Pending</span>
+                            </span>
+                          )}
                           {linkedSurvey && (
                             <span className="px-2 py-0.5 text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200 rounded">
                               Survey: {linkedSurvey.id}
@@ -531,18 +573,18 @@ export const ProjectManagerHandoverView: React.FC<ProjectManagerHandoverViewProp
                           <span>Official PDF</span>
                         </a>
 
-                        {indentsMap[q.id]?.has_signed_grn ? (
+                        {isMaterialsReady ? (
                           <button
                             onClick={() => setSelectedQuoteForKickoff(q)}
                             className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl text-xs shadow-md hover:shadow-lg transition-all flex items-center gap-2 cursor-pointer animate-pulse"
                           >
-                            <CheckCheck className="w-4 h-4 text-emerald-200" />
-                            <span>Materials Signed ✓ • Convert to EPC Project &rarr;</span>
+                            <Sparkles className="w-4 h-4 text-emerald-200" />
+                            <span>Materials Purchased ✓ • Convert to EPC Project &rarr;</span>
                           </button>
                         ) : (
                           <div className="flex items-center gap-2 px-3.5 py-2.5 bg-amber-50 border border-amber-300 text-amber-900 font-bold rounded-xl text-xs shadow-xs">
                             <Truck className="w-4 h-4 text-amber-600 animate-pulse" />
-                            <span>Step 2: Procurement In Progress (Purchase Team) • Site Delivery &amp; Customer Signature Required</span>
+                            <span>Step 2: Awaiting Purchase Team Material Confirmation</span>
                           </div>
                         )}
                       </div>
@@ -581,9 +623,16 @@ export const ProjectManagerHandoverView: React.FC<ProjectManagerHandoverViewProp
                         <div className="text-lg font-black text-emerald-800 font-mono mt-0.5">
                           ₹{advanceDue.toLocaleString('en-IN')}
                         </div>
-                        <span className="text-[10px] text-slate-500 font-medium">
-                          Initial Contract Deposit (90%)
-                        </span>
+                        {isAdvancePaid ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 mt-1">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                            <span>Advance Paid (Confirmed)</span>
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-slate-500 font-medium">
+                            Initial Contract Deposit (90%)
+                          </span>
+                        )}
                       </div>
 
                       <div>
@@ -644,6 +693,10 @@ export const ProjectManagerHandoverView: React.FC<ProjectManagerHandoverViewProp
                         <span className="font-mono font-bold text-slate-900 text-xs">{q.quotationNumber}</span>
                         <span className="text-slate-400">&bull;</span>
                         <span className="font-bold text-slate-800 text-xs">{q.leadName}</span>
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                          <span>Advance Paid</span>
+                        </span>
                       </div>
                       <span className="text-[11px] text-slate-500 font-mono">
                         {q.systemCapacityKw} kW &bull; ₹{q.totalAmount.toLocaleString('en-IN')}

@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
+import { pool } from '../db.js';
 
 export const subsidiesRouter = Router();
 
@@ -273,9 +274,169 @@ function saveSubsidies(records: SubsidyRecord[]): void {
   }
 }
 
+export function mapProjectStageToSubsidyStage(projStage: string): { stage: number; stageName: string } {
+  switch (projStage) {
+    case 'Booking':
+      return { stage: 1, stageName: 'Portal Registration Submitted' };
+    case 'Site Survey':
+    case 'Engineering & Design':
+      return { stage: 2, stageName: 'DISCOM Feasibility (TFR) Pending' };
+    case 'Material Procurement':
+      return { stage: 3, stageName: 'Vendor Allocated (AB Energy Solutions)' };
+    case 'Installation':
+      return { stage: 4, stageName: 'Installation Complete (WCR Uploaded)' };
+    case 'Testing & Commissioning':
+      return { stage: 5, stageName: 'DISCOM Joint Inspection Scheduled' };
+    case 'Net Metering & Handover':
+      return { stage: 6, stageName: 'Net Meter Commissioned & Grid Synchronized' };
+    case 'Completed':
+      return { stage: 7, stageName: 'DBT Subsidy Credited to Customer Bank' };
+    default:
+      return { stage: 1, stageName: 'Portal Registration Submitted' };
+  }
+}
+
+/**
+ * Safely synchronizes live projects from MySQL database with subsidy tracking dossiers.
+ * Preserves all manual coordinator edits (officer names, TFR numbers, bank UTRs, document checklist).
+ */
+export async function syncLiveProjectsWithSubsidies(cached: SubsidyRecord[]): Promise<SubsidyRecord[]> {
+  try {
+    const [projects]: any = await pool.query(`
+      SELECT 
+        p.id, p.customer_id, p.customer_name, p.customer_phone, p.customer_address, 
+        p.capacity_kw, p.stage, p.discom_sanction_number, p.net_meter_installed_date, 
+        p.commissioning_date, p.created_at,
+        c.consumer_number_discom, c.discom_name as customer_discom
+      FROM projects p
+      LEFT JOIN customers c ON p.customer_id = c.id
+      ORDER BY p.created_at DESC
+    `);
+
+    if (!Array.isArray(projects) || projects.length === 0) {
+      return cached;
+    }
+
+    const updatedList = [...cached];
+    let hasChanges = false;
+
+    for (const p of projects) {
+      const cleanId = String(p.id);
+      const existingIdx = updatedList.findIndex(
+        s => s.project_id === cleanId || s.id === `SUB-${cleanId.replace('PROJECT-', '').replace('PRJ-', '')}`
+      );
+      const capKw = Number(p.capacity_kw) || 3;
+      const isResidential = capKw <= 10;
+      
+      let applicableSubsidy = 0;
+      if (isResidential) {
+        if (capKw <= 1) applicableSubsidy = 30000;
+        else if (capKw <= 2) applicableSubsidy = 60000;
+        else applicableSubsidy = 78000;
+      }
+
+      const stageInfo = mapProjectStageToSubsidyStage(p.stage || 'Booking');
+
+      if (existingIdx === -1) {
+        // Auto-create tracking record for live project
+        const subId = `SUB-${cleanId.replace('PROJECT-', '').replace('PRJ-', '')}`;
+        const newRecord: SubsidyRecord = {
+          id: subId,
+          project_id: cleanId,
+          project_number: cleanId,
+          customer_name: p.customer_name || 'Valued Customer',
+          customer_phone: p.customer_phone || '',
+          customer_type: isResidential ? 'residential' : 'commercial',
+          is_eligible: isResidential,
+          ineligibility_reason: isResidential ? undefined : 'Commercial/Industrial installation: 40% tax depreciation applicable in lieu of residential subsidy.',
+          site_address: p.customer_address || 'Tamil Nadu, India',
+          discom_name: p.customer_discom || 'TANGEDCO',
+          discom_section_office: 'Local Section Office',
+          consumer_number: p.consumer_number_discom || p.discom_sanction_number || 'Pending Consumer No',
+          sanctioned_load_kw: capKw,
+          system_capacity_kw: capKw,
+          subsidy_applicable_amount: applicableSubsidy,
+          dcr_modules_used: isResidential,
+          panel_make_and_model: isResidential ? 'Tata Power Solar / Waaree 545W Mono PERC (DCR)' : 'Tier-1 High Efficiency Panels',
+          inverter_make_and_model: `${capKw}kW On-Grid Solar Inverter`,
+          portal_application_no: isResidential ? `PMS-TN-${new Date().getFullYear()}-${cleanId.replace(/\D/g, '').slice(-5) || Math.floor(10000 + Math.random() * 90000)}` : 'N/A (Commercial Project)',
+          application_submission_date: p.created_at ? new Date(p.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+          current_stage: isResidential ? stageInfo.stage : 0,
+          current_stage_name: isResidential ? stageInfo.stageName : 'Not Eligible (Commercial Project)',
+          stage_status: p.stage === 'Completed' ? 'completed' : 'in_progress',
+          days_in_current_stage: 1,
+          is_delayed: false,
+          net_meter_number: p.discom_sanction_number || undefined,
+          net_meter_install_date: p.net_meter_installed_date || undefined,
+          commissioning_certificate_date: p.commissioning_date || undefined,
+          documents: {
+            electricity_bill: true,
+            aadhaar_card: isResidential,
+            cancelled_cheque: false,
+            roof_photo_geotagged: true,
+            dcr_certificate: isResidential,
+            tfr_letter: Boolean(p.discom_sanction_number),
+            wcr_copy: p.stage === 'Testing & Commissioning' || p.stage === 'Net Metering & Handover' || p.stage === 'Completed',
+            net_meter_test_report: Boolean(p.net_meter_installed_date),
+            commissioning_cert: Boolean(p.commissioning_date),
+          },
+          notes: `Auto-linked from live Project ${cleanId}. Workflow synchronized with PM Surya Ghar portal.`,
+          last_updated: new Date().toISOString().split('T')[0]
+        };
+
+        updatedList.unshift(newRecord);
+        hasChanges = true;
+      } else {
+        // Sync project updates if customer info changed or project stage advanced
+        const existing = { ...updatedList[existingIdx] };
+        let recordChanged = false;
+
+        if (p.customer_name && existing.customer_name !== p.customer_name) {
+          existing.customer_name = p.customer_name;
+          recordChanged = true;
+        }
+        if (p.customer_phone && existing.customer_phone !== p.customer_phone) {
+          existing.customer_phone = p.customer_phone;
+          recordChanged = true;
+        }
+        if (p.customer_address && existing.site_address !== p.customer_address) {
+          existing.site_address = p.customer_address;
+          recordChanged = true;
+        }
+        if (p.discom_sanction_number && !existing.net_meter_number && !existing.tfr_number) {
+          existing.net_meter_number = p.discom_sanction_number;
+          recordChanged = true;
+        }
+
+        // If project completed and subsidy not yet marked completed
+        if (p.stage === 'Completed' && existing.current_stage < 7 && existing.is_eligible) {
+          existing.current_stage = 7;
+          existing.current_stage_name = 'DBT Subsidy Credited to Customer Bank';
+          existing.stage_status = 'completed';
+          recordChanged = true;
+        }
+
+        if (recordChanged) {
+          updatedList[existingIdx] = existing;
+          hasChanges = true;
+        }
+      }
+    }
+
+    if (hasChanges) {
+      saveSubsidies(updatedList);
+    }
+    return updatedList;
+  } catch (err) {
+    console.warn('[Subsidies] Live project sync fallback to local store:', err);
+    return cached;
+  }
+}
+
 // 1. Get all subsidies
-subsidiesRouter.get('/', (_req: Request, res: Response) => {
-  const data = loadSubsidies();
+subsidiesRouter.get('/', async (_req: Request, res: Response) => {
+  const cached = loadSubsidies();
+  const data = await syncLiveProjectsWithSubsidies(cached);
   const activeEligible = data.filter(d => d.is_eligible);
   const totalPipelineSubsidy = activeEligible.reduce((acc, curr) => acc + (curr.subsidy_applicable_amount || 0), 0);
   const totalDisbursed = data.filter(d => d.current_stage === 7).reduce((acc, curr) => acc + (curr.dbt_disbursal_amount || curr.subsidy_applicable_amount || 0), 0);
@@ -310,7 +471,7 @@ subsidiesRouter.get('/project/:projectId', (req: Request, res: Response) => {
 });
 
 // 3. Update subsidy stage or details
-subsidiesRouter.put('/:id', (req: Request, res: Response) => {
+subsidiesRouter.put('/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
   const updates = req.body;
   const data = loadSubsidies();
@@ -328,6 +489,17 @@ subsidiesRouter.put('/:id', (req: Request, res: Response) => {
 
   data[index] = updatedRecord;
   saveSubsidies(data);
+
+  // Optionally propagate net-meter number to live projects table if available
+  if (updatedRecord.project_id && (updates.net_meter_number || updates.tfr_number)) {
+    try {
+      const sanctionOrMeter = updates.net_meter_number || updates.tfr_number;
+      await pool.query(
+        'UPDATE projects SET discom_sanction_number = COALESCE(discom_sanction_number, ?) WHERE id = ?',
+        [sanctionOrMeter, updatedRecord.project_id]
+      );
+    } catch (_) {}
+  }
 
   return res.json({
     success: true,

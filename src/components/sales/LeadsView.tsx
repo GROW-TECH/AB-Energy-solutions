@@ -137,13 +137,15 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
       if (!isLeadAssignedToMe(lead)) return false;
     }
 
-    const matchesSearch = 
-      lead.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      lead.phone.includes(searchTerm) ||
-      lead.city.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      lead.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (lead.email && lead.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (lead.address && lead.address.toLowerCase().includes(searchTerm.toLowerCase()));
+    const s = (searchTerm || '').trim().toLowerCase();
+    const matchesSearch = !s ||
+      (lead.name || '').toLowerCase().includes(s) ||
+      (lead.phone || '').includes(s) ||
+      (lead.city || '').toLowerCase().includes(s) ||
+      (lead.id || '').toLowerCase().includes(s) ||
+      (lead.email || '').toLowerCase().includes(s) ||
+      (lead.address || '').toLowerCase().includes(s) ||
+      ((lead.consumerNumberDiscom || (lead as any).ebServiceNumber) || '').toLowerCase().includes(s);
     
     const matchesStatus = statusFilter === 'All' || lead.status === statusFilter;
     const matchesPriority = priorityFilter === 'All' || lead.priority === priorityFilter;
@@ -368,15 +370,22 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                   (lead.phone && s.phone === lead.phone) || 
                   (lead.name && s.leadName && s.leadName.toLowerCase() === lead.name.toLowerCase())
                 );
+                const isSurveyScheduledOrPending = 
+                  lead.status === 'Site Survey Scheduled' || 
+                  linkedSurvey?.status === 'Scheduled' || 
+                  linkedSurvey?.status === 'In Progress' || 
+                  linkedSurvey?.status === 'Submitted for Review';
+
                 const hasSurveyScheduled = Boolean(lead.surveyId || linkedSurvey || lead.status === 'Site Survey Scheduled' || lead.status === 'Qualified' || lead.status === 'Survey Completed');
                 const isSurveyApproved = 
-                  linkedSurvey?.status === 'Approved' || 
-                  lead.status === 'Survey Completed' || 
-                  lead.status === 'Quotation Sent' || 
-                  lead.status === 'Negotiation' || 
-                  lead.status === 'Won' || 
-                  Boolean(lead.quotationId) ||
-                  quotations.some(q => q.leadId === lead.id);
+                  !isSurveyScheduledOrPending && (
+                    linkedSurvey?.status === 'Approved' || 
+                    lead.status === 'Survey Completed' || 
+                    lead.status === 'Quotation Sent' || 
+                    lead.status === 'Negotiation' || 
+                    lead.status === 'Won' || 
+                    Boolean(lead.quotationId)
+                  );
 
                 return (
                   <div
@@ -421,6 +430,20 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                       <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-200">
                         {lead.systemType || 'On-Grid'}
                       </span>
+                      {lead.connectionSpace && (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-800 border border-indigo-200">
+                          {lead.connectionSpace}
+                        </span>
+                      )}
+                      {(lead.lastModifiedRole === 'Super Admin' || lead.lastModifiedRole === 'CEO') && (
+                        <span 
+                          title={`Edited by ${lead.lastModifiedBy || lead.lastModifiedRole}${lead.lastModifiedAt ? ' at ' + new Date(lead.lastModifiedAt).toLocaleDateString() : ''}`}
+                          className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-300 flex items-center gap-1 shadow-2xs"
+                        >
+                          <ShieldCheck className="w-3 h-3 text-purple-600" />
+                          Edited by {lead.lastModifiedRole === 'CEO' ? 'CEO' : 'Super Admin'} ({lead.lastModifiedBy || 'Admin'})
+                        </span>
+                      )}
                     </div>
 
                     {/* Contact Info */}
@@ -613,13 +636,26 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                       <div className="text-[10px] text-slate-400 font-mono">
                         {lead.id} • {lead.source}
                       </div>
-                      <div className="flex items-center gap-1 mt-1">
+                      <div className="flex flex-wrap items-center gap-1 mt-1">
                         <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
                           {lead.customerType || 'Residential'}
                         </span>
                         <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-blue-50 text-blue-800 border border-blue-200">
                           {lead.systemType || 'On-Grid'}
                         </span>
+                        {lead.connectionSpace && (
+                          <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-indigo-50 text-indigo-800 border border-indigo-200">
+                            {lead.connectionSpace}
+                          </span>
+                        )}
+                        {(lead.lastModifiedRole === 'Super Admin' || lead.lastModifiedRole === 'CEO') && (
+                          <span 
+                            title={`Edited by ${lead.lastModifiedBy || lead.lastModifiedRole}`}
+                            className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-purple-100 text-purple-800 border border-purple-300"
+                          >
+                            Edited by {lead.lastModifiedRole === 'CEO' ? 'CEO' : 'Super Admin'}
+                          </span>
+                        )}
                       </div>
                     </td>
 
@@ -727,15 +763,22 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                           (lead.phone && s.phone === lead.phone) || 
                           (lead.name && s.leadName && s.leadName.toLowerCase() === lead.name.toLowerCase())
                         );
+                        const isSurveyScheduledOrPending = 
+                          lead.status === 'Site Survey Scheduled' || 
+                          linkedSurvey?.status === 'Scheduled' || 
+                          linkedSurvey?.status === 'In Progress' || 
+                          linkedSurvey?.status === 'Submitted for Review';
+
                         const hasSurveyScheduled = Boolean(lead.surveyId || linkedSurvey || lead.status === 'Site Survey Scheduled' || lead.status === 'Qualified' || lead.status === 'Survey Completed');
                         const isSurveyApproved = 
-                          linkedSurvey?.status === 'Approved' || 
-                          lead.status === 'Survey Completed' || 
-                          lead.status === 'Quotation Sent' || 
-                          lead.status === 'Negotiation' || 
-                          lead.status === 'Won' || 
-                          Boolean(lead.quotationId) ||
-                          quotations.some(q => q.leadId === lead.id);
+                          !isSurveyScheduledOrPending && (
+                            linkedSurvey?.status === 'Approved' || 
+                            lead.status === 'Survey Completed' || 
+                            lead.status === 'Quotation Sent' || 
+                            lead.status === 'Negotiation' || 
+                            lead.status === 'Won' || 
+                            Boolean(lead.quotationId)
+                          );
 
                         return (
                           <div className="flex items-center justify-end gap-1.5">
@@ -1000,14 +1043,21 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                   s.id === selectedLead.surveyId || 
                   (selectedLead.phone && s.phone === selectedLead.phone)
                 );
+                const isSurveyScheduledOrPending = 
+                  selectedLead.status === 'Site Survey Scheduled' || 
+                  linkedSurvey?.status === 'Scheduled' || 
+                  linkedSurvey?.status === 'In Progress' || 
+                  linkedSurvey?.status === 'Submitted for Review';
+
                 const isSurveyApproved = 
-                  linkedSurvey?.status === 'Approved' || 
-                  selectedLead.status === 'Survey Completed' || 
-                  selectedLead.status === 'Quotation Sent' || 
-                  selectedLead.status === 'Negotiation' || 
-                  selectedLead.status === 'Won' || 
-                  Boolean(selectedLead.quotationId) ||
-                  quotations.some(q => q.leadId === selectedLead.id);
+                  !isSurveyScheduledOrPending && (
+                    linkedSurvey?.status === 'Approved' || 
+                    selectedLead.status === 'Survey Completed' || 
+                    selectedLead.status === 'Quotation Sent' || 
+                    selectedLead.status === 'Negotiation' || 
+                    selectedLead.status === 'Won' || 
+                    Boolean(selectedLead.quotationId)
+                  );
                 const hasSurveyScheduled = Boolean(selectedLead.surveyId || linkedSurvey || selectedLead.status === 'Site Survey Scheduled' || selectedLead.status === 'Qualified');
 
                 if (isSurveyApproved) {
@@ -1149,8 +1199,38 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                     <span className="text-[10px] text-slate-400">Roof Construction</span>
                     <div className="font-semibold text-slate-800">{selectedLead.roofType}</div>
                   </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400">Connection Space</span>
+                    <div className="font-semibold text-slate-800">{selectedLead.connectionSpace || 'Single Space'}</div>
+                  </div>
                 </div>
               </div>
+
+              {/* Super Admin / CEO Edit Audit Notice */}
+              {(selectedLead.lastModifiedRole === 'Super Admin' || selectedLead.lastModifiedRole === 'CEO') && (
+                <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl space-y-1.5">
+                  <div className="flex items-center gap-1.5 text-purple-900 font-bold text-xs">
+                    <ShieldCheck className="w-4 h-4 text-purple-600" />
+                    <span>Edited by {selectedLead.lastModifiedRole === 'CEO' ? 'CEO' : 'Super Admin'} ({selectedLead.lastModifiedBy || 'Admin'})</span>
+                  </div>
+                  {selectedLead.lastModifiedAt && (
+                    <div className="text-[10px] text-purple-700 font-mono">
+                      Last modified on {new Date(selectedLead.lastModifiedAt).toLocaleString()}
+                    </div>
+                  )}
+                  {selectedLead.editHistory && selectedLead.editHistory.length > 0 && (
+                    <div className="pt-2 border-t border-purple-100 text-[10px] space-y-1">
+                      <div className="font-bold text-purple-900">Audit Trail:</div>
+                      {selectedLead.editHistory.map((h, i) => (
+                        <div key={i} className="text-slate-600 flex justify-between">
+                          <span>{h.editedBy} ({h.editorRole}): {h.changesSummary}</span>
+                          <span className="font-mono text-slate-400">{new Date(h.timestamp).toLocaleDateString()}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Quick Action: Generate Proposal (Gated behind approved survey & BOM) */}
               <div>
@@ -1160,14 +1240,21 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                     s.id === selectedLead.surveyId || 
                     (selectedLead.phone && s.phone === selectedLead.phone)
                   );
+                  const isSurveyScheduledOrPending = 
+                    selectedLead.status === 'Site Survey Scheduled' || 
+                    linkedSurvey?.status === 'Scheduled' || 
+                    linkedSurvey?.status === 'In Progress' || 
+                    linkedSurvey?.status === 'Submitted for Review';
+
                   const isSurveyApproved = 
-                    linkedSurvey?.status === 'Approved' || 
-                    selectedLead.status === 'Survey Completed' || 
-                    selectedLead.status === 'Quotation Sent' || 
-                    selectedLead.status === 'Negotiation' || 
-                    selectedLead.status === 'Won' || 
-                    Boolean(selectedLead.quotationId) ||
-                    quotations.some(q => q.leadId === selectedLead.id);
+                    !isSurveyScheduledOrPending && (
+                      linkedSurvey?.status === 'Approved' || 
+                      selectedLead.status === 'Survey Completed' || 
+                      selectedLead.status === 'Quotation Sent' || 
+                      selectedLead.status === 'Negotiation' || 
+                      selectedLead.status === 'Won' || 
+                      Boolean(selectedLead.quotationId)
+                    );
 
                   if (isSurveyApproved) {
                     return (

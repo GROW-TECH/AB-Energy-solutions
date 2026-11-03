@@ -13,9 +13,10 @@ import { FollowUpsView } from '../../components/sales/FollowUpsView';
 import { QuotationsView } from '../../components/sales/QuotationsView';
 import { CustomersView } from '../../components/sales/CustomersView';
 import { NegotiationView } from '../../components/sales/NegotiationView';
+import { AdvancePaymentsView } from '../../components/finance/AdvancePaymentsView';
 
 interface SalesPanelProps {
-  initialSubTab?: 'dashboard' | 'leads' | 'pipeline' | 'followups' | 'quotations' | 'negotiations' | 'customers';
+  initialSubTab?: 'dashboard' | 'leads' | 'pipeline' | 'followups' | 'quotations' | 'negotiations' | 'customers' | 'advances';
   targetQuoteLeadId?: string;
   onTabChange?: (tab: string) => void;
   onOpenNewLead: () => void;
@@ -35,7 +36,7 @@ export const SalesPanel: React.FC<SalesPanelProps> = ({
 }) => {
   const { leads, activeRole } = useCrm();
   const [activeSubTab, setActiveSubTab] = useState<
-    'dashboard' | 'leads' | 'pipeline' | 'followups' | 'quotations' | 'negotiations' | 'customers'
+    'dashboard' | 'leads' | 'pipeline' | 'followups' | 'quotations' | 'negotiations' | 'customers' | 'advances'
   >(initialSubTab);
 
   // Sync sub-tab immediately when sidebar navigation changes
@@ -155,6 +156,13 @@ export const SalesPanel: React.FC<SalesPanelProps> = ({
           <NegotiationView 
             onNavigateToProject={onNavigateToProject} 
             onNavigateToTab={onTabChange} 
+          />
+        )}
+
+        {activeSubTab === 'advances' && (
+          <AdvancePaymentsView 
+            onNavigateToTab={onTabChange}
+            onNavigateToProject={onNavigateToProject}
           />
         )}
 

@@ -81,4 +81,8 @@ apiRouter.use('/telephony', telephonyRouter);
 import { subsidiesRouter } from './subsidies.routes.js';
 apiRouter.use('/subsidies', subsidiesRouter);
 
+// 20. Lead Follow-ups & Direct Field Tasks
+import { followupsRouter } from './followups.routes.js';
+apiRouter.use('/follow-ups', followupsRouter);
+
 

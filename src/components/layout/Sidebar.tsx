@@ -6,7 +6,7 @@ import {
   Boxes, BarChart3, Truck, ShoppingCart, LifeBuoy, ShieldCheck, 
   Clock, LineChart, Cpu, History, FolderOpen, Briefcase, 
   Settings, ExternalLink, ChevronDown, ChevronRight, SunMedium,
-  Handshake, PhoneCall, Landmark
+  Handshake, PhoneCall, Landmark, IndianRupee
 } from 'lucide-react';
 import { useCrm } from '../../context/CrmContext';
 import { getApiUrl } from '../../utils/apiUrl';
@@ -35,6 +35,7 @@ export type NavItemKey =
   // Finance
   | 'invoices'
   | 'payments'
+  | 'customer-advances'
   | 'expenses'
   // Inventory
   | 'products'
@@ -266,6 +267,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: '5. Finance & Accounts',
       items: [
         { key: 'invoices', label: 'Invoices', icon: Receipt },
+        { key: 'customer-advances', label: 'Customer Advances', icon: IndianRupee },
         { key: 'payments', label: 'Payment Receipts', icon: CreditCard },
         { key: 'expenses', label: 'Operating Expenses', icon: DollarSign },
         { key: 'purchase-orders', label: 'Purchase Orders', icon: ShoppingCart }
@@ -446,6 +448,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   {activeNegotiationsCount}
                 </span>
               ) : null)}
+              {renderNavButton('customer-advances', 'Customer Advances', IndianRupee, acceptedQuotesCount > 0 ? (
+                <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                  {acceptedQuotesCount}
+                </span>
+              ) : null)}
               {renderNavButton('follow-ups', 'Team Follow-ups', CalendarClock, pendingFollowupsCount > 0 ? (
                 <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
                   {pendingFollowupsCount}
@@ -575,6 +582,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </div>
               {renderNavButton('dashboard', 'Finance Dashboard', LayoutDashboard)}
               {renderNavButton('invoices', 'Invoices', Receipt)}
+              {renderNavButton('customer-advances', 'Customer Advances', IndianRupee, acceptedQuotesCount > 0 ? (
+                <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                  {acceptedQuotesCount}
+                </span>
+              ) : null)}
               {renderNavButton('payments', 'Payment Receipts', CreditCard)}
               {renderNavButton('expenses', 'Expenses', DollarSign)}
               {renderNavButton('purchase-orders', 'Purchase Orders', ShoppingCart)}

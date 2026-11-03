@@ -525,6 +525,7 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
                     <div>&bull; Engineering Support</div>
                     <div>&bull; Testing &amp; Commissioning</div>
                     <div>&bull; Supply of Material</div>
+                    <div>&bull; Subsidy Support</div>
                     <div>&bull; Service Support</div>
                   </div>
                 </div>
@@ -537,21 +538,20 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
                   </div>
 
                   <div className="overflow-x-auto -mx-2 sm:mx-0 border border-slate-300 rounded-xl shadow-2xs">
-                    <table className="w-full min-w-[540px] text-left text-[11px]">
+                    <table className="w-full min-w-[500px] text-left text-[11px]">
                       <thead className="bg-slate-900 text-white font-black text-[10px] uppercase border-b border-slate-300">
                         <tr>
                           <th className="py-2 px-3 text-center w-12">S.NO</th>
-                          <th className="py-2 px-3 w-40">MATERIALS</th>
+                          <th className="py-2 px-3 w-48">MATERIALS</th>
                           <th className="py-2 px-3">SPECIFICATION</th>
-                          <th className="py-2 px-3 w-36">MAKE</th>
-                          <th className="py-2 px-3 text-center w-16">UNITS</th>
-                          <th className="py-2 px-3 text-center w-16">QUANTITY</th>
+                          <th className="py-2 px-3 text-center w-20">UNITS</th>
+                          <th className="py-2 px-3 text-center w-20">QUANTITY</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200 font-medium">
                         {items.length === 0 ? (
                           <tr>
-                            <td colSpan={6} className="py-4 text-center text-slate-400">
+                            <td colSpan={5} className="py-4 text-center text-slate-400">
                               No BOM items found.
                             </td>
                           </tr>
@@ -563,8 +563,7 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
                               <td className="py-2 px-3 text-slate-700 font-mono text-[11px]">
                                 {item.specification || item.description || item.makeModel}
                               </td>
-                              <td className="py-2 px-3 text-slate-800 font-semibold">{item.make || item.makeModel?.split(' ')[0] || 'Reputed'}</td>
-                              <td className="py-2 px-3 text-center text-slate-600">{item.unit || 'Nos'}</td>
+                              <td className="py-2 px-3 text-center text-slate-600 font-semibold">{item.unit || 'Nos'}</td>
                               <td className="py-2 px-3 text-center font-mono font-black text-black">{item.quantity}</td>
                             </tr>
                           ))
@@ -604,7 +603,7 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
                   </h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-slate-800">
                     <div>➢ Provide a shadow-free installation area.</div>
-                    <div>➢ Minor civil works, if required.</div>
+                    <div>➢ Rooftop access and electricity/water for testing.</div>
                     <div>➢ Statutory charges for the Bi-Directional Net Meter.</div>
                     <div>➢ Non-statutory charges related to Net Metering.</div>
                     <div>➢ Additional charges for elevated structures (if applicable).</div>
@@ -628,39 +627,46 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
                   </div>
                 </div>
 
-                {/* System Capacity & Pricing Box */}
+                {/* System Capacity & Pricing Box with Explicit Subsidy Details */}
                 <div className="pt-3 border-t border-slate-100">
                   <h3 className="text-sm font-black text-black mb-2 tracking-tight uppercase">
-                    System Capacity &amp; Pricing
+                    System Capacity &amp; Subsidy Details
                   </h3>
                   <div className="overflow-x-auto border border-slate-300 rounded-xl">
                     <table className="w-full text-center text-xs">
                       <thead className="bg-slate-900 text-white font-black border-b border-slate-300">
                         <tr>
-                          <th className="py-2.5 px-4 w-1/3">System Capacity</th>
-                          <th className="py-2.5 px-4 w-1/3">Domestic Price<br /><span className="text-[10px] font-normal text-slate-300">(Including GST)</span></th>
-                          <th className="py-2.5 px-4 w-1/3">{hasSubsidy ? 'Govt Subsidy / Net Cost' : 'Estimated ROI'}</th>
+                          <th className="py-2.5 px-3 w-1/4">System Capacity</th>
+                          <th className="py-2.5 px-3 w-1/4">Domestic Price<br /><span className="text-[10px] font-normal text-slate-300">(Including GST)</span></th>
+                          <th className="py-2.5 px-3 w-1/4">Govt Subsidy Support<br /><span className="text-[10px] font-normal text-emerald-300">(Eligible DBT Subsidy)</span></th>
+                          <th className="py-2.5 px-3 w-1/4">Net Customer Cost<br /><span className="text-[10px] font-normal text-slate-300">(Effective Investment)</span></th>
                         </tr>
                       </thead>
                       <tbody>
-                        <tr className="divide-x divide-slate-200">
-                          <td className="py-3 px-4 font-bold text-black">
-                            {quotation.systemCapacityKw}KW On-grid Solar System
-                          </td>
-                          <td className="py-3 px-4 font-mono font-black text-black text-base">
-                            ₹{quotation.totalAmount.toLocaleString('en-IN')}/-
-                          </td>
-                          <td className="py-3 px-4 font-bold text-slate-800">
-                            {hasSubsidy ? (
-                              <div>
-                                <span className="text-emerald-700 font-black block">Subsidy: ₹{Math.round(quotation.subsidyAmount || 0).toLocaleString('en-IN')}</span>
-                                <span className="text-slate-900 text-xs block">Net Cost: ₹{Math.round(netCustomerCost).toLocaleString('en-IN')}/-</span>
-                              </div>
-                            ) : (
-                              <span>3.5 - 4.0 Years</span>
-                            )}
-                          </td>
-                        </tr>
+                        {(() => {
+                          const estSubsidy = quotation.subsidyAmount || (quotation.systemCapacityKw >= 3 ? 78000 : quotation.systemCapacityKw * 30000);
+                          const netEffective = Math.max(0, quotation.totalAmount - estSubsidy);
+
+                          return (
+                            <tr className="divide-x divide-slate-200">
+                              <td className="py-3 px-3 font-bold text-black">
+                                <span className="text-sm font-black text-slate-900 block">{quotation.systemCapacityKw} kW</span>
+                                <span className="text-[10px] text-slate-500 font-normal">On-Grid Rooftop</span>
+                              </td>
+                              <td className="py-3 px-3 font-mono font-black text-black text-sm">
+                                ₹{quotation.totalAmount.toLocaleString('en-IN')}/-
+                              </td>
+                              <td className="py-3 px-3 font-bold text-emerald-700">
+                                <span className="text-sm font-black font-mono block">₹{Math.round(estSubsidy).toLocaleString('en-IN')}/-</span>
+                                <span className="text-[10px] text-emerald-600 font-semibold block">Direct DBT to Account</span>
+                              </td>
+                              <td className="py-3 px-3 font-bold text-slate-900">
+                                <span className="text-sm font-black font-mono text-emerald-900 block">₹{Math.round(netEffective).toLocaleString('en-IN')}/-</span>
+                                <span className="text-[10px] text-slate-500 font-normal block">Net Payable Value</span>
+                              </td>
+                            </tr>
+                          );
+                        })()}
                       </tbody>
                     </table>
                   </div>
@@ -704,18 +710,13 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-slate-700 text-[11px]">
                     <div>&bull; Quotation Validity: 7 Days from issue date.</div>
                     <div>&bull; GST is included in the above price.</div>
-                    <div>&bull; Additional civil work will be charged extra 800/kW.</div>
+                    <div>&bull; Custom elevated structures beyond 4 Feet charged extra 2500/kW.</div>
                     <div>&bull; Net Meter approval is subject to TANGEDCO / DISCOM regulations.</div>
                     <div>&bull; Delivery is subject to material readiness and site access.</div>
-                    <div>&bull; Any additional work outside the quoted scope will be charged extra.</div>
-                    <div>&bull; Elevated above 4 Feet mounting structures extra 2500/kW.</div>
+                    <div>&bull; Any additional cabling beyond standard run will be charged extra.</div>
+                    <div>&bull; Pre-engineered HDG solar mounting structures included in scope.</div>
                     <div>&bull; Force majeure conditions and grid outages are excluded.</div>
                   </div>
-                </div>
-
-                {/* Valued Opportunity Thank You Note */}
-                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-center text-emerald-900 font-bold text-xs">
-                  Thank you for your valuable opportunity. We look forward to delivering a reliable solar solution and building a long-term partnership with you.
                 </div>
 
                 {/* Contact Details & Visiting Card */}
@@ -744,6 +745,11 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
                       <div className="text-[10px] text-slate-500 font-semibold">Authorized Signatory</div>
                     </div>
                   </div>
+                </div>
+
+                {/* Valued Opportunity Thank You Note - Placed at the bottom */}
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-center text-emerald-900 font-bold text-xs">
+                  Thank you for your valuable opportunity. We look forward to delivering a reliable solar solution and building a long-term partnership with you.
                 </div>
 
                 <div className="text-[10px] text-slate-400 text-right pt-2 border-t border-slate-100">

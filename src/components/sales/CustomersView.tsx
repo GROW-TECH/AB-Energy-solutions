@@ -106,14 +106,15 @@ export const CustomersView: React.FC<CustomersViewProps> = ({ onNavigate }) => {
 
   // Filter calculations
   const filteredCustomers = customers.filter(c => {
-    const matchesSearch = 
-      c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      c.phone.includes(searchTerm) ||
-      c.city.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      c.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (c.consumerNumberDiscom && c.consumerNumberDiscom.toLowerCase().includes(searchTerm.toLowerCase()));
+    const s = (searchTerm || '').trim().toLowerCase();
+    const matchesSearch = !s ||
+      (c.name || '').toLowerCase().includes(s) ||
+      (c.phone || '').includes(s) ||
+      (c.city || '').toLowerCase().includes(s) ||
+      (c.id || '').toLowerCase().includes(s) ||
+      (c.consumerNumberDiscom && c.consumerNumberDiscom.toLowerCase().includes(s));
 
-    const matchesStatus = statusFilter === 'ALL' || c.status.toLowerCase() === statusFilter.toLowerCase();
+    const matchesStatus = statusFilter === 'ALL' || (c.status || '').toLowerCase() === statusFilter.toLowerCase();
     return matchesSearch && matchesStatus;
   });
 

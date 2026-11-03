@@ -2,17 +2,33 @@ import React, { useState } from 'react';
 import { 
   Sun, TrendingUp, ShieldCheck, Clock, FileText, 
   Leaf, LifeBuoy, AlertCircle, CheckCircle2, ChevronRight, 
-  ExternalLink, Phone, ArrowDownRight, ArrowUpRight, Download
+  ExternalLink, Phone, ArrowDownRight, ArrowUpRight, Download,
+  ArrowLeft, LayoutDashboard
 } from 'lucide-react';
 import { useCrm } from '../../context/CrmContext';
 import { getApiUrl } from '../../utils/apiUrl';
 
 interface CustomerPortalViewProps {
   onBackToAdmin?: () => void;
+  onBackToDashboard?: () => void;
 }
 
-export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({ onBackToAdmin }) => {
-  const { currentUser, customers, selectedCustomerIdForPortal, setSelectedCustomerIdForPortal, projects, invoices, warranties, amcs, quotations, tickets, createServiceTicket } = useCrm();
+export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({ onBackToAdmin, onBackToDashboard }) => {
+  const { 
+    currentUser, 
+    activeRole, 
+    setActiveRole, 
+    customers, 
+    selectedCustomerIdForPortal, 
+    setSelectedCustomerIdForPortal, 
+    projects, 
+    invoices, 
+    warranties, 
+    amcs, 
+    quotations, 
+    tickets, 
+    createServiceTicket 
+  } = useCrm();
 
   const isRealCustomer = currentUser?.role === 'Customer';
   const customerId = isRealCustomer 
@@ -71,30 +87,53 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({ onBackTo
       {/* Customer Switcher Bar - ONLY visible to Super Admin in preview mode, NEVER to real customer */}
       {!isRealCustomer && (
         <div className="bg-slate-900 text-white p-3.5 rounded-2xl flex flex-wrap items-center justify-between gap-3 text-xs shadow-md border border-slate-800">
-          <div className="flex items-center gap-3">
-            {onBackToAdmin && (
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => {
+                if (activeRole === 'Customer') {
+                  setActiveRole(currentUser?.role && currentUser.role !== 'Customer' ? currentUser.role : 'Super Admin');
+                }
+                if (onBackToAdmin) onBackToAdmin();
+              }}
+              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs shrink-0"
+              title="Return to Customer Directory"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Back to Customers</span>
+            </button>
+
+            {onBackToDashboard && (
               <button
                 type="button"
-                onClick={onBackToAdmin}
-                className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                onClick={() => {
+                  if (activeRole === 'Customer') {
+                    setActiveRole(currentUser?.role && currentUser.role !== 'Customer' ? currentUser.role : 'Super Admin');
+                  }
+                  onBackToDashboard();
+                }}
+                className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs shrink-0"
+                title="Exit preview and return to Executive Dashboard"
               >
-                <span>← Back to Customers</span>
+                <LayoutDashboard className="w-3.5 h-3.5 text-slate-400" />
+                <span>Exit to Dashboard</span>
               </button>
             )}
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-amber-400 uppercase tracking-wider text-[10px] bg-amber-950/60 border border-amber-500/30 px-2 py-0.5 rounded">
+
+            <div className="flex items-center gap-2 pl-1 border-l border-slate-700/60">
+              <span className="font-bold text-amber-400 uppercase tracking-wider text-[10px] bg-amber-950/60 border border-amber-500/30 px-2 py-0.5 rounded shrink-0">
                 ADMIN PREVIEW MODE
               </span>
-              <span className="text-slate-300">Viewing Customer Self-Service Portal</span>
+              <span className="text-slate-300 hidden md:inline">Viewing Customer Self-Service Portal</span>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-slate-400">Preview as Customer:</span>
+            <span className="text-slate-400 shrink-0">Preview as Customer:</span>
             <select
               value={currentCustomer?.id}
               onChange={e => setSelectedCustomerIdForPortal(e.target.value)}
-              className="p-1.5 bg-slate-800 border border-slate-700 rounded-lg text-white font-semibold text-xs focus:ring-1 focus:ring-emerald-500 cursor-pointer"
+              className="p-1.5 bg-slate-800 border border-slate-700 rounded-lg text-white font-semibold text-xs focus:ring-1 focus:ring-emerald-500 cursor-pointer max-w-[260px] truncate"
             >
               {customers.map(c => (
                 <option key={c.id} value={c.id}>

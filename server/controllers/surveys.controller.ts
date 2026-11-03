@@ -4,6 +4,59 @@ import fs from 'fs';
 import path from 'path';
 import { createQuotationDraftInternal } from './quotations.controller.js';
 
+let cachedSurveyColumns: Set<string> | null = null;
+
+async function getSurveyColumns(): Promise<Set<string>> {
+  if (cachedSurveyColumns) return cachedSurveyColumns;
+  try {
+    const [cols]: any = await pool.query('SHOW COLUMNS FROM `site_surveys`');
+    cachedSurveyColumns = new Set(cols.map((c: any) => c.Field));
+    return cachedSurveyColumns;
+  } catch (e) {
+    return new Set();
+  }
+}
+
+async function ensureSurveyCableColumns() {
+  try {
+    const cols = await getSurveyColumns();
+    if (!cols.has('measured_dc_cable_meters')) {
+      await pool.query('ALTER TABLE `site_surveys` ADD COLUMN `measured_dc_cable_meters` DECIMAL(10, 2) NULL');
+      cols.add('measured_dc_cable_meters');
+    }
+    if (!cols.has('measured_ac_cable_meters')) {
+      await pool.query('ALTER TABLE `site_surveys` ADD COLUMN `measured_ac_cable_meters` DECIMAL(10, 2) NULL');
+      cols.add('measured_ac_cable_meters');
+    }
+    if (!cols.has('client_signature_data')) {
+      await pool.query('ALTER TABLE `site_surveys` ADD COLUMN `client_signature_data` LONGTEXT NULL');
+      cols.add('client_signature_data');
+    }
+    if (!cols.has('client_signed_at')) {
+      await pool.query('ALTER TABLE `site_surveys` ADD COLUMN `client_signed_at` VARCHAR(50) NULL');
+      cols.add('client_signed_at');
+    }
+    if (!cols.has('client_signer_name')) {
+      await pool.query('ALTER TABLE `site_surveys` ADD COLUMN `client_signer_name` VARCHAR(150) NULL');
+      cols.add('client_signer_name');
+    }
+    if (!cols.has('client_approval_doc_url')) {
+      await pool.query('ALTER TABLE `site_surveys` ADD COLUMN `client_approval_doc_url` TEXT NULL');
+      cols.add('client_approval_doc_url');
+    }
+    if (!cols.has('latitude')) {
+      await pool.query('ALTER TABLE `site_surveys` ADD COLUMN `latitude` DECIMAL(10, 7) NULL');
+      cols.add('latitude');
+    }
+    if (!cols.has('longitude')) {
+      await pool.query('ALTER TABLE `site_surveys` ADD COLUMN `longitude` DECIMAL(10, 7) NULL');
+      cols.add('longitude');
+    }
+  } catch (err: any) {
+    console.warn('[Surveys] Auto schema migration notice:', err.message);
+  }
+}
+
 // Helper to format photo object
 export function formatPhoto(p: any) {
   return {
@@ -110,6 +163,24 @@ export function formatSurvey(s: any, photos: any[] = [], history: any[] = []) {
     reviewComments: s.review_comments || null,
     quotationId: s.quotation_id || null,
     isDraft: Boolean(s.is_draft),
+
+    // GPS Coordinates and Client Approval
+    latitude: s.latitude !== null && s.latitude !== undefined ? Number(s.latitude) : null,
+    longitude: s.longitude !== null && s.longitude !== undefined ? Number(s.longitude) : null,
+    clientSignatureData: s.client_signature_data || null,
+    clientSignedAt: s.client_signed_at || null,
+    clientSignerName: s.client_signer_name || null,
+    clientApprovalDocUrl: s.client_approval_doc_url || null,
+
+    // On-Site Cable Measurements
+    measuredDcCableMeters: s.measured_dc_cable_meters !== null && s.measured_dc_cable_meters !== undefined ? Number(s.measured_dc_cable_meters) : null,
+    measuredAcCableMeters: s.measured_ac_cable_meters !== null && s.measured_ac_cable_meters !== undefined ? Number(s.measured_ac_cable_meters) : null,
+
+    // Edit Tracking
+    lastModifiedBy: s.last_modified_by || undefined,
+    lastModifiedRole: s.last_modified_role || undefined,
+    lastModifiedAt: s.last_modified_at || undefined,
+    editHistory: typeof s.edit_history === 'string' ? JSON.parse(s.edit_history) : (s.edit_history || []),
 
     // Custom Fields added by Survey Engineer
     customFields: typeof s.custom_fields === 'string' ? JSON.parse(s.custom_fields) : (s.custom_fields || []),
@@ -418,9 +489,48 @@ export const updateSurvey = async (req: Request, res: Response) => {
       unresolved_technical_issues: s.unresolvedTechnicalIssues !== undefined ? s.unresolvedTechnicalIssues : current.unresolved_technical_issues,
       engineer_recommendations: s.engineerRecommendations !== undefined ? s.engineerRecommendations : current.engineer_recommendations,
       custom_fields: s.customFields !== undefined ? (typeof s.customFields === 'string' ? s.customFields : JSON.stringify(s.customFields)) : current.custom_fields,
+
+      // GPS Coordinates and Client Approval
+      latitude: s.latitude !== undefined ? (s.latitude !== null ? Number(s.latitude) : null) : current.latitude,
+      longitude: s.longitude !== undefined ? (s.longitude !== null ? Number(s.longitude) : null) : current.longitude,
+      client_signature_data: s.clientSignatureData !== undefined ? s.clientSignatureData : current.client_signature_data,
+      client_signed_at: s.clientSignedAt !== undefined ? s.clientSignedAt : current.client_signed_at,
+      client_signer_name: s.clientSignerName !== undefined ? s.clientSignerName : current.client_signer_name,
+      client_approval_doc_url: s.clientApprovalDocUrl !== undefined ? s.clientApprovalDocUrl : current.client_approval_doc_url,
+
+      // On-Site Measured Cable Run Lengths
+      measured_dc_cable_meters: s.measuredDcCableMeters !== undefined ? (s.measuredDcCableMeters !== null ? Number(s.measuredDcCableMeters) : null) : current.measured_dc_cable_meters,
+      measured_ac_cable_meters: s.measuredAcCableMeters !== undefined ? (s.measuredAcCableMeters !== null ? Number(s.measuredAcCableMeters) : null) : current.measured_ac_cable_meters,
       
       is_draft: s.isDraft !== undefined ? (s.isDraft ? 1 : 0) : 1,
     };
+
+    // Super Admin / CEO Edit Tracking
+    const user = (req as any).user;
+    if (user?.role === 'Super Admin' || user?.role === 'CEO' || s.lastModifiedRole === 'Super Admin') {
+      const modifierName = user?.name || s.lastModifiedBy || 'Super Admin';
+      const modifierRole = user?.role || s.lastModifiedRole || 'Super Admin';
+      const modifiedAt = new Date().toISOString();
+      updateMap.last_modified_by = modifierName;
+      updateMap.last_modified_role = modifierRole;
+      updateMap.last_modified_at = modifiedAt;
+
+      try {
+        let history: any[] = [];
+        if (current.edit_history) {
+          history = typeof current.edit_history === 'string' ? JSON.parse(current.edit_history) : current.edit_history;
+        }
+        history.push({
+          timestamp: modifiedAt,
+          editedBy: modifierName,
+          editorRole: modifierRole,
+          changesSummary: 'Updated site survey details'
+        });
+        updateMap.edit_history = JSON.stringify(history);
+      } catch (e) {
+        console.warn('Could not update survey edit history:', e);
+      }
+    }
 
     if (s.status !== undefined) {
       updateMap.status = s.status;
@@ -432,15 +542,22 @@ export const updateSurvey = async (req: Request, res: Response) => {
       updateMap.completed_at = s.completedAt;
     }
 
+    await ensureSurveyCableColumns();
+    const existingCols = await getSurveyColumns();
+
     const setClauses: string[] = [];
     const values: any[] = [];
     for (const [key, val] of Object.entries(updateMap)) {
-      setClauses.push(`${key} = ?`);
-      values.push(val);
+      if (existingCols.size === 0 || existingCols.has(key)) {
+        setClauses.push(`\`${key}\` = ?`);
+        values.push(val);
+      }
     }
     values.push(id);
 
-    await pool.query(`UPDATE site_surveys SET ${setClauses.join(', ')} WHERE id = ?`, values);
+    if (setClauses.length > 0) {
+      await pool.query(`UPDATE site_surveys SET ${setClauses.join(', ')} WHERE id = ?`, values);
+    }
 
     // Fetch updated
     const [updated]: any = await pool.query('SELECT * FROM site_surveys WHERE id = ?', [id]);
@@ -645,16 +762,35 @@ export const submitSurveyForReview = async (req: Request, res: Response) => {
         unresolved_technical_issues: s.unresolvedTechnicalIssues !== undefined ? s.unresolvedTechnicalIssues : current.unresolved_technical_issues,
         engineer_recommendations: s.engineerRecommendations !== undefined ? s.engineerRecommendations : current.engineer_recommendations,
         custom_fields: s.customFields !== undefined ? (typeof s.customFields === 'string' ? s.customFields : JSON.stringify(s.customFields)) : current.custom_fields,
+
+        // GPS Coordinates and Client Approval
+        latitude: s.latitude !== undefined ? (s.latitude !== null ? Number(s.latitude) : null) : current.latitude,
+        longitude: s.longitude !== undefined ? (s.longitude !== null ? Number(s.longitude) : null) : current.longitude,
+        client_signature_data: s.clientSignatureData !== undefined ? s.clientSignatureData : current.client_signature_data,
+        client_signed_at: s.clientSignedAt !== undefined ? s.clientSignedAt : current.client_signed_at,
+        client_signer_name: s.clientSignerName !== undefined ? s.clientSignerName : current.client_signer_name,
+        client_approval_doc_url: s.clientApprovalDocUrl !== undefined ? s.clientApprovalDocUrl : current.client_approval_doc_url,
+
+        // On-Site Measured Cable Run Lengths
+        measured_dc_cable_meters: s.measuredDcCableMeters !== undefined ? (s.measuredDcCableMeters !== null ? Number(s.measuredDcCableMeters) : null) : current.measured_dc_cable_meters,
+        measured_ac_cable_meters: s.measuredAcCableMeters !== undefined ? (s.measuredAcCableMeters !== null ? Number(s.measuredAcCableMeters) : null) : current.measured_ac_cable_meters,
       };
+
+      await ensureSurveyCableColumns();
+      const existingCols = await getSurveyColumns();
 
       const setClauses: string[] = [];
       const values: any[] = [];
       for (const [key, val] of Object.entries(updateMap)) {
-        setClauses.push(`${key} = ?`);
-        values.push(val);
+        if (existingCols.size === 0 || existingCols.has(key)) {
+          setClauses.push(`\`${key}\` = ?`);
+          values.push(val);
+        }
       }
       values.push(id);
-      await pool.query(`UPDATE site_surveys SET ${setClauses.join(', ')} WHERE id = ?`, values);
+      if (setClauses.length > 0) {
+        await pool.query(`UPDATE site_surveys SET ${setClauses.join(', ')} WHERE id = ?`, values);
+      }
     }
 
     const [freshRows]: any = await pool.query('SELECT * FROM site_surveys WHERE id = ?', [id]);
@@ -670,6 +806,11 @@ export const submitSurveyForReview = async (req: Request, res: Response) => {
     }
     if (!survey.recommended_kw || Number(survey.recommended_kw) <= 0) {
       errors.push('Recommended system capacity must be calculated and greater than 0 kW');
+    }
+
+    // Client Digital Signature Validation (Mandatory for O&M / PM Review)
+    if (!survey.client_signature_data || !survey.client_signature_data.toString().trim()) {
+      errors.push('Client digital signature is required before submitting for review');
     }
 
     // Check mandatory photos: full rooftop view and meter

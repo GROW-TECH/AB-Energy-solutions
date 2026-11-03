@@ -45,6 +45,7 @@ export type ProjectStage =
   | 'Documentation'
   | 'Material Planning'
   | 'Material Ready'
+  | 'Material Arrived'
   | 'Installation Scheduled'
   | 'Installation In Progress'
   | 'Installation Completed'
@@ -63,6 +64,13 @@ export type TicketStatus =
   | 'Closed';
 
 export type Priority = 'Low' | 'Medium' | 'High' | 'Urgent';
+
+export interface EditHistoryEntry {
+  timestamp: string;
+  editedBy: string;
+  editorRole: string;
+  changesSummary?: string;
+}
 
 export interface Employee {
   id: string;
@@ -103,6 +111,7 @@ export interface Lead {
   sanctionLoad: number; // in kW
   roofAreaSqFt: number;
   roofType: 'RCC Flat' | 'Tin Shed' | 'Tiled' | 'Elevated Structure';
+  connectionSpace?: 'Single Space' | '2 Space' | '3 Space';
   recommendedKw: number;
   estimatedBudget: number; // in ₹
   createdAt: string;
@@ -113,6 +122,12 @@ export interface Lead {
   quotationId?: string;
   projectId?: string;
   customerId?: string;
+  consumerNumberDiscom?: string;
+  ebServiceNumber?: string;
+  lastModifiedBy?: string;
+  lastModifiedRole?: string;
+  lastModifiedAt?: string;
+  editHistory?: EditHistoryEntry[];
 }
 
 
@@ -133,6 +148,9 @@ export interface FollowUp {
   assignedToName: string;
   notes: string;
   completedAt?: string;
+  isStruckOut?: boolean;
+  outcome?: string;
+  createdAt?: string;
   dayInterval?: number; // e.g. Day 1, Day 3, Day 7
 }
 
@@ -177,7 +195,11 @@ export type SurveyPhotoCategory =
   | 'earthing_arrangement'
   | 'cable_route_inverter'
   | 'roof_damage_concerns'
-  | 'additional_evidence';
+  | 'additional_evidence'
+  | 'panel_fixing_area'
+  | 'inverter_mounting_area'
+  | 'cable_routing_area'
+  | 'eb_meter_location';
 
 export interface SurveyPhoto {
   id: string;
@@ -297,6 +319,24 @@ export interface SiteSurvey {
   // Attached individual photos & history
   photos?: SurveyPhoto[];
   reviewHistory?: SurveyReviewHistory[];
+
+  // GPS Coordinates and Client Approval
+  latitude?: number | null;
+  longitude?: number | null;
+  clientSignatureData?: string | null;
+  clientSignedAt?: string | null;
+  clientSignerName?: string | null;
+  clientApprovalDocUrl?: string | null;
+
+  // On-Site Cable Measurements
+  measuredDcCableMeters?: number | null;
+  measuredAcCableMeters?: number | null;
+
+  // Edit Tracking
+  lastModifiedBy?: string;
+  lastModifiedRole?: string;
+  lastModifiedAt?: string;
+  editHistory?: EditHistoryEntry[];
 }
 
 export interface QuotationItem {
@@ -385,6 +425,19 @@ export interface Quotation {
   convertedToProjectId?: string;
   surveyId?: string;
   notes?: string;
+  priority?: 'High' | 'Medium' | 'Low';
+  lastModifiedBy?: string;
+  lastModifiedRole?: string;
+  lastModifiedAt?: string;
+  editHistory?: EditHistoryEntry[];
+  advancePaymentReceived?: boolean;
+  advancePaymentAmount?: number;
+  advancePaymentDate?: string;
+  advancePaymentMode?: string;
+  advancePaymentRef?: string;
+  materialsPurchasedConfirmed?: boolean;
+  materialsPurchasedAt?: string;
+  materialsPurchasedBy?: string;
 }
 
 export interface ProjectTask {
@@ -417,6 +470,7 @@ export interface InstallationChecklist {
   photosUploaded: string[];
   completedBy?: string;
   completionDate?: string;
+  arrivedMaterialIds?: string[];
 }
 
 export interface Project {
@@ -450,6 +504,58 @@ export interface Project {
   notes: string;
   scheduled_installation_date?: string;
   assigned_crew_members?: string[];
+  lastModifiedBy?: string;
+  lastModifiedRole?: string;
+  lastModifiedAt?: string;
+  editHistory?: EditHistoryEntry[];
+
+  // Advance Payment Gate & Accounts Integration
+  advancePaymentReceived?: boolean;
+  advancePaymentAmount?: number;
+  advancePaymentMode?: string;
+  advancePaymentRef?: string;
+  advancePaymentDate?: string;
+  advancePaymentNotes?: string;
+
+  // DISCOM Net Metering Paperwork & Agreement
+  discomNetMeteringFee?: number;
+  discomFeeReceiptUrl?: string;
+  discomAgreementSigned?: boolean;
+  discomAgreementDocUrl?: string;
+
+  // Installation Commitment Window
+  installationTargetDays?: number;
+  installationDurationDays?: number;
+
+  // 4-Step Coordinated Project Lifecycle
+  materialArrivedOnSite?: boolean;
+  materialArrivedConfirmedAt?: string;
+  materialArrivedConfirmedBy?: string;
+  siteSurveyVerified?: boolean;
+  siteSurveyVerifiedAt?: string;
+  siteSurveyVerifiedBy?: string;
+  attendancePhotoUrl?: string;
+  attendanceGpsCoords?: { lat?: number; lng?: number };
+  arrivedMaterialIds?: string[];
+
+  // Post-Installation Geotagged Photos & 20-Sec Live Video Gate
+  postInstallPhotos?: {
+    panelFixing?: string;
+    inverterCabling?: string;
+    earthingProtection?: string;
+    plantWithCustomer?: string;
+  };
+  commissioningVideoUrl?: string;
+  pmClearanceStatus?: 'Pending' | 'Approved';
+  pmClearedBy?: string;
+  pmClearedAt?: string;
+
+  // DISCOM Grid Synchronization & 5-10 Yr AMC Auto-Activation
+  ebInspectionCleared?: boolean;
+  solarMeterFixed?: boolean;
+  solarMeterInitialReading?: number;
+  gridLiveDate?: string;
+  amcWarrantyYears?: number;
 }
 
 export interface InventoryProduct {
@@ -521,6 +627,11 @@ export interface Payment {
   bankName?: string;
   status: 'Verified' | 'Pending Verification';
   recordedBy: string;
+  isAdvance?: boolean;
+  quotationId?: string;
+  reconciled?: boolean;
+  reconciledAt?: string;
+  reconciledBy?: string;
 }
 
 export interface Warranty {

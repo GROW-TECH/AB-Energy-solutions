@@ -11,15 +11,22 @@ export const PaymentsView: React.FC = () => {
 
   const [searchTerm, setSearchTerm] = useState('');
   const [modeFilter, setModeFilter] = useState('All');
+  const [typeFilter, setTypeFilter] = useState<'All' | 'Advances' | 'Milestones'>('All');
   const [selectedReceipt, setSelectedReceipt] = useState<Payment | null>(null);
 
+  const advancePayments = payments.filter(p => p.isAdvance || p.paymentNumber.includes('ADV') || p.id.includes('ADV'));
+  const totalAdvancesCollected = advancePayments.reduce((acc, p) => acc + (p.amount || 0), 0);
+
   const filteredPayments = payments.filter(p => {
+    const isAdv = p.isAdvance || p.paymentNumber.includes('ADV') || p.id.includes('ADV');
+    const matchesType = typeFilter === 'All' ? true : typeFilter === 'Advances' ? isAdv : !isAdv;
     const matchesSearch = 
       p.paymentNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
       p.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.transactionReference.toLowerCase().includes(searchTerm.toLowerCase());
+      p.transactionReference.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (p.quotationId && p.quotationId.toLowerCase().includes(searchTerm.toLowerCase()));
     const matchesMode = modeFilter === 'All' || p.paymentMode === modeFilter;
-    return matchesSearch && matchesMode;
+    return matchesType && matchesSearch && matchesMode;
   });
 
   const totalCollected = payments.reduce((acc, p) => acc + (p.amount || 0), 0);
@@ -67,12 +74,17 @@ export const PaymentsView: React.FC = () => {
           </div>
         </div>
 
-        <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs">
-          <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Avg Transaction Size</div>
-          <div className="text-2xl font-black text-slate-900 mt-1 font-mono">
-            ₹{(avgPayment / 1000).toFixed(1)}k
+        <div className="bg-white p-4 rounded-2xl border border-amber-200 bg-amber-50/40 shadow-xs">
+          <div className="text-[10px] uppercase font-bold text-amber-800 tracking-wider flex items-center justify-between">
+            <span>Customer Advances</span>
+            <span className="px-1.5 py-0.2 rounded bg-amber-200 text-amber-900 font-extrabold text-[9px]">Accounts</span>
           </div>
-          <div className="text-[10px] text-slate-400 font-medium mt-1">Per milestone tranche</div>
+          <div className="text-2xl font-black text-amber-950 mt-1 font-mono">
+            ₹{(totalAdvancesCollected / 100000).toFixed(2)}L
+          </div>
+          <div className="text-[10px] text-amber-700 font-semibold mt-1">
+            {advancePayments.length} project advance receipts
+          </div>
         </div>
 
         <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs">
@@ -86,6 +98,43 @@ export const PaymentsView: React.FC = () => {
           <div className="text-2xl font-black text-emerald-600 mt-1 font-mono">0.0%</div>
           <div className="text-[10px] text-slate-400 font-medium mt-1">Zero payment dishonors</div>
         </div>
+      </div>
+
+      {/* Tabs Filter Bar (All vs Customer Advances vs Milestones) */}
+      <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
+        <button
+          onClick={() => setTypeFilter('All')}
+          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+            typeFilter === 'All'
+              ? 'bg-slate-900 text-white shadow-xs'
+              : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+          }`}
+        >
+          All Payments ({payments.length})
+        </button>
+        <button
+          onClick={() => setTypeFilter('Advances')}
+          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+            typeFilter === 'Advances'
+              ? 'bg-amber-600 text-white shadow-xs'
+              : 'bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200'
+          }`}
+        >
+          <span>Customer Advances</span>
+          <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-white/90 text-amber-900 font-extrabold">
+            {advancePayments.length}
+          </span>
+        </button>
+        <button
+          onClick={() => setTypeFilter('Milestones')}
+          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+            typeFilter === 'Milestones'
+              ? 'bg-emerald-600 text-white shadow-xs'
+              : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+          }`}
+        >
+          Milestone Tranches ({payments.length - advancePayments.length})
+        </button>
       </div>
 
       {/* Filter and Search Bar */}
@@ -198,7 +247,14 @@ export const PaymentsView: React.FC = () => {
               {filteredPayments.map(p => (
                 <tr key={p.id} className="hover:bg-slate-50/80 transition-colors">
                   <td className="py-3.5 px-4">
-                    <div className="font-mono font-bold text-slate-900">{p.paymentNumber}</div>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="font-mono font-bold text-slate-900">{p.paymentNumber}</span>
+                      {(p.isAdvance || p.paymentNumber.includes('ADV') || p.id.includes('ADV')) && (
+                        <span className="px-1.5 py-0.2 rounded text-[9px] font-extrabold bg-amber-100 text-amber-900 border border-amber-300">
+                          Advance
+                        </span>
+                      )}
+                    </div>
                     <div className="text-[10px] text-slate-400 font-medium mt-0.5">{p.paymentDate}</div>
                   </td>
 

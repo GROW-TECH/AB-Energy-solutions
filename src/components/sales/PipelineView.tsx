@@ -169,10 +169,12 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
       if (!isLeadAssignedToMe(lead)) return false;
     }
 
-    const matchesSearch = 
-      lead.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      lead.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (lead.city && lead.city.toLowerCase().includes(searchTerm.toLowerCase()));
+    const s = (searchTerm || '').trim().toLowerCase();
+    const matchesSearch = !s ||
+      (lead.name || '').toLowerCase().includes(s) ||
+      (lead.id || '').toLowerCase().includes(s) ||
+      (lead.city || '').toLowerCase().includes(s) ||
+      (lead.phone || '').includes(s);
 
     const matchesRep = selectedRep === 'All' || lead.assignedToName === selectedRep;
 

@@ -37,7 +37,9 @@ export const EditQuotationModal: React.FC<EditQuotationModalProps> = ({
         id: it.id || `ITEM-${idx + 1}`,
         category: it.category || 'Protection & BOS',
         description: it.description || '',
+        brand: (it as any).brand || it.make || (it.makeModel ? it.makeModel.split(' ')[0] : 'Waaree'),
         makeModel: it.makeModel || '',
+        specification: it.specification || it.makeModel || '',
         hsnSacCode: it.hsnSacCode || '8541',
         quantity: it.quantity || 1,
         unit: it.unit || 'Nos',
@@ -51,10 +53,12 @@ export const EditQuotationModal: React.FC<EditQuotationModalProps> = ({
         id: 'QI-1',
         category: 'Panels',
         description: `${Math.ceil((capacityKw * 1000) / 575)} × Tier-1 Bifacial Solar Modules`,
+        brand: 'Jinko Solar',
         makeModel: 'Jinko 575W Tiger Neo TOPCon',
+        specification: '575W Tiger Neo TOPCon',
         hsnSacCode: '8541',
         quantity: Math.ceil((capacityKw * 1000) / 575),
-        unit: 'Nos',
+        unit: 'kWp',
         unitPrice: 12800,
         gstRate: 5,
         warrantyPeriod: '12-Yr Product / 30-Yr Output',
@@ -63,10 +67,12 @@ export const EditQuotationModal: React.FC<EditQuotationModalProps> = ({
         id: 'QI-2',
         category: 'Inverter',
         description: `${capacityKw} kW High-Yield Cloud Inverter`,
+        brand: 'Sungrow',
         makeModel: 'Growatt / Sungrow Smart Inverter',
+        specification: 'Smart Inverter With WiFi',
         hsnSacCode: '8504',
         quantity: 1,
-        unit: 'Unit',
+        unit: 'Inverter kWp',
         unitPrice: 48000,
         gstRate: 5,
         warrantyPeriod: '10-Yr Replacement Warranty',
@@ -91,7 +97,9 @@ export const EditQuotationModal: React.FC<EditQuotationModalProps> = ({
       id: `CUSTOM-${Date.now().toString().slice(-4)}`,
       category: 'Protection & BOS',
       description: 'Custom Auxiliary Equipment / Surcharge',
+      brand: 'Tier-1',
       makeModel: 'Standard EPC Spec',
+      specification: 'Standard EPC Spec',
       hsnSacCode: '8544',
       quantity: 1,
       unit: 'Set',
@@ -161,7 +169,10 @@ export const EditQuotationModal: React.FC<EditQuotationModalProps> = ({
           id: it.id,
           category: it.category,
           description: it.description,
+          brand: it.brand || it.makeModel?.split(' ')[0] || 'Waaree',
+          make: it.brand || it.makeModel?.split(' ')[0] || 'Waaree',
           makeModel: it.makeModel,
+          specification: it.specification || it.makeModel,
           hsnSacCode: it.hsnSacCode,
           quantity: Number(it.quantity) || 1,
           unit: it.unit || 'Nos',
@@ -293,10 +304,10 @@ export const EditQuotationModal: React.FC<EditQuotationModalProps> = ({
                 <thead className="bg-slate-900 text-white font-bold uppercase tracking-wider text-[10px]">
                   <tr>
                     <th className="py-2.5 px-3 w-10 text-center">#</th>
-                    <th className="py-2.5 px-3 min-w-[220px]">Item Description &amp; Make</th>
+                    <th className="py-2.5 px-3 min-w-[240px]">Item Description, Brand &amp; Spec</th>
                     <th className="py-2.5 px-2 w-20 text-center">HSN/SAC</th>
                     <th className="py-2.5 px-2 w-16 text-center">Qty</th>
-                    <th className="py-2.5 px-2 w-16 text-center">Unit</th>
+                    <th className="py-2.5 px-2 w-28 text-center">Unit</th>
                     <th className="py-2.5 px-3 w-24 text-right">Unit Rate (₹)</th>
                     <th className="py-2.5 px-3 w-24 text-right">Gross (₹)</th>
                     <th className="py-2.5 px-2 w-16 text-center">GST %</th>
@@ -312,7 +323,7 @@ export const EditQuotationModal: React.FC<EditQuotationModalProps> = ({
                           {index + 1}
                         </td>
 
-                        {/* Description & Make */}
+                        {/* Description & Brand / Specifications */}
                         <td className="py-2 px-3 space-y-1">
                           <input
                             type="text"
@@ -322,13 +333,33 @@ export const EditQuotationModal: React.FC<EditQuotationModalProps> = ({
                             placeholder="Description..."
                             required
                           />
-                          <input
-                            type="text"
-                            value={item.makeModel}
-                            onChange={e => handleItemChange(index, 'makeModel', e.target.value)}
-                            className="w-full px-2 py-0.5 text-[11px] text-slate-500 border border-slate-200 rounded-md focus:border-blue-500 outline-hidden"
-                            placeholder="Make / Model..."
-                          />
+                          <div className="grid grid-cols-2 gap-1.5">
+                            <input
+                              type="text"
+                              value={item.brand || ''}
+                              onChange={e => {
+                                const val = e.target.value;
+                                setItems(prev => {
+                                  const copy = [...prev];
+                                  copy[index] = { 
+                                    ...copy[index], 
+                                    brand: val, 
+                                    makeModel: val ? `${val} ${copy[index].specification || ''}`.trim() : copy[index].makeModel 
+                                  };
+                                  return copy;
+                                });
+                              }}
+                              className="w-full px-2 py-0.5 text-[11px] font-semibold text-blue-700 bg-blue-50/60 border border-blue-200 rounded-md focus:border-blue-500 outline-hidden"
+                              placeholder="Brand (e.g. Waaree, Solis)"
+                            />
+                            <input
+                              type="text"
+                              value={item.makeModel}
+                              onChange={e => handleItemChange(index, 'makeModel', e.target.value)}
+                              className="w-full px-2 py-0.5 text-[11px] text-slate-500 border border-slate-200 rounded-md focus:border-blue-500 outline-hidden"
+                              placeholder="Model / Specs..."
+                            />
+                          </div>
                         </td>
 
                         {/* HSN/SAC */}
@@ -360,7 +391,7 @@ export const EditQuotationModal: React.FC<EditQuotationModalProps> = ({
                           <select
                             value={item.unit}
                             onChange={e => handleItemChange(index, 'unit', e.target.value)}
-                            className="w-full text-center px-1 py-1 text-xs border border-slate-200 rounded-md focus:border-blue-500 outline-hidden"
+                            className="w-full text-center px-1 py-1 text-xs border border-slate-200 rounded-md focus:border-blue-500 outline-hidden font-semibold"
                           >
                             <option value="Nos">Nos</option>
                             <option value="Unit">Unit</option>
@@ -369,6 +400,8 @@ export const EditQuotationModal: React.FC<EditQuotationModalProps> = ({
                             <option value="Turnkey">Turnkey</option>
                             <option value="Mtrs">Mtrs</option>
                             <option value="Job">Job</option>
+                            <option value="kWp">kWp</option>
+                            <option value="Inverter kWp">Inverter kWp</option>
                           </select>
                         </td>
 

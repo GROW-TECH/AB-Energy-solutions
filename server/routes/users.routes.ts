@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authenticateToken } from '../middleware/auth.js';
-import { getUsers, createUser, updateUser, toggleUserStatus, importUsers } from '../controllers/users.controller.js';
+import { getUsers, createUser, updateUser, toggleUserStatus, importUsers, deleteUser } from '../controllers/users.controller.js';
 
 export const usersRouter = Router();
 
@@ -11,3 +11,4 @@ usersRouter.post('/', createUser);
 usersRouter.post('/import', importUsers);
 usersRouter.put('/:id', updateUser);
 usersRouter.post('/:id/toggle-status', toggleUserStatus);
+usersRouter.delete('/:id', deleteUser);

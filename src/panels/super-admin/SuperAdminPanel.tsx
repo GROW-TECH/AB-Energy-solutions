@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { 
   ShieldCheck, LayoutDashboard, BarChart3, Cpu, Users, 
-  FileText, Settings, Database, Activity, CheckCircle2 
+  FileText, Settings, Activity, CheckCircle2 
 } from 'lucide-react';
 import { useCrm } from '../../context/CrmContext';
 
@@ -50,18 +50,12 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
               </span>
             </div>
             <p className="text-xs text-slate-500">
-              Executive business oversight, remote MySQL persistence, recommendation engine, and multi-department governance.
+              Executive business oversight, real-time sync, recommendation engine, and multi-department governance.
             </p>
           </div>
 
           {/* Quick System Indicators */}
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700">
-              <Database className="w-3.5 h-3.5 text-emerald-600" />
-              <span>MySQL Live</span>
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse ml-0.5" />
-            </div>
-
             <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700">
               <Activity className="w-3.5 h-3.5 text-blue-600" />
               <span>{activeProjectsCount} Active Projects</span>

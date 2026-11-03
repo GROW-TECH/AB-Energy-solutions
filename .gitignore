@@ -5,7 +5,15 @@ coverage/
 .DS_Store
 *.log
 *.zip
+scratch/
 backups/
+audio/
+client_request_video_31_oct/
+*.mp4
+*.mp3
+*.wav
+*.ogg
+*.apk
 .gemini/
 .env*
 !.env.example

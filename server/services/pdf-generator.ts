@@ -368,7 +368,7 @@ export async function generateProposalPdf(data: ProposalPdfData): Promise<{ file
          .text('We will execute the complete following turnkey EPC activities:', 40, p4Y);
       p4Y += 15;
 
-      const scopeCol1 = ['Site Survey', 'Engineering Support', 'Supply of Material'];
+      const scopeCol1 = ['Site Survey', 'Engineering Support', 'Supply of Material', 'Subsidy Support'];
       const scopeCol2 = ['Complete Installation', 'Testing & Commissioning', 'Service Support'];
 
       let scY1 = p4Y;
@@ -389,9 +389,9 @@ export async function generateProposalPdf(data: ProposalPdfData): Promise<{ file
       doc.font('Helvetica-Bold').fontSize(11).fillColor(headingNavy).text('Bill Of Materials', 40, p4Y);
       p4Y += 16;
 
-      // Table Header: S.NO | MATERIALS | SPECIFICATION | MAKE | UNITS | QUANTITY
-      const colX = [40, 75, 185, 360, 455, 500];
-      const colW = [35, 110, 175, 95, 45, 55];
+      // Table Header: S.NO | MATERIALS | SPECIFICATION | UNITS | QUANTITY
+      const colX = [40, 80, 220, 430, 485];
+      const colW = [40, 140, 210, 55, 70];
       const tableW = 515;
 
       const drawBOMTableHeader = (y: number, isContinued = false) => {
@@ -400,9 +400,8 @@ export async function generateProposalPdf(data: ProposalPdfData): Promise<{ file
         doc.text('S.NO', colX[0], y + 6, { width: colW[0], align: 'center' });
         doc.text(isContinued ? 'MATERIALS (Contd.)' : 'MATERIALS', colX[1], y + 6, { width: colW[1], align: 'left' });
         doc.text('SPECIFICATION', colX[2], y + 6, { width: colW[2], align: 'left' });
-        doc.text('MAKE', colX[3], y + 6, { width: colW[3], align: 'left' });
-        doc.text('UNITS', colX[4], y + 6, { width: colW[4], align: 'center' });
-        doc.text('QUANTITY', colX[5], y + 6, { width: colW[5], align: 'center' });
+        doc.text('UNITS', colX[3], y + 6, { width: colW[3], align: 'center' });
+        doc.text('QUANTITY', colX[4], y + 6, { width: colW[4], align: 'center' });
       };
 
       drawBOMTableHeader(p4Y);
@@ -413,7 +412,6 @@ export async function generateProposalPdf(data: ProposalPdfData): Promise<{ file
       bomItems.forEach((item, idx) => {
         const materialName = item.category || item.description || 'Solar Component';
         const spec = item.specification || item.description || item.makeModel || 'Standard';
-        const make = item.make || item.makeModel?.split(' ')[0] || 'Reputed Tier-1';
         const unit = item.unit || 'Nos';
         const qty = item.quantity || 1;
 
@@ -435,9 +433,8 @@ export async function generateProposalPdf(data: ProposalPdfData): Promise<{ file
         doc.text(String(idx + 1), colX[0], p4Y + 5, { width: colW[0], align: 'center' });
         doc.font('Helvetica-Bold').text(materialName, colX[1], p4Y + 5, { width: colW[1], ellipsis: true });
         doc.font('Helvetica').text(spec, colX[2], p4Y + 5, { width: colW[2], ellipsis: true });
-        doc.text(make, colX[3], p4Y + 5, { width: colW[3], ellipsis: true });
-        doc.text(unit, colX[4], p4Y + 5, { width: colW[4], align: 'center' });
-        doc.font('Helvetica-Bold').text(String(qty), colX[5], p4Y + 5, { width: colW[5], align: 'center' });
+        doc.text(unit, colX[3], p4Y + 5, { width: colW[3], align: 'center' });
+        doc.font('Helvetica-Bold').text(String(qty), colX[4], p4Y + 5, { width: colW[4], align: 'center' });
 
         p4Y += rowHeight;
       });
@@ -466,7 +463,7 @@ export async function generateProposalPdf(data: ProposalPdfData): Promise<{ file
 
       const clientScopeCol1 = [
         'Provide a shadow-free installation area.',
-        'Minor civil works, if required.',
+        'Rooftop access and electricity/water for testing.',
         'Statutory charges for Bi-Directional Net Meter.',
       ];
       const clientScopeCol2 = [
@@ -523,39 +520,41 @@ export async function generateProposalPdf(data: ProposalPdfData): Promise<{ file
 
       p5Y = Math.max(ftY1, ftY2) + 24;
 
-      // System Capacity & Pricing
-      doc.font('Helvetica-Bold').fontSize(11).fillColor(headingNavy).text('System Capacity & Pricing', 40, p5Y);
+      // System Capacity & Pricing with Explicit Subsidy Details
+      doc.font('Helvetica-Bold').fontSize(11).fillColor(headingNavy).text('System Capacity & Subsidy Details', 40, p5Y);
       p5Y += 16;
 
       const priceW = 515;
-      const hasSubsidy = data.subsidyEligible && (data.subsidyAmount > 0);
+      const subsidyAmt = data.subsidyAmount || (data.systemCapacityKw >= 3 ? 78000 : data.systemCapacityKw * 30000);
+      const netCustomerCost = Math.max(0, data.finalContractAmount - subsidyAmt);
 
       doc.rect(40, p5Y, priceW, 22).fillAndStroke('#0F172A', '#0F172A');
-      doc.font('Helvetica-Bold').fontSize(8).fillColor('#FFFFFF');
-      doc.text('System Capacity', 45, p5Y + 6, { width: 145, align: 'center' });
-      doc.text('Domestic Price (Including GST)', 195, p5Y + 6, { width: 165, align: 'center' });
-      doc.text(hasSubsidy ? 'Govt Subsidy / Net Cost' : 'Estimated ROI', 365, p5Y + 6, { width: 185, align: 'center' });
+      doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#FFFFFF');
+      doc.text('System Capacity', 42, p5Y + 6, { width: 120, align: 'center' });
+      doc.text('Domestic Price (Incl. GST)', 165, p5Y + 6, { width: 120, align: 'center' });
+      doc.text('Govt. Subsidy Support', 290, p5Y + 6, { width: 120, align: 'center' });
+      doc.text('Net Customer Cost', 415, p5Y + 6, { width: 135, align: 'center' });
       p5Y += 22;
 
       const finalPriceStr = `₹${Math.round(data.finalContractAmount).toLocaleString('en-IN')}/-`;
       doc.rect(40, p5Y, priceW, 36).fillAndStroke('#FFFFFF', '#CBD5E1');
 
-      doc.font('Helvetica-Bold').fontSize(9).fillColor(bodyDark);
-      doc.text(`${data.systemCapacityKw}KW On-grid Solar System`, 45, p5Y + 13, { width: 145, align: 'center' });
+      doc.font('Helvetica-Bold').fontSize(8.5).fillColor(bodyDark);
+      doc.text(`${data.systemCapacityKw} kW On-Grid Solar`, 42, p5Y + 13, { width: 120, align: 'center' });
 
-      doc.font('Helvetica-Bold').fontSize(12).fillColor(headingNavy);
-      doc.text(finalPriceStr, 195, p5Y + 11, { width: 165, align: 'center' });
+      doc.font('Helvetica-Bold').fontSize(10.5).fillColor(headingNavy);
+      doc.text(finalPriceStr, 165, p5Y + 12, { width: 120, align: 'center' });
 
-      if (hasSubsidy) {
-        const netCost = data.indicativeNetCustomerCost || (data.finalContractAmount - data.subsidyAmount);
-        doc.font('Helvetica-Bold').fontSize(8).fillColor(greenAccent)
-           .text(`Subsidy: ₹${Math.round(data.subsidyAmount).toLocaleString('en-IN')}`, 365, p5Y + 7, { width: 185, align: 'center' });
-        doc.font('Helvetica-Bold').fontSize(9.5).fillColor(headingNavy)
-           .text(`Net Cost: ₹${Math.round(netCost).toLocaleString('en-IN')}/-`, 365, p5Y + 20, { width: 185, align: 'center' });
-      } else {
-        doc.font('Helvetica-Bold').fontSize(9.5).fillColor(headingNavy)
-           .text('3.5 - 4.0 Years', 365, p5Y + 12, { width: 185, align: 'center' });
-      }
+      doc.font('Helvetica-Bold').fontSize(10.5).fillColor(greenAccent);
+      doc.text(`₹${Math.round(subsidyAmt).toLocaleString('en-IN')}`, 290, p5Y + 8, { width: 120, align: 'center' });
+      doc.font('Helvetica').fontSize(6.5).fillColor(textMuted);
+      doc.text('(Direct DBT Support)', 290, p5Y + 22, { width: 120, align: 'center' });
+
+      doc.font('Helvetica-Bold').fontSize(10.5).fillColor(headingNavy);
+      doc.text(`₹${Math.round(netCustomerCost).toLocaleString('en-IN')}/-`, 415, p5Y + 8, { width: 135, align: 'center' });
+      doc.font('Helvetica').fontSize(6.5).fillColor(textMuted);
+      doc.text('(Net Payable Investment)', 415, p5Y + 22, { width: 135, align: 'center' });
+
       p5Y += 46;
 
       // Payment Terms
@@ -580,11 +579,11 @@ export async function generateProposalPdf(data: ProposalPdfData): Promise<{ file
       const termsList = [
         'Quotation Validity: 7 Days from issue date.',
         'GST is included in the above quoted price.',
-        'Additional civil work will be charged extra 800/kW.',
+        'Custom structural elevations beyond standard height will be charged extra.',
         'Net Meter approval is subject to TANGEDCO / DISCOM regulations.',
         'Delivery is subject to material readiness and site access.',
-        'Any additional civil or electrical work outside the quoted scope will be charged extra.',
-        'Elevated above 4 Feet mounting structures will be charged extra 2500 per kW.',
+        'Any additional cabling or elevated structure work outside the quoted scope will be charged extra.',
+        'Pre-engineered HDG solar mounting structures included in scope.',
         'Force majeure conditions and DISCOM grid outages are excluded.',
       ];
 
@@ -595,14 +594,6 @@ export async function generateProposalPdf(data: ProposalPdfData): Promise<{ file
       });
 
       p6Y += 18;
-
-      // Thank you message
-      doc.rect(40, p6Y, 515, 36).fillAndStroke(greenLight, '#A7F3D0');
-      doc.font('Helvetica-Bold').fontSize(8.5).fillColor('#065F46').text(
-        'Thank you for your valuable opportunity. We look forward to delivering a reliable solar solution and building a long-term partnership with you.',
-        55, p6Y + 11, { width: 485, align: 'center' }
-      );
-      p6Y += 52;
 
       // Contact Details & Signature Card
       doc.font('Helvetica-Bold').fontSize(11).fillColor(headingNavy).text('Contact Details', 40, p6Y);
@@ -628,6 +619,15 @@ export async function generateProposalPdf(data: ProposalPdfData): Promise<{ file
       doc.moveTo(395, p6Y + 60).lineTo(525, p6Y + 60).lineWidth(0.5).strokeColor('#94A3B8').stroke();
       doc.font('Helvetica').fontSize(7.5).fillColor('#64748B')
          .text('Authorized Signatory', 380, p6Y + 65, { width: 160, align: 'center' });
+
+      p6Y += cardHeight + 20;
+
+      // Thank you message - Placed at the very bottom
+      doc.rect(40, p6Y, 515, 36).fillAndStroke(greenLight, '#A7F3D0');
+      doc.font('Helvetica-Bold').fontSize(8.5).fillColor('#065F46').text(
+        'Thank you for your valuable opportunity. We look forward to delivering a reliable solar solution and building a long-term partnership with you.',
+        55, p6Y + 11, { width: 485, align: 'center' }
+      );
 
       // ==========================================
       // STAMP ALL BUFFERED PAGES WITH DYNAMIC FOOTER

@@ -4,6 +4,7 @@ import {
   createPurchaseOrder, 
   createGoodsReceiptNote, 
   getPendingIndents,
+  confirmMaterialsPurchased,
   convertToEpcProject,
   getGoodsReceiptNotes,
   getPublicSigningGrn,
@@ -40,6 +41,7 @@ router.post('/grn/:id/revoke-link', authenticateToken, requireRole(['Purchase Te
 
 router.get('/pending-indents', authenticateToken, getPendingIndents);
 router.get('/indents', authenticateToken, getPendingIndents);
+router.post('/confirm-materials-purchased', authenticateToken, requireRole(['Purchase Team', 'Project Manager', 'Super Admin']), confirmMaterialsPurchased);
 router.delete('/indents-closed/all', authenticateToken, requireRole(['Purchase Team', 'Project Manager', 'Super Admin', 'Sales Manager']), clearClosedIndents);
 router.delete('/indents/:id', authenticateToken, requireRole(['Purchase Team', 'Project Manager', 'Super Admin', 'Sales Manager']), deleteIndent);
 

@@ -498,6 +498,30 @@ export async function createGoodsReceiptNote(req: Request, res: Response): Promi
   }
 }
 
+let hasCheckedProcurementCols = false;
+export async function ensureProcurementColumns() {
+  if (hasCheckedProcurementCols) return;
+  try {
+    const [cols]: any = await pool.query('SHOW COLUMNS FROM quotations');
+    const colSet = new Set(cols.map((c: any) => c.Field));
+    if (!colSet.has('materials_purchased_confirmed')) {
+      await pool.query('ALTER TABLE quotations ADD COLUMN materials_purchased_confirmed TINYINT(1) DEFAULT 0');
+    }
+    if (!colSet.has('materials_purchased_at')) {
+      await pool.query('ALTER TABLE quotations ADD COLUMN materials_purchased_at DATETIME NULL');
+    }
+    if (!colSet.has('materials_purchased_by')) {
+      await pool.query('ALTER TABLE quotations ADD COLUMN materials_purchased_by VARCHAR(100) NULL');
+    }
+    if (!colSet.has('materials_purchased_notes')) {
+      await pool.query('ALTER TABLE quotations ADD COLUMN materials_purchased_notes TEXT NULL');
+    }
+    hasCheckedProcurementCols = true;
+  } catch (err: any) {
+    console.warn('[Procurement] Migration check notice:', err.message);
+  }
+}
+
 /**
  * GET /api/procurement/pending-indents
  * Returns material requirements from accepted quotations (and approved project BOMs)
@@ -505,12 +529,14 @@ export async function createGoodsReceiptNote(req: Request, res: Response): Promi
  */
 export async function getPendingIndents(req: Request, res: Response): Promise<void> {
   try {
+    await ensureProcurementColumns();
     // 1. Fetch all accepted quotations that are not archived
     const [quotations]: any = await pool.query(`
       SELECT q.id as quotation_id, q.quotation_number, q.lead_name as customer_name,
              q.customer_phone, q.customer_address, q.system_capacity_kw, q.total_amount,
              q.status as quotation_status, q.survey_id, q.converted_to_project_id,
              q.versions,
+             q.materials_purchased_confirmed, q.materials_purchased_at, q.materials_purchased_by,
              p.stage as project_stage
       FROM quotations q
       LEFT JOIN projects p ON p.id = q.converted_to_project_id
@@ -622,6 +648,8 @@ export async function getPendingIndents(req: Request, res: Response): Promise<vo
       let procurementStatus = 'Pending Indent';
       if (isProjectCompleted) {
         procurementStatus = 'Project Completed (Procurement Closed)';
+      } else if (q.materials_purchased_confirmed) {
+        procurementStatus = 'Materials Purchased (Ready for PM)';
       } else if (hasSignedGrn && isDelivered && !isPartial) {
         procurementStatus = 'Materials Delivered & Signed';
       } else if (isPartial) {
@@ -674,6 +702,9 @@ export async function getPendingIndents(req: Request, res: Response): Promise<vo
         project_stage: q.project_stage || null,
         is_completed: isProjectCompleted,
         has_signed_grn: hasSignedGrn,
+        materials_purchased_confirmed: Boolean(q.materials_purchased_confirmed),
+        materials_purchased_at: q.materials_purchased_at || null,
+        materials_purchased_by: q.materials_purchased_by || null,
         signed_grn: grns[0] || null,
         purchase_orders: pos,
         goods_receipt_notes: grns,
@@ -741,9 +772,62 @@ export async function clearClosedIndents(req: Request, res: Response): Promise<v
 }
 
 /**
+ * POST /api/procurement/confirm-materials-purchased
+ * Allows the Purchase Team to confirm material purchase.
+ * Hands the quotation over to the Project Manager to execute conversion into a live EPC Project.
+ */
+export async function confirmMaterialsPurchased(req: Request, res: Response): Promise<void> {
+  try {
+    const { quotationId, notes } = req.body;
+    if (!quotationId) {
+      res.status(400).json({ success: false, error: 'Quotation ID is required' });
+      return;
+    }
+
+    await ensureProcurementColumns();
+
+    const [qRows]: any = await pool.query('SELECT * FROM quotations WHERE id = ?', [quotationId]);
+    if (!qRows || qRows.length === 0) {
+      res.status(404).json({ success: false, error: 'Quotation not found' });
+      return;
+    }
+    const quote = qRows[0];
+    const buyerName = (req as any).user?.name || 'Purchase Team';
+
+    await pool.query(
+      `UPDATE quotations 
+       SET materials_purchased_confirmed = 1,
+           materials_purchased_at = NOW(),
+           materials_purchased_by = ?,
+           materials_purchased_notes = ?
+       WHERE id = ?`,
+      [buyerName, notes || 'Materials purchased and confirmed by Purchase Team', quotationId]
+    );
+
+    // Send persistent notification to Project Manager
+    await createNotification({
+      recipientRole: 'Project Manager',
+      title: `Materials Purchased Confirmed (${quote.quotation_number || quote.id})`,
+      message: `Purchase Team has confirmed material procurement for ${quote.lead_name} (${quote.system_capacity_kw} kW). Deal is now ready for PM to convert to EPC execution.`,
+      type: 'success',
+    });
+
+    res.json({
+      success: true,
+      message: `Materials purchase confirmed for ${quote.quotation_number || quote.id}. Handed over to Project Manager for EPC conversion.`,
+      materials_purchased_confirmed: true,
+      materials_purchased_at: new Date().toISOString(),
+      materials_purchased_by: buyerName,
+    });
+  } catch (error: any) {
+    console.error('Error in confirmMaterialsPurchased:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+}
+
+/**
  * POST /api/procurement/convert-to-project
- * Step 5 of Workflow: Converts an accepted quotation into an EPC project
- * ONLY when required material receipt and customer signature conditions are satisfied!
+ * Converts an accepted quotation into an EPC project once materials are purchased/confirmed.
  * Links quotation, procurement, GRN, and signature records to the EPC project.
  * Prevents duplicate conversion.
  */
@@ -781,7 +865,7 @@ export async function convertToEpcProject(req: Request, res: Response) {
       }
     }
 
-    // 3. Strict Pre-requisite Check: Must have a completed GRN with customer digital signature!
+    // 3. Pre-requisite Check: Must have confirmed material purchase OR completed signed GRN!
     const [grnRows]: any = await conn.query(
       `SELECT g.*, p.id as po_id FROM goods_receipt_notes g
        LEFT JOIN purchase_orders p ON g.po_id = p.id
@@ -791,11 +875,14 @@ export async function convertToEpcProject(req: Request, res: Response) {
       [quotationId, quotationId]
     );
 
-    if (!grnRows || grnRows.length === 0) {
+    const hasMaterialsPurchased = Boolean(quote.materials_purchased_confirmed);
+    const hasSignedGrn = grnRows && grnRows.length > 0;
+
+    if (!hasSignedGrn && !hasMaterialsPurchased) {
       conn.release();
       return res.status(400).json({
         success: false,
-        error: 'Cannot convert to EPC project: Required material receipt and customer digital signature conditions are not satisfied. Please ensure the Purchase Team records material arrival at site and captures the customer signature first.',
+        error: 'Cannot convert to EPC project: Purchase Team must click Material Purchased Confirmation first before Project Manager can convert to EPC project.',
       });
     }
 

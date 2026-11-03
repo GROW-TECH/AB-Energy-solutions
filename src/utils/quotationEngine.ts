@@ -325,7 +325,7 @@ export function calculateQuotation(input: QuotationCalculationInput): QuotationC
   // 5. Turnkey Installation & Commissioning
   const installRatePerKw = tier === 'Premium Bifacial' ? 4200 : 4000;
   const installTotal = Math.round(capacityKw * installRatePerKw);
-  const installDesc = 'Complete civil mounting, cable routing in conduits, safety labeling, DISCOM net-metering liaison and synchronization';
+  const installDesc = 'Complete pre-engineered structural mounting, cable routing in conduits, safety labeling, DISCOM net-metering liaison and synchronization';
 
   // Base raw materials before tax & discount allocation
   let rawItems: Array<{
@@ -445,7 +445,7 @@ export function calculateQuotation(input: QuotationCalculationInput): QuotationC
         id: 'QI-5',
         category: 'Installation & Commissioning',
         description: installDesc,
-        specification: 'Civil mounting & liaison',
+        specification: 'Structural mounting & liaison',
         make: 'AB Energy Solutions',
         makeModel: 'AB Energy Solutions Certified EPC Crew',
         hsnSacCode: QUOTATION_CONFIG.DEFAULT_HSN_CODES.INSTALLATION,
@@ -555,18 +555,18 @@ export function calculateQuotation(input: QuotationCalculationInput): QuotationC
     subsidyEligible = true;
     if (capacityKw <= 1) {
       subsidyAmount = QUOTATION_CONFIG.RESIDENTIAL_SUBSIDY.SLAB_1KW_MAX;
-      subsidyNotes = 'PM Surya Ghar: ₹30,000 for 1 kW residential rooftop';
+      subsidyNotes = 'Govt. Subsidy: ₹30,000 for 1 kW residential rooftop';
     } else if (capacityKw <= 2) {
       subsidyAmount = QUOTATION_CONFIG.RESIDENTIAL_SUBSIDY.SLAB_2KW_MAX;
-      subsidyNotes = 'PM Surya Ghar: ₹60,000 for 2 kW residential rooftop';
+      subsidyNotes = 'Govt. Subsidy: ₹60,000 for 2 kW residential rooftop';
     } else {
       subsidyAmount = QUOTATION_CONFIG.RESIDENTIAL_SUBSIDY.SLAB_3KW_AND_ABOVE_MAX;
-      subsidyNotes = 'PM Surya Ghar: ₹78,000 maximum capped central subsidy for ≥ 3 kW';
+      subsidyNotes = 'Govt. Subsidy: ₹78,000 maximum capped central subsidy for ≥ 3 kW';
     }
   } else {
     subsidyEligible = false;
     subsidyAmount = 0;
-    subsidyNotes = 'Commercial / Industrial / Institutional installations are not eligible for PM Surya Ghar residential central subsidy.';
+    subsidyNotes = 'Commercial / Industrial / Institutional installations are not eligible for residential central DBT subsidy.';
   }
 
   // Indicative net customer investment (Post Direct Benefit Transfer)
@@ -637,7 +637,7 @@ export function calculateQuotation(input: QuotationCalculationInput): QuotationC
       '50% upon material dispatch against warehouse delivery challan.',
       '10% upon successful DISCOM net-metering synchronization and commissioning sign-off.',
       'Quotation valid for 14 calendar days from date of issuance.',
-      'Central subsidy under PM Surya Ghar is credited directly by the Government to the customer bank account post DISCOM inspection via DBT.',
+      'Central Govt. subsidy support is credited directly to the customer bank account post DISCOM inspection via DBT.',
       'Standard 25-Year linear performance warranty on Tier-1 ALMM solar panels.',
     ],
     warranties: {

@@ -5,7 +5,7 @@ import {
   Upload, AlertTriangle, Layers, Calendar, User, Eye, Check,
   ArrowLeft, CheckCircle, Clock, Save, Send, AlertCircle,
   Trash2, RefreshCw, ShieldAlert, FileText, ChevronRight,
-  Info, ExternalLink, HelpCircle, Edit3, Lock, Zap, ShieldCheck
+  Info, ExternalLink, HelpCircle, Edit3, Lock, Zap, ShieldCheck, PenTool
 } from 'lucide-react';
 import { useCrm } from '../../context/CrmContext';
 import { SiteSurvey, SurveyPhoto, SurveyPhotoCategory, SurveyStatus, BomItem, Quotation } from '../../types';
@@ -122,7 +122,7 @@ export const LiveCameraModal: React.FC<LiveCameraModalProps> = ({
     startCamera(nextFacing);
   };
 
-  const handleSnap = () => {
+  const handleSnap = async () => {
     const video = videoRef.current;
     if (!video) return;
 
@@ -137,6 +137,40 @@ export const LiveCameraModal: React.FC<LiveCameraModalProps> = ({
       ctx.scale(-1, 1);
     }
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    // High-visibility GPS camera watermark banner
+    try {
+      let gpsLat: number | null = null;
+      let gpsLng: number | null = null;
+      if (navigator.geolocation) {
+        const pos = await new Promise<GeolocationPosition>((res, rej) => {
+          navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: true, timeout: 2500, maximumAge: 60000 });
+        }).catch(() => null);
+        if (pos) {
+          gpsLat = pos.coords.latitude;
+          gpsLng = pos.coords.longitude;
+        }
+      }
+
+      const bannerH = Math.max(50, Math.floor(canvas.height * 0.09));
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.75)';
+      ctx.fillRect(0, canvas.height - bannerH, canvas.width, bannerH);
+
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = `bold ${Math.max(13, Math.floor(bannerH * 0.3))}px sans-serif`;
+      const timeStr = new Date().toLocaleString('en-IN');
+      const locStr = gpsLat && gpsLng 
+        ? `GPS: ${gpsLat.toFixed(6)}°N, ${gpsLng.toFixed(6)}°E` 
+        : 'GPS: Live Site Geotag Attached';
+      ctx.fillText(`AB ENERGY SOLUTIONS SITE AUDIT | ${locStr}`, 16, canvas.height - bannerH + Math.floor(bannerH * 0.44));
+      
+      ctx.font = `${Math.max(11, Math.floor(bannerH * 0.25))}px sans-serif`;
+      ctx.fillStyle = '#34D399';
+      ctx.fillText(`Captured: ${timeStr} | Geotagged Site Evidence`, 16, canvas.height - bannerH + Math.floor(bannerH * 0.82));
+    } catch (e) {
+      console.warn('GPS watermark stamp warning:', e);
+    }
+
     const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
     setCapturedImage(dataUrl);
     stopStream();
@@ -359,18 +393,155 @@ export const LiveCameraModal: React.FC<LiveCameraModalProps> = ({
   );
 };
 
-// 9 Standard Solar Site Audit Photographic Categories
+// 9 Standard Solar Site Audit Photographic Categories (Aligned with Site Requirements)
 const PHOTO_CATEGORIES: { key: SurveyPhotoCategory; label: string; mandatory: boolean; hint: string }[] = [
-  { key: 'full_rooftop_view', label: '1. Full Rooftop View', mandatory: true, hint: 'Wide angle showing overall roof geometry & sun path' },
-  { key: 'mounting_area', label: '2. Mounting Surface & Slab', mandatory: true, hint: 'Close-up of slab quality, surface texture & slope' },
-  { key: 'water_tank_obstacles', label: '3. Water Tank & Obstacles', mandatory: false, hint: 'Tanks, mumty room, AC units, vents, and shade sources' },
-  { key: 'main_electricity_meter', label: '4. Main Electricity Meter', mandatory: true, hint: 'DISCOM bidirectional meter display & tariff label' },
-  { key: 'distribution_board', label: '5. Main LT / AC Distribution Board', mandatory: false, hint: 'Breakers, MCB/MCCB ratings & spare slots' },
-  { key: 'earthing_arrangement', label: '6. Earthing Pit Site & Soil', mandatory: false, hint: 'Proposed chemical earthing pit locations & soil type' },
-  { key: 'cable_route_inverter', label: '7. Cable Route & Inverter Spot', mandatory: false, hint: 'Wall space for inverter & vertical DC/AC cable run' },
-  { key: 'roof_damage_concerns', label: '8. Roof Damage / Crack Concerns', mandatory: false, hint: 'Visible structural cracks, seepage, or dampness' },
+  { key: 'panel_fixing_area', label: '1. Panel Fixing Area', mandatory: true, hint: 'Terrace surface, structure anchor points & shadow clearance' },
+  { key: 'inverter_mounting_area', label: '2. Inverter Mounting Area', mandatory: true, hint: 'Wall space, ventilation clearance & shade protection' },
+  { key: 'cable_routing_area', label: '3. Cable Routing Area', mandatory: true, hint: 'Vertical & horizontal conduit chase from roof to inverter/meter' },
+  { key: 'eb_meter_location', label: '4. EB Meter Location', mandatory: true, hint: 'DISCOM bidirectional meter display, LT board & consumer number' },
+  { key: 'earthing_arrangement', label: '5. Earthing Pit Site & Soil', mandatory: false, hint: 'Proposed chemical earthing pit locations & soil type' },
+  { key: 'full_rooftop_view', label: '6. Full Rooftop View', mandatory: false, hint: 'Wide angle showing overall roof geometry & sun path' },
+  { key: 'water_tank_obstacles', label: '7. Water Tank & Obstacles', mandatory: false, hint: 'Tanks, mumty room, AC units, vents, and shade sources' },
+  { key: 'distribution_board', label: '8. Main LT / AC Distribution Board', mandatory: false, hint: 'Breakers, MCB/MCCB ratings & spare slots' },
   { key: 'additional_evidence', label: '9. Additional Field Evidence', mandatory: false, hint: 'Nearby trees, neighbor building heights, or road access' }
 ];
+
+// =========================================================================
+// DIGITAL SIGNATURE PAD: HTML5 Touch & Mouse on-screen stylus signing
+// =========================================================================
+interface SignaturePadProps {
+  initialSignature: string | null;
+  onSave: (dataUrl: string) => void;
+  onClear: () => void;
+  isReadOnly?: boolean;
+}
+
+export const DigitalSignaturePad: React.FC<SignaturePadProps> = ({
+  initialSignature,
+  onSave,
+  onClear,
+  isReadOnly = false
+}) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [hasDrawn, setHasDrawn] = useState(false);
+  const [currentSignature, setCurrentSignature] = useState<string | null>(initialSignature);
+
+  useEffect(() => {
+    setCurrentSignature(initialSignature);
+  }, [initialSignature]);
+
+  const getCanvasPos = (e: React.MouseEvent | React.TouchEvent, canvas: HTMLCanvasElement) => {
+    const rect = canvas.getBoundingClientRect();
+    const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
+    return {
+      x: (clientX - rect.left) * (canvas.width / rect.width),
+      y: (clientY - rect.top) * (canvas.height / rect.height)
+    };
+  };
+
+  const startDrawing = (e: React.MouseEvent | React.TouchEvent) => {
+    if (isReadOnly) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const pos = getCanvasPos(e, canvas);
+    ctx.beginPath();
+    ctx.moveTo(pos.x, pos.y);
+    setIsDrawing(true);
+    setHasDrawn(true);
+  };
+
+  const draw = (e: React.MouseEvent | React.TouchEvent) => {
+    if (!isDrawing || isReadOnly) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const pos = getCanvasPos(e, canvas);
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#0F172A';
+    ctx.lineTo(pos.x, pos.y);
+    ctx.stroke();
+  };
+
+  const stopDrawing = () => {
+    setIsDrawing(false);
+  };
+
+  const handleClear = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    setHasDrawn(false);
+    setCurrentSignature(null);
+    onClear();
+  };
+
+  const handleSave = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const dataUrl = canvas.toDataURL('image/png');
+    setCurrentSignature(dataUrl);
+    onSave(dataUrl);
+  };
+
+  if (currentSignature && isReadOnly) {
+    return (
+      <div className="border border-slate-200 rounded-xl p-3 bg-white inline-block">
+        <img src={currentSignature} alt="Client Signature" className="max-h-24 object-contain" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="relative border-2 border-dashed border-slate-300 rounded-xl bg-slate-50/50 overflow-hidden touch-none">
+        <canvas
+          ref={canvasRef}
+          width={500}
+          height={160}
+          className="w-full h-36 bg-white cursor-crosshair"
+          onMouseDown={startDrawing}
+          onMouseMove={draw}
+          onMouseUp={stopDrawing}
+          onMouseLeave={stopDrawing}
+          onTouchStart={startDrawing}
+          onTouchMove={draw}
+          onTouchEnd={stopDrawing}
+        />
+        {!hasDrawn && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none text-slate-400 text-xs">
+            Customer signs here with finger or stylus
+          </div>
+        )}
+      </div>
+      <div className="flex items-center justify-between">
+        <button
+          type="button"
+          onClick={handleClear}
+          disabled={!hasDrawn}
+          className="px-3 py-1.5 text-xs text-slate-600 hover:text-slate-800 font-semibold disabled:opacity-40 cursor-pointer"
+        >
+          Clear Pad
+        </button>
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={!hasDrawn}
+          className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white font-bold text-xs rounded-lg transition-colors cursor-pointer shadow-xs"
+        >
+          Confirm Signature
+        </button>
+      </div>
+    </div>
+  );
+};
 
 export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQuotation, onNavigateToBom, onAuditModeChange }) => {
   const { 
@@ -495,6 +666,8 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
   const [panelWattage, setPanelWattage] = useState<number>(550);
   const [inverterRec, setInverterRec] = useState('');
   const [cableSpec, setCableSpec] = useState('');
+  const [measuredDcCableMeters, setMeasuredDcCableMeters] = useState<number | ''>('');
+  const [measuredAcCableMeters, setMeasuredAcCableMeters] = useState<number | ''>('');
   const [engineerNotes, setEngineerNotes] = useState('');
   const [customFields, setCustomFields] = useState<{ id: string; label: string; value: string }[]>([]);
 
@@ -541,6 +714,7 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
     | { type: 'customer_photo' }
     | { type: 'doc_front' }
     | { type: 'doc_back' }
+    | { type: 'client_approval_doc' }
     | null
   >(null);
 
@@ -556,6 +730,37 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
   const [docNotes, setDocNotes] = useState('');
   const [isUploadingDoc, setIsUploadingDoc] = useState(false);
   const [savedDocMetadata, setSavedDocMetadata] = useState<any>(null);
+
+  // GPS Location & Client Approval states
+  const [latitude, setLatitude] = useState<number | ''>('');
+  const [longitude, setLongitude] = useState<number | ''>('');
+  const [isLocatingGps, setIsLocatingGps] = useState<boolean>(false);
+  const [clientSignatureData, setClientSignatureData] = useState<string | null>(null);
+  const [clientSignerName, setClientSignerName] = useState<string>('');
+  const [clientSignedAt, setClientSignedAt] = useState<string>('');
+  const [clientApprovalDocUrl, setClientApprovalDocUrl] = useState<string | null>(null);
+  const clientApprovalDocInputRef = useRef<HTMLInputElement>(null);
+
+  const handleCaptureGpsCoordinates = () => {
+    if (!navigator.geolocation) {
+      showToast('Geolocation is not supported by your browser', 'error');
+      return;
+    }
+    setIsLocatingGps(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLatitude(Number(pos.coords.latitude.toFixed(6)));
+        setLongitude(Number(pos.coords.longitude.toFixed(6)));
+        setIsLocatingGps(false);
+        showToast(`GPS captured: ${pos.coords.latitude.toFixed(6)}°N, ${pos.coords.longitude.toFixed(6)}°E`, 'success');
+      },
+      (err) => {
+        setIsLocatingGps(false);
+        showToast('Unable to retrieve GPS coordinates. Please ensure Location permission is granted.', 'error');
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  };
 
   // Field BOM Builder state
   const [bomItems, setBomItems] = useState<BomItem[]>([]);
@@ -857,12 +1062,21 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
       setPanelWattage(activeSurvey.proposedPanelWattage || 550);
       setInverterRec(activeSurvey.inverterRecommendation || '');
       setCableSpec(activeSurvey.cableSpecification || '');
+      setMeasuredDcCableMeters(activeSurvey.measuredDcCableMeters !== null && activeSurvey.measuredDcCableMeters !== undefined ? activeSurvey.measuredDcCableMeters : '');
+      setMeasuredAcCableMeters(activeSurvey.measuredAcCableMeters !== null && activeSurvey.measuredAcCableMeters !== undefined ? activeSurvey.measuredAcCableMeters : '');
       const isAutoPrompt = activeSurvey.notes && (
         activeSurvey.notes.includes('Scheduled site audit') ||
         activeSurvey.notes.includes('Site survey audit scheduled')
       );
       setEngineerNotes(isAutoPrompt ? '' : (activeSurvey.notes || ''));
       setCustomFields(activeSurvey.customFields || []);
+
+      setLatitude(activeSurvey.latitude !== null && activeSurvey.latitude !== undefined ? activeSurvey.latitude : '');
+      setLongitude(activeSurvey.longitude !== null && activeSurvey.longitude !== undefined ? activeSurvey.longitude : '');
+      setClientSignatureData(activeSurvey.clientSignatureData || null);
+      setClientSignerName(activeSurvey.clientSignerName || activeSurvey.customerName || '');
+      setClientSignedAt(activeSurvey.clientSignedAt || '');
+      setClientApprovalDocUrl(activeSurvey.clientApprovalDocUrl || null);
 
       setSaveSuccessMsg('');
       const shouldEdit = activeSurvey ? (activeSurvey.status === 'Scheduled' || activeSurvey.status === 'In Progress' || activeSurvey.status === 'Changes Required') : false;
@@ -963,8 +1177,16 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
       co2ReductionTonsPerYear: co2Tons,
       inverterRecommendation: inverterRec,
       cableSpecification: cableSpec,
+      measuredDcCableMeters: measuredDcCableMeters !== '' ? Number(measuredDcCableMeters) : null,
+      measuredAcCableMeters: measuredAcCableMeters !== '' ? Number(measuredAcCableMeters) : null,
       notes: engineerNotes,
       customFields,
+      latitude: latitude !== '' ? Number(latitude) : null,
+      longitude: longitude !== '' ? Number(longitude) : null,
+      clientSignatureData,
+      clientSignerName,
+      clientSignedAt,
+      clientApprovalDocUrl,
       isDraft,
     };
   };
@@ -1092,6 +1314,11 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
   const handleLiveCameraCapture = async (base64Data: string) => {
     if (!liveCameraTarget) return;
 
+    if (liveCameraTarget.type === 'client_approval_doc') {
+      setClientApprovalDocUrl(base64Data);
+      showToast('Client approval document captured successfully!', 'success');
+      return;
+    }
     if (liveCameraTarget.type === 'customer_photo') {
       setCustomerPhotoBase64(base64Data);
       showToast('Customer photograph captured successfully!', 'success');
@@ -1164,15 +1391,19 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
     
     const currentPhotos = activeSurvey?.photos || [];
     const categories = new Set(currentPhotos.map(p => p.category));
-    if (!categories.has('full_rooftop_view')) {
-      errors.push('Site Photographs: "1. Full Rooftop View" photograph is mandatory');
+    if (!categories.has('panel_fixing_area') && !categories.has('mounting_area') && !categories.has('full_rooftop_view')) {
+      errors.push('Site Photographs: "1. Panel Fixing Area" photograph is mandatory');
     }
-    if (!categories.has('main_electricity_meter')) {
-      errors.push('Site Photographs: "4. Main Electricity Meter" photograph is mandatory');
+    if (!categories.has('eb_meter_location') && !categories.has('main_electricity_meter')) {
+      errors.push('Site Photographs: "4. EB Meter Location" photograph is mandatory');
     }
 
     if (mainMeterStatus === 'Not Assessed') {
       errors.push('Electrical Inspection: Main meter status has not been assessed');
+    }
+
+    if (!clientSignatureData) {
+      errors.push('Client Site Approval: Client digital signature is strictly mandatory. Please capture the client signature in Section 8 at the bottom of the audit form before submitting.');
     }
 
     return errors;
@@ -1180,6 +1411,11 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
 
   const handleOpenSubmitChecklist = async () => {
     if (!activeSurvey) return;
+
+    if (!clientSignatureData) {
+      showToast('Client digital signature is required before submitting for review. Please complete Section 8 at the bottom of the audit form.', 'error');
+      return;
+    }
 
     // Immediately persist current form state to MySQL so backend is always in sync with user's inputs
     const payload = getSurveyFormPayload(true);
@@ -1201,6 +1437,12 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
 
   const handleConfirmSubmit = async (bypassWithExceptions: boolean = false) => {
     if (!activeSurvey) return;
+
+    if (!clientSignatureData) {
+      showToast('Submission blocked: Client digital signature is mandatory.', 'error');
+      return;
+    }
+
     setIsSubmitting(true);
     showToast('Submitting survey audit for technical review...', 'info');
 
@@ -1520,7 +1762,13 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
                   {activeSurvey.status !== 'Approved' && activeSurvey.status !== 'Completed' && (
                     <button
                       onClick={handleOpenSubmitChecklist}
-                      className="flex items-center justify-center gap-1 px-3 py-1.5 sm:px-4 sm:py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg sm:rounded-xl text-xs shadow-xs transition-colors cursor-pointer flex-1 sm:flex-none"
+                      disabled={!clientSignatureData}
+                      className={`flex items-center justify-center gap-1 px-3 py-1.5 sm:px-4 sm:py-2 text-white font-bold rounded-lg sm:rounded-xl text-xs shadow-xs transition-colors shrink-0 ${
+                        !clientSignatureData
+                          ? 'bg-slate-400 cursor-not-allowed opacity-60'
+                          : 'bg-emerald-600 hover:bg-emerald-700 cursor-pointer'
+                      }`}
+                      title={!clientSignatureData ? 'Client signature is strictly required in Section 8 before submitting' : 'Submit for review'}
                     >
                       <Send className="w-3.5 h-3.5 shrink-0" />
                       <span className="text-[11px] sm:text-xs">Submit for Review</span>
@@ -1533,6 +1781,21 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
 
           {/* MAIN AUDIT CONTAINER: 8 DEDICATED SECTIONS */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-3.5 sm:p-6 md:p-8 max-w-5xl mx-auto space-y-6 sm:space-y-8 text-xs text-slate-700">
+
+            {/* Super Admin / CEO Edit Audit Notice */}
+            {(activeSurvey.lastModifiedRole === 'Super Admin' || activeSurvey.lastModifiedRole === 'CEO') && (
+              <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-purple-900 font-bold text-xs">
+                  <ShieldCheck className="w-4 h-4 text-purple-600" />
+                  <span>Edited by {activeSurvey.lastModifiedRole === 'CEO' ? 'CEO' : 'Super Admin'} ({activeSurvey.lastModifiedBy || 'Admin'})</span>
+                </div>
+                {activeSurvey.lastModifiedAt && (
+                  <span className="text-[10px] text-purple-700 font-mono">
+                    Last modified: {new Date(activeSurvey.lastModifiedAt).toLocaleString()}
+                  </span>
+                )}
+              </div>
+            )}
 
             {/* Inspection vs Edit Mode Banner */}
             {!isEditingMode ? (
@@ -2067,6 +2330,95 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
                           <span className="text-[10px] text-slate-400 font-mono">{new Date(hist.createdAt).toLocaleTimeString()}</span>
                         </div>
                       ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* 6. Section 6: Geolocation & Client Site Confirmation */}
+                <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 space-y-3">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                    <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 shrink-0" />
+                      <span>6. Site GPS Geolocation &amp; Client Confirmation</span>
+                    </h3>
+                    {activeSurvey.clientSignatureData ? (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                        Signed by Client
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                        Signature Not Recorded
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div className="p-3 bg-slate-50 rounded-xl space-y-1">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                        GPS Coordinates
+                      </span>
+                      {activeSurvey.latitude && activeSurvey.longitude ? (
+                        <div className="space-y-1">
+                          <span className="font-mono font-bold text-slate-800 block">
+                            {activeSurvey.latitude}°N, {activeSurvey.longitude}°E
+                          </span>
+                          <a
+                            href={`https://www.google.com/maps?q=${activeSurvey.latitude},${activeSurvey.longitude}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-teal-700 hover:text-teal-800 font-bold underline text-[11px] inline-flex items-center gap-1"
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                            <span>View on Google Maps</span>
+                          </a>
+                        </div>
+                      ) : (
+                        <span className="text-slate-400 italic">No GPS coordinates recorded</span>
+                      )}
+                    </div>
+
+                    <div className="p-3 bg-slate-50 rounded-xl space-y-1">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                        Client Signer
+                      </span>
+                      <span className="font-bold text-slate-800 block">
+                        {activeSurvey.clientSignerName || activeSurvey.customerName || 'Client'}
+                      </span>
+                      {activeSurvey.clientSignedAt && (
+                        <span className="text-[10px] text-slate-400 font-mono block">
+                          Signed at: {new Date(activeSurvey.clientSignedAt).toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {activeSurvey.clientSignatureData && (
+                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                        Digital Signature Record
+                      </span>
+                      <div className="bg-white p-2 rounded-lg border border-slate-200 inline-block">
+                        <img 
+                          src={activeSurvey.clientSignatureData} 
+                          alt="Client Signature" 
+                          className="max-h-20 object-contain"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {activeSurvey.clientApprovalDocUrl && (
+                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between text-xs">
+                      <span className="font-medium text-slate-700">Client Approval Paperwork Attached</span>
+                      <a
+                        href={activeSurvey.clientApprovalDocUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-teal-700 hover:text-teal-800 font-bold underline"
+                      >
+                        View Document
+                      </a>
                     </div>
                   )}
                 </div>
@@ -2928,6 +3280,53 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
                 </div>
               </div>
 
+              {/* On-Site Physical Cable Measurements (Client Requested) */}
+              <div className="p-3.5 bg-emerald-50/60 border border-emerald-200/80 rounded-xl space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-emerald-950 flex items-center gap-1.5">
+                    <Zap className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>On-Site Physical Cable Run Measurements (Surveyor Measured Quantities)</span>
+                  </span>
+                  <span className="text-[10px] font-semibold text-emerald-700 bg-white px-2 py-0.5 rounded border border-emerald-200">
+                    Auto-feeds BOM Procurement
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Measured DC Cable Run (Meters)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.5"
+                      min="0"
+                      value={measuredDcCableMeters}
+                      disabled={!isEditingMode}
+                      readOnly={!isEditingMode}
+                      onChange={e => setMeasuredDcCableMeters(e.target.value ? parseFloat(e.target.value) : '')}
+                      placeholder="e.g. 45 meters (Roof array to inverter)"
+                      className="w-full p-2.5 bg-white border border-slate-300 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-emerald-500 disabled:opacity-75 disabled:cursor-not-allowed"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Measured AC Cable Run (Meters)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.5"
+                      min="0"
+                      value={measuredAcCableMeters}
+                      disabled={!isEditingMode}
+                      readOnly={!isEditingMode}
+                      onChange={e => setMeasuredAcCableMeters(e.target.value ? parseFloat(e.target.value) : '')}
+                      placeholder="e.g. 25 meters (Inverter to EB Meter/DB)"
+                      className="w-full p-2.5 bg-white border border-slate-300 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-emerald-500 disabled:opacity-75 disabled:cursor-not-allowed"
+                    />
+                  </div>
+                </div>
+              </div>
+
               <div>
                 <label className="block text-[11px] font-bold text-slate-700 mb-1">
                   Lead Engineer Remarks &amp; Site Observations
@@ -3278,6 +3677,236 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
                 </div>
               </div>
 
+                {/* 8. Section 8: GPS Location & Client Site Confirmation */}
+                <div className="bg-white border-2 border-slate-200 rounded-2xl p-4 sm:p-6 space-y-4 shadow-xs">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 shrink-0" />
+                      <h3 className="font-bold text-slate-900 text-sm">8. GPS Location &amp; Client Site Confirmation</h3>
+                    </div>
+                    <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded uppercase tracking-wider">
+                      Strict Gate: Required for O&amp;M Review
+                    </span>
+                  </div>
+
+                  {/* 8A. GPS Geolocation */}
+                  <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                        <MapPin className="w-4 h-4 text-emerald-600" />
+                        <span>Site Geolocation Coordinates</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleCaptureGpsCoordinates}
+                        disabled={isLocatingGps}
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 self-start sm:self-auto shadow-xs"
+                      >
+                        <Compass className={`w-3.5 h-3.5 ${isLocatingGps ? 'animate-spin' : ''}`} />
+                        <span>{isLocatingGps ? 'Locating GPS...' : 'Capture Current GPS'}</span>
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                          Latitude (°N)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.000001"
+                          value={latitude}
+                          onChange={e => setLatitude(e.target.value === '' ? '' : parseFloat(e.target.value))}
+                          placeholder="e.g. 12.971598"
+                          className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-mono font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                          Longitude (°E)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.000001"
+                          value={longitude}
+                          onChange={e => setLongitude(e.target.value === '' ? '' : parseFloat(e.target.value))}
+                          placeholder="e.g. 77.594566"
+                          className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-mono font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        />
+                      </div>
+                    </div>
+
+                    {latitude !== '' && longitude !== '' && (
+                      <div className="flex items-center justify-between text-[11px] text-slate-600 pt-1">
+                        <span className="font-mono text-emerald-700 font-semibold">
+                          GPS: {latitude}°N, {longitude}°E
+                        </span>
+                        <a
+                          href={`https://www.google.com/maps?q=${latitude},${longitude}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-teal-700 hover:text-teal-800 font-bold underline flex items-center gap-1"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          <span>View on Google Maps</span>
+                        </a>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 8B. Client Approval & Digital Signature */}
+                  <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                        <PenTool className="w-4 h-4 text-emerald-600" />
+                        <span>Client Confirmation &amp; Digital Signature (Mandatory)</span>
+                      </div>
+                      {clientSignatureData ? (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                          Signature Confirmed
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-800 border border-red-300 flex items-center gap-1">
+                          <AlertTriangle className="w-3 h-3 text-red-600" />
+                          Signature Pending
+                        </span>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                        Client / Authorized Signer Name
+                      </label>
+                      <input
+                        type="text"
+                        value={clientSignerName}
+                        onChange={e => setClientSignerName(e.target.value)}
+                        placeholder="Enter full name of client or authorized signer"
+                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+
+                    {clientSignatureData ? (
+                      <div className="p-3 bg-white border border-emerald-200 rounded-xl space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-bold text-slate-700">Digital Signature Record</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setClientSignatureData(null);
+                              setClientSignedAt('');
+                            }}
+                            className="text-red-600 hover:text-red-700 text-[11px] font-bold cursor-pointer"
+                          >
+                            Clear &amp; Re-sign
+                          </button>
+                        </div>
+                        <div className="border border-slate-200 rounded-lg p-2 bg-slate-50/50 flex justify-center">
+                          <img 
+                            src={clientSignatureData} 
+                            alt="Client Signature" 
+                            className="max-h-24 object-contain"
+                          />
+                        </div>
+                        {clientSignedAt && (
+                          <div className="text-[10px] text-slate-400 font-mono text-right">
+                            Signed on: {new Date(clientSignedAt).toLocaleString()}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5">
+                        <span className="text-[11px] text-slate-500 block">
+                          Client must draw their signature below using finger or stylus:
+                        </span>
+                        <DigitalSignaturePad
+                          initialSignature={null}
+                          onSave={(dataUrl) => {
+                            setClientSignatureData(dataUrl);
+                            setClientSignedAt(new Date().toISOString());
+                            showToast('Client digital signature confirmed!', 'success');
+                          }}
+                          onClear={() => {
+                            setClientSignatureData(null);
+                            setClientSignedAt('');
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 8C. Physical Signed Document / Approval Photo (Optional) */}
+                  <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                        <FileText className="w-4 h-4 text-slate-600" />
+                        <span>Client Approval Document / Site Sign-Off Sheet</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => openLiveCamera('Capture Client Approval Document', 'environment', { type: 'client_approval_doc' })}
+                          className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-semibold rounded-lg text-[10px] flex items-center gap-1 cursor-pointer"
+                        >
+                          <Camera className="w-3 h-3" />
+                          <span>Camera</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => clientApprovalDocInputRef.current?.click()}
+                          className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg text-[10px] flex items-center gap-1 cursor-pointer"
+                        >
+                          <Upload className="w-3 h-3" />
+                          <span>Upload</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <input
+                      ref={clientApprovalDocInputRef}
+                      type="file"
+                      accept="image/*,application/pdf"
+                      className="hidden"
+                      onChange={async e => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          const b64 = await readFileAsBase64(file);
+                          setClientApprovalDocUrl(b64);
+                          showToast('Client approval document attached!', 'success');
+                        }
+                      }}
+                    />
+
+                    {clientApprovalDocUrl ? (
+                      <div className="p-2 bg-white border border-slate-200 rounded-lg flex items-center justify-between">
+                        <span className="text-xs text-slate-700 font-medium truncate max-w-xs">
+                          Approval Document Attached
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => window.open(clientApprovalDocUrl, '_blank')}
+                            className="text-teal-700 hover:text-teal-800 text-[11px] font-bold cursor-pointer"
+                          >
+                            View
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setClientApprovalDocUrl(null)}
+                            className="text-red-600 hover:text-red-700 text-[11px] font-bold cursor-pointer"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-[10px] text-slate-400">
+                        Optional: Attach photo or scan of signed physical sheet, quotation agreement, or client NOC.
+                      </p>
+                    )}
+                  </div>
+                </div>
 
               </div>
             )}
@@ -3459,7 +4088,13 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
                         <button
                           type="button"
                           onClick={handleOpenSubmitChecklist}
-                          className="flex-1 sm:flex-none px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5 text-center text-xs"
+                          disabled={!clientSignatureData}
+                          className={`flex-1 sm:flex-none px-5 py-2.5 font-bold rounded-xl shadow-xs transition-colors flex items-center justify-center gap-1.5 text-center text-xs ${
+                            !clientSignatureData
+                              ? 'bg-slate-400 cursor-not-allowed opacity-60 text-white'
+                              : 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer'
+                          }`}
+                          title={!clientSignatureData ? 'Client signature is strictly required in Section 8 before submitting' : 'Submit for review'}
                         >
                           <Send className="w-4 h-4" />
                           <span>Submit for Review</span>
@@ -3694,13 +4329,21 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
                       className="p-3.5 space-y-2.5 hover:bg-slate-50/80 transition-colors cursor-pointer"
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2 min-w-0">
+                        <div className="flex items-center gap-2 min-w-0 flex-wrap">
                           <span className="font-mono font-bold text-slate-900 text-xs px-2 py-0.5 bg-slate-100 rounded">
                             {s.id}
                           </span>
                           <span className="font-bold text-slate-900 text-xs truncate">
                             {s.customerName}
                           </span>
+                          {(s.lastModifiedRole === 'Super Admin' || s.lastModifiedRole === 'CEO') && (
+                            <span 
+                              title={`Edited by ${s.lastModifiedBy || s.lastModifiedRole}`}
+                              className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-purple-100 text-purple-800 border border-purple-300 shrink-0"
+                            >
+                              Edited by {s.lastModifiedRole === 'CEO' ? 'CEO' : 'Super Admin'}
+                            </span>
+                          )}
                         </div>
 
                         <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider shrink-0 ${
@@ -3881,7 +4524,17 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
                             {s.id}
                           </td>
                           <td className="py-3.5 px-4">
-                            <div className="font-bold text-slate-900">{s.customerName}</div>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-bold text-slate-900">{s.customerName}</span>
+                              {(s.lastModifiedRole === 'Super Admin' || s.lastModifiedRole === 'CEO') && (
+                                <span 
+                                  title={`Edited by ${s.lastModifiedBy || s.lastModifiedRole}${s.lastModifiedAt ? ' at ' + new Date(s.lastModifiedAt).toLocaleDateString() : ''}`}
+                                  className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-purple-100 text-purple-800 border border-purple-300"
+                                >
+                                  Edited by {s.lastModifiedRole === 'CEO' ? 'CEO' : 'Super Admin'}
+                                </span>
+                              )}
+                            </div>
                             <div className="text-[11px] text-slate-400 truncate max-w-[200px]" title={s.address}>
                               {s.address}
                             </div>

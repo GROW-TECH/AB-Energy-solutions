@@ -916,7 +916,6 @@ export const SurveyBomView: React.FC<SurveyBomViewProps> = ({
                       <th className="p-3 text-center w-12">S.NO</th>
                       <th className="p-3.5">MATERIALS</th>
                       <th className="p-3.5">SPECIFICATION</th>
-                      <th className="p-3.5">MAKE</th>
                       <th className="p-3.5 text-center">UNITS</th>
                       <th className="p-3.5 text-center">QUANTITY</th>
                       <th className="p-3.5 text-right">EST. UNIT RATE</th>
@@ -1029,25 +1028,6 @@ export const SurveyBomView: React.FC<SurveyBomViewProps> = ({
                           )}
                         </td>
 
-                        {/* MAKE */}
-                        <td className="p-3 min-w-[160px]">
-                          {isLocked ? (
-                            <div className="text-xs font-semibold text-slate-800 py-1">{item.brandMake || '—'}</div>
-                          ) : (
-                            <input
-                              type="text"
-                              value={item.brandMake || ''}
-                              onChange={e => {
-                                const next = [...activeBomItems];
-                                next[idx].brandMake = e.target.value;
-                                setActiveBomItems(next);
-                              }}
-                              className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-hidden focus:border-emerald-500"
-                              placeholder="e.g. Waaree / Solis / Reputed"
-                            />
-                          )}
-                        </td>
-
                         {/* UNITS */}
                         <td className="p-3 text-center min-w-[95px]">
                           {isLocked ? (
@@ -1062,7 +1042,6 @@ export const SurveyBomView: React.FC<SurveyBomViewProps> = ({
                               }}
                               className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-hidden focus:border-emerald-500 text-center"
                             >
-                              <option value="KWp">KWp</option>
                               <option value="Nos">Nos</option>
                               <option value="Set">Set</option>
                               <option value="Sets">Sets</option>
@@ -1070,6 +1049,8 @@ export const SurveyBomView: React.FC<SurveyBomViewProps> = ({
                               <option value="Lot">Lot</option>
                               <option value="Pkts">Pkts</option>
                               <option value="Kg">Kg</option>
+                              <option value="kWp">kWp</option>
+                              <option value="Inverter kWp">Inverter kWp</option>
                             </select>
                           )}
                         </td>

@@ -5,7 +5,7 @@ import {
   Search, Filter, Shield, KeyRound, UserX, UserPlus,
   Building2, Lock, Eye, Edit3, RefreshCw, AlertCircle, 
   ChevronRight, CheckSquare, Layers, Receipt, LifeBuoy, Clock,
-  X, Upload, Download, FileSpreadsheet
+  X, Upload, Download, FileSpreadsheet, Trash2
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useCrm } from '../../context/CrmContext';
@@ -105,10 +105,20 @@ export const TeamView: React.FC = () => {
         'Customer'
       ]
     : isSalesManager
-    ? ['Sales Executive']
+    ? ['Sales Executive', 'Survey Engineer']
     : isProjectManager
     ? ['Installation Team']
     : [];
+
+  const canManageTargetUser = (user: ManagedUser) => {
+    if (isSuperAdmin) return true;
+    if (isSalesManager && (user.role === 'Sales Executive' || user.role === 'Survey Engineer')) return true;
+    if (isProjectManager && user.role === 'Installation Team') return true;
+    return false;
+  };
+
+  const [userToDelete, setUserToDelete] = useState<ManagedUser | null>(null);
+  const [isDeletingUser, setIsDeletingUser] = useState(false);
 
   // Enforce that only Super Admin can stay on perspectives, matrix, or departments
   useEffect(() => {
@@ -394,15 +404,9 @@ export const TeamView: React.FC = () => {
 
   const handleToggleStatus = async (user: ManagedUser) => {
     setActionError(null);
-    if (!isSuperAdmin) {
-      if (isSalesManager && user.role !== 'Sales Executive') {
-        setActionError('Permission denied: Sales Manager can only manage Sales Executives.');
-        return;
-      }
-      if (isProjectManager && user.role !== 'Installation Team') {
-        setActionError('Permission denied: Project Manager can only manage Installation Crew.');
-        return;
-      }
+    if (!canManageTargetUser(user)) {
+      setActionError('Permission denied: You do not have permission to modify this user account.');
+      return;
     }
 
     try {
@@ -422,16 +426,45 @@ export const TeamView: React.FC = () => {
     }
   };
 
+  const handleDeleteUser = async (user: ManagedUser) => {
+    setActionError(null);
+    if (!canManageTargetUser(user)) {
+      setActionError('Permission denied: You do not have permission to delete this user.');
+      return;
+    }
+    if (user.username === currentUser?.username || user.id === currentUser?.id) {
+      setActionError('Cannot delete your own active session account.');
+      return;
+    }
+
+    setIsDeletingUser(true);
+    try {
+      const res = await authFetch(`/api/users/${user.id}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to delete user');
+      }
+
+      setActionSuccess(`User account ${user.username} (${user.name}) deleted successfully.`);
+      setUsers(prev => prev.filter(u => u.id !== user.id && u.username !== user.username));
+      if (selectedMemberProfile?.id === user.id || selectedMemberProfile?.username === user.username) {
+        setSelectedMemberProfile(null);
+      }
+      setUserToDelete(null);
+      refreshData();
+    } catch (err: any) {
+      setActionError(err.message);
+    } finally {
+      setIsDeletingUser(false);
+    }
+  };
+
   const openEditModal = (user: ManagedUser) => {
-    if (!isSuperAdmin) {
-      if (isSalesManager && user.role !== 'Sales Executive') {
-        setActionError('Permission denied: You can only edit Sales Executives.');
-        return;
-      }
-      if (isProjectManager && user.role !== 'Installation Team') {
-        setActionError('Permission denied: You can only edit Installation Crew.');
-        return;
-      }
+    if (!canManageTargetUser(user)) {
+      setActionError('Permission denied: You cannot edit this user.');
+      return;
     }
     setEditingUser(user);
     setFormData({
@@ -930,7 +963,7 @@ export const TeamView: React.FC = () => {
                       >
                         Profile
                       </button>
-                      {canManageUsers && (
+                      {canManageTargetUser(user) && (
                         <>
                           <button
                             onClick={() => openEditModal(user)}
@@ -947,6 +980,15 @@ export const TeamView: React.FC = () => {
                           >
                             {user.isActive ? 'Deactivate' : 'Activate'}
                           </button>
+                          {user.username !== currentUser?.username && user.id !== currentUser?.id && (
+                            <button
+                              onClick={() => setUserToDelete(user)}
+                              className="p-1 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg text-xs cursor-pointer"
+                              title="Permanently Delete User"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </>
                       )}
                       {isSuperAdmin && (
@@ -1128,7 +1170,7 @@ export const TeamView: React.FC = () => {
                               <span className="hidden xl:inline">Profile</span>
                             </button>
 
-                            {canManageUsers && (
+                            {canManageTargetUser(user) && (
                               <>
                                 <button
                                   onClick={() => openEditModal(user)}
@@ -1149,6 +1191,16 @@ export const TeamView: React.FC = () => {
                                 >
                                   {user.isActive ? 'Deactivate' : 'Activate'}
                                 </button>
+
+                                {user.username !== currentUser?.username && user.id !== currentUser?.id && (
+                                  <button
+                                    onClick={() => setUserToDelete(user)}
+                                    className="p-1.5 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg transition-colors cursor-pointer shrink-0"
+                                    title="Permanently delete user"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                                  </button>
+                                )}
                               </>
                             )}
 
@@ -1688,78 +1740,83 @@ export const TeamView: React.FC = () => {
                 </div>
               </div>
 
-              {/* SECTION: TODAY'S FIELD ATTENDANCE STATUS */}
-              <div className="p-4 rounded-xl border border-slate-200 bg-white space-y-2.5 shadow-xs">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                    <Clock className="w-3.5 h-3.5 text-indigo-600" />
-                    <span>Today's Field Attendance &amp; GPS Verification</span>
-                  </span>
-
-                  {isLoadingMemberAttendance ? (
-                    <span className="text-[10px] text-slate-400 animate-pulse">Syncing GPS...</span>
-                  ) : isCheckedInToday ? (
-                    <span className="px-2.5 py-0.5 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded text-[10px] font-bold flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />
-                      <span>Checked In Today</span>
+              {/* SECTION: TODAY'S FIELD ATTENDANCE STATUS (EXCLUSIVELY FOR ON-SITE INSTALLATION CREW) */}
+              {(selectedMemberProfile.role === 'Installation Team' ||
+                selectedMemberProfile.department?.toLowerCase().includes('installation') ||
+                selectedMemberProfile.department?.toLowerCase().includes('mounting') ||
+                memberAttendance.length > 0) && (
+                <div className="p-4 rounded-xl border border-slate-200 bg-white space-y-2.5 shadow-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>Today's Field Attendance &amp; GPS Verification</span>
                     </span>
-                  ) : (
-                    <span className="px-2.5 py-0.5 bg-amber-100 text-amber-800 border border-amber-200 rounded text-[10px] font-bold">
-                      Check-in Pending Today
-                    </span>
-                  )}
-                </div>
 
-                {latestAttendance ? (
-                  <div className="p-3 bg-slate-50 rounded-lg space-y-1.5 text-xs border border-slate-100">
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">Latest Logged Check-In:</span>
-                      <span className="font-mono font-bold text-slate-800">
-                        {latestAttendance.date} at {latestAttendance.check_in_time || latestAttendance.checkInTime || '09:00'}
+                    {isLoadingMemberAttendance ? (
+                      <span className="text-[10px] text-slate-400 animate-pulse">Syncing GPS...</span>
+                    ) : isCheckedInToday ? (
+                      <span className="px-2.5 py-0.5 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded text-[10px] font-bold flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />
+                        <span>Checked In Today</span>
                       </span>
-                    </div>
+                    ) : (
+                      <span className="px-2.5 py-0.5 bg-amber-100 text-amber-800 border border-amber-200 rounded text-[10px] font-bold">
+                        Check-in Pending Today
+                      </span>
+                    )}
+                  </div>
 
-                    <div className="flex justify-between items-center">
-                      <span className="text-slate-500">Crew Present on Site:</span>
-                      <div className="flex flex-wrap gap-1">
-                        {Array.isArray(latestAttendance.presentTeamMembers) && latestAttendance.presentTeamMembers.length > 0 ? (
-                          latestAttendance.presentTeamMembers.map((m: string, i: number) => (
-                            <span key={i} className="px-2 py-0.2 bg-white border border-slate-200 rounded text-[10px] font-bold text-slate-800">
-                              {m}
-                            </span>
-                          ))
+                  {latestAttendance ? (
+                    <div className="p-3 bg-slate-50 rounded-lg space-y-1.5 text-xs border border-slate-100">
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Latest Logged Check-In:</span>
+                        <span className="font-mono font-bold text-slate-800">
+                          {latestAttendance.date} at {latestAttendance.check_in_time || latestAttendance.checkInTime || '09:00'}
+                        </span>
+                      </div>
+
+                      <div className="flex justify-between items-center">
+                        <span className="text-slate-500">Crew Present on Site:</span>
+                        <div className="flex flex-wrap gap-1">
+                          {Array.isArray(latestAttendance.presentTeamMembers) && latestAttendance.presentTeamMembers.length > 0 ? (
+                            latestAttendance.presentTeamMembers.map((m: string, i: number) => (
+                              <span key={i} className="px-2 py-0.2 bg-white border border-slate-200 rounded text-[10px] font-bold text-slate-800">
+                                {m}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="font-semibold text-slate-700">{selectedMemberProfile.name} (Solo)</span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="pt-1 border-t border-slate-200 flex justify-between items-center text-[11px]">
+                        <span className="text-slate-400 flex items-center gap-1">
+                          <MapPin className="w-3 h-3 text-slate-400" />
+                          <span>GPS Coordinates:</span>
+                        </span>
+                        {latestAttendance.latitude && latestAttendance.longitude ? (
+                          <a
+                            href={`https://www.google.com/maps?q=${latestAttendance.latitude},${latestAttendance.longitude}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="font-mono text-emerald-700 hover:text-emerald-800 font-bold underline flex items-center gap-1"
+                          >
+                            <span>{Number(latestAttendance.latitude).toFixed(4)}° N, {Number(latestAttendance.longitude).toFixed(4)}° E</span>
+                            <span className="text-[9px]">↗</span>
+                          </a>
                         ) : (
-                          <span className="font-semibold text-slate-700">{selectedMemberProfile.name} (Solo)</span>
+                          <span className="text-slate-400 font-mono text-[10px]">GPS Geo-Stamp Verified</span>
                         )}
                       </div>
                     </div>
-
-                    <div className="pt-1 border-t border-slate-200 flex justify-between items-center text-[11px]">
-                      <span className="text-slate-400 flex items-center gap-1">
-                        <MapPin className="w-3 h-3 text-slate-400" />
-                        <span>GPS Coordinates:</span>
-                      </span>
-                      {latestAttendance.latitude && latestAttendance.longitude ? (
-                        <a
-                          href={`https://www.google.com/maps?q=${latestAttendance.latitude},${latestAttendance.longitude}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="font-mono text-emerald-700 hover:text-emerald-800 font-bold underline flex items-center gap-1"
-                        >
-                          <span>{Number(latestAttendance.latitude).toFixed(4)}° N, {Number(latestAttendance.longitude).toFixed(4)}° E</span>
-                          <span className="text-[9px]">↗</span>
-                        </a>
-                      ) : (
-                        <span className="text-slate-400 font-mono text-[10px]">GPS Geo-Stamp Verified</span>
-                      )}
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-xs text-slate-400 italic p-2 bg-slate-50 rounded-lg text-center">
-                    No field attendance logs found for this member yet.
-                  </p>
-                )}
-              </div>
+                  ) : (
+                    <p className="text-xs text-slate-400 italic p-2 bg-slate-50 rounded-lg text-center">
+                      No field attendance logs found for this member yet.
+                    </p>
+                  )}
+                </div>
+              )}
 
               {/* SECTION: CURRENT ASSIGNED SOLAR PROJECTS */}
               <div className="space-y-2">
@@ -1843,7 +1900,20 @@ export const TeamView: React.FC = () => {
               </div>
 
               {/* Modal Bottom Action */}
-              <div className="flex justify-end pt-3 border-t border-slate-100">
+              <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+                {canManageTargetUser(selectedMemberProfile) && 
+                 selectedMemberProfile.username !== currentUser?.username && 
+                 selectedMemberProfile.id !== currentUser?.id ? (
+                  <button
+                    type="button"
+                    onClick={() => setUserToDelete(selectedMemberProfile)}
+                    className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold rounded-xl text-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                    title="Permanently delete user"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete User</span>
+                  </button>
+                ) : <div />}
                 <button
                   type="button"
                   onClick={() => setSelectedMemberProfile(null)}
@@ -1856,6 +1926,71 @@ export const TeamView: React.FC = () => {
           </div>
         );
       })()}
+
+      {/* MODAL: DELETE USER CONFIRMATION */}
+      {userToDelete && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-150 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center border border-rose-200 shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Confirm Account Deletion</h3>
+                <p className="text-xs text-slate-500">This action cannot be undone.</p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1">
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-medium">User Name:</span>
+                <span className="font-bold text-slate-900">{userToDelete.name}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-medium">Username:</span>
+                <span className="font-mono font-semibold text-slate-800">@{userToDelete.username}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-medium">Role:</span>
+                <span className="font-semibold text-emerald-700">{userToDelete.role}</span>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600">
+              Are you sure you want to permanently delete this user account? Their login access will be revoked immediately and employee profile removed.
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setUserToDelete(null)}
+                disabled={isDeletingUser}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDeleteUser(userToDelete)}
+                disabled={isDeletingUser}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {isDeletingUser ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete User</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL: DIRECT LEAD ASSIGNMENT TO SALES EXECUTIVE */}
       {assignLeadModalUser && (

@@ -45,6 +45,7 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
   const [sanctionLoad, setSanctionLoad] = useState<number | ''>('');
   const [roofAreaSqFt, setRoofAreaSqFt] = useState<number | ''>('');
   const [roofType, setRoofType] = useState<'RCC Flat' | 'Tin Shed' | 'Tiled' | 'Elevated Structure'>('RCC Flat');
+  const [connectionSpace, setConnectionSpace] = useState<'Single Space' | '2 Space' | '3 Space'>('Single Space');
   const [source, setSource] = useState<LeadSource>('Website');
   const [buyingIntent, setBuyingIntent] = useState<'Immediate (< 15 days)' | '1-2 months' | 'Budgetary / Researching' | 'Future (> 3 months)'>('Immediate (< 15 days)');
   const [notes, setNotes] = useState('');
@@ -72,6 +73,7 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
 
   // Available Survey Engineers
   const surveyEngineers = employees.filter(e => e.role === 'Survey Engineer');
+  const selectedEng = surveyEngineers.find(e => e.id === surveyEngineerId) || surveyEngineers[0];
 
   // Initialize default survey engineer if available
   useEffect(() => {
@@ -230,6 +232,7 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
         sanctionLoad: numLoad,
         roofAreaSqFt: Number(roofAreaSqFt) || 0,
         roofType,
+        connectionSpace,
         source,
         priority,
         recommendedPriority: recommendation?.recommendedPriority,
@@ -282,6 +285,7 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
     setSanctionLoad('');
     setRoofAreaSqFt('');
     setRoofType('RCC Flat');
+    setConnectionSpace('Single Space');
     setSource('Website');
     setBuyingIntent('Immediate (< 15 days)');
     setNotes('');
@@ -586,7 +590,7 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
             <div>
               <label className="block text-[11px] font-bold text-slate-700 mb-1">
                 Roof Type
@@ -600,6 +604,21 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
                 <option value="Tin Shed">Tin Shed / Metal Sheet</option>
                 <option value="Tiled">Clay Tiled / Slanted</option>
                 <option value="Elevated Structure">Elevated Super Structure</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                Connection
+              </label>
+              <select
+                value={connectionSpace}
+                onChange={e => setConnectionSpace(e.target.value as any)}
+                className="w-full text-xs p-2.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-hidden font-medium text-slate-800"
+              >
+                <option value="Single Space">Single Space</option>
+                <option value="2 Space">2 Space</option>
+                <option value="3 Space">3 Space</option>
               </select>
             </div>
 

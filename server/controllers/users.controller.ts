@@ -19,8 +19,8 @@ export const getUsers = async (req: Request, res: Response) => {
     const params: any[] = [];
 
     if (currentUser.role === 'Sales Manager') {
-      // Sales Manager can only view and manage Sales Executives
-      query += ` WHERE u.role = 'Sales Executive'`;
+      // Sales Manager can view and manage Sales Executives and Survey Engineers
+      query += ` WHERE u.role IN ('Sales Executive', 'Survey Engineer')`;
     } else if (currentUser.role === 'Project Manager') {
       // Project Manager can only view and manage Installation Team
       query += ` WHERE u.role = 'Installation Team'`;
@@ -73,9 +73,9 @@ export const createUser = async (req: Request, res: Response) => {
     }
 
     // Authorization checks:
-    // Sales Manager can only create Sales Executive
-    if (currentUser.role === 'Sales Manager' && role !== 'Sales Executive') {
-      return res.status(403).json({ success: false, error: 'Sales Managers may only create Sales Executive accounts' });
+    // Sales Manager can create Sales Executive or Survey Engineer
+    if (currentUser.role === 'Sales Manager' && role !== 'Sales Executive' && role !== 'Survey Engineer') {
+      return res.status(403).json({ success: false, error: 'Sales Managers may only create Sales Executive or Survey Engineer accounts' });
     }
     // Project Manager can only create Installation Team
     if (currentUser.role === 'Project Manager' && role !== 'Installation Team') {
@@ -150,9 +150,9 @@ export const updateUser = async (req: Request, res: Response) => {
     }
     const target = existing[0];
 
-    // RBAC: Sales Manager can only update Sales Executive; Project Manager only Installation Team
-    if (currentUser.role === 'Sales Manager' && target.role !== 'Sales Executive') {
-      return res.status(403).json({ success: false, error: 'Sales Manager can only update Sales Executive accounts' });
+    // RBAC: Sales Manager can update Sales Executive or Survey Engineer; Project Manager only Installation Team
+    if (currentUser.role === 'Sales Manager' && target.role !== 'Sales Executive' && target.role !== 'Survey Engineer') {
+      return res.status(403).json({ success: false, error: 'Sales Manager can only update Sales Executive or Survey Engineer accounts' });
     }
     if (currentUser.role === 'Project Manager' && target.role !== 'Installation Team') {
       return res.status(403).json({ success: false, error: 'Project Manager can only update Installation Team accounts' });
@@ -223,7 +223,7 @@ export const toggleUserStatus = async (req: Request, res: Response) => {
     const target = existing[0];
 
     // RBAC check
-    if (currentUser.role === 'Sales Manager' && target.role !== 'Sales Executive') {
+    if (currentUser.role === 'Sales Manager' && target.role !== 'Sales Executive' && target.role !== 'Survey Engineer') {
       return res.status(403).json({ success: false, error: 'Permission denied' });
     }
     if (currentUser.role === 'Project Manager' && target.role !== 'Installation Team') {
@@ -338,3 +338,68 @@ export const importUsers = async (req: Request, res: Response) => {
     res.status(500).json({ success: false, error: error.message || 'Bulk import failed' });
   }
 };
+
+export const deleteUser = async (req: Request, res: Response) => {
+  try {
+    const currentUser = req.user;
+    if (!currentUser) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
+
+    const { id } = req.params;
+    let [existing]: any = await pool.query('SELECT * FROM user_accounts WHERE id = ? LIMIT 1', [id]);
+    if (!existing || existing.length === 0) {
+      // Fallback lookup by employee_id or username
+      const [byUsername]: any = await pool.query('SELECT * FROM user_accounts WHERE username = ? OR employee_id = ? LIMIT 1', [id, id]);
+      if (!byUsername || byUsername.length === 0) {
+        return res.status(404).json({ success: false, error: 'User account not found' });
+      }
+      existing = byUsername;
+    }
+    const target = existing[0];
+
+    // RBAC check
+    if (currentUser.role === 'Sales Manager' && target.role !== 'Sales Executive' && target.role !== 'Survey Engineer') {
+      return res.status(403).json({ success: false, error: 'Permission denied: Sales Manager can only delete Sales Executives or Survey Engineers' });
+    }
+    if (currentUser.role === 'Project Manager' && target.role !== 'Installation Team') {
+      return res.status(403).json({ success: false, error: 'Permission denied: Project Manager can only delete Installation Team accounts' });
+    }
+    if (currentUser.role !== 'Super Admin' && currentUser.role !== 'Sales Manager' && currentUser.role !== 'Project Manager') {
+      return res.status(403).json({ success: false, error: 'Permission denied: Unauthorized to delete user accounts' });
+    }
+
+    // Safety checks: Cannot delete your own active session account or the core master admin
+    if (target.id === currentUser.userId || target.username === currentUser.username) {
+      return res.status(400).json({ success: false, error: 'Cannot delete your own active account session' });
+    }
+    if (target.username.toLowerCase() === 'admin' && currentUser.role !== 'Super Admin') {
+      return res.status(400).json({ success: false, error: 'Cannot delete master system administrator account' });
+    }
+
+    // 1. Delete from user_accounts
+    await pool.query('DELETE FROM user_accounts WHERE id = ? OR username = ?', [target.id, target.username]);
+
+    // 2. Delete from employees table
+    await pool.query('DELETE FROM employees WHERE id = ? OR username = ? OR id = ?', [target.id, target.username, target.employee_id || '']);
+
+    // 3. Unassign from leads or projects so there are no dangling foreign references
+    try {
+      await pool.query('UPDATE leads SET assigned_to = NULL WHERE assigned_to = ? OR assigned_to = ?', [target.name, target.username]);
+    } catch (_) {}
+    try {
+      await pool.query('UPDATE projects SET installation_lead_id = NULL, installation_lead_name = NULL WHERE installation_lead_id = ? OR installation_lead_name = ?', [target.id, target.name]);
+    } catch (_) {}
+
+    res.json({
+      success: true,
+      message: `User account ${target.username} (${target.name}) deleted successfully`,
+      deletedId: target.id,
+      deletedUsername: target.username,
+    });
+  } catch (error: any) {
+    console.error('deleteUser error:', error);
+    res.status(500).json({ success: false, error: error.message || 'Failed to delete user' });
+  }
+};
+

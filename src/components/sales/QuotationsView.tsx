@@ -26,7 +26,8 @@ export const QuotationsView: React.FC<QuotationsViewProps> = ({
   const { 
     quotations, leads, surveys, projects, sendQuotation, acceptQuotation, 
     createQuotation, approveQuotationDiscount, recordCustomerAcceptance,
-    editQuotationData, currentUser, activeRole 
+    editQuotationData, updateQuotationPriority, currentUser, activeRole,
+    recordPayment, updateProject
   } = useCrm();
 
   const isSalesManager = activeRole === 'Sales Manager' || currentUser?.role === 'Sales Manager' || currentUser?.role === 'Super Admin';
@@ -34,6 +35,7 @@ export const QuotationsView: React.FC<QuotationsViewProps> = ({
 
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('All');
+  const [priorityFilter, setPriorityFilter] = useState<'All' | 'High' | 'Medium' | 'Low'>('All');
   const [repFilter, setRepFilter] = useState<string>('all');
   const [activeViewMode, setActiveViewMode] = useState<'grid' | 'document'>('grid');
   const [selectedQuoteForPreview, setSelectedQuoteForPreview] = useState<Quotation | null>(quotations[0] || null);
@@ -48,6 +50,11 @@ export const QuotationsView: React.FC<QuotationsViewProps> = ({
   const [acceptanceNotes, setAcceptanceNotes] = useState('');
   const [clientPoNumber, setClientPoNumber] = useState('');
   const [recordingAcceptance, setRecordingAcceptance] = useState(false);
+  const [advanceReceived, setAdvanceReceived] = useState(true);
+  const [advanceAmount, setAdvanceAmount] = useState<number>(0);
+  const [advanceMode, setAdvanceMode] = useState<string>('NEFT/RTGS');
+  const [advanceRef, setAdvanceRef] = useState<string>('');
+  const [advanceDate, setAdvanceDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [copiedSummary, setCopiedSummary] = useState(false);
   const [proposalDocTab, setProposalDocTab] = useState<'proposal' | 'tax_audit'>('proposal');
 
@@ -150,7 +157,12 @@ export const QuotationsView: React.FC<QuotationsViewProps> = ({
       matchesStatus = q.status === statusFilter;
     }
 
-    return matchesSearch && matchesRep && matchesStatus;
+    let matchesPriority = true;
+    if (priorityFilter !== 'All') {
+      matchesPriority = (q.priority || 'Medium') === priorityFilter;
+    }
+
+    return matchesSearch && matchesRep && matchesStatus && matchesPriority;
   }).sort((a, b) => {
     // Sort actionable quotes (Customer_Accepted, Sent, Draft) to the top
     const getPriority = (status: string) => {
@@ -218,6 +230,10 @@ export const QuotationsView: React.FC<QuotationsViewProps> = ({
     window.print();
   };
 
+  const handleUpdatePriority = async (quotationId: string, newPriority: 'High' | 'Medium' | 'Low') => {
+    await updateQuotationPriority(quotationId, newPriority);
+  };
+
   const handleCopySummary = () => {
     if (!selectedQuoteForPreview) return;
     const q = selectedQuoteForPreview;
@@ -230,7 +246,7 @@ Capacity: ${q.systemCapacityKw} kW On-Grid Solar Plant
 Modules: Tier-1 550W Half-Cut Bifacial ALMM
 Inverter: Sungrow / Growatt Dual-MPPT Cloud Unit
 Gross Plant Cost: INR ${v?.subtotal.toLocaleString('en-IN')}
-PM Surya Ghar Subsidy: - INR ${v?.subsidyDeduction.toLocaleString('en-IN')}
+Govt. Subsidy Support: - INR ${v?.subsidyDeduction.toLocaleString('en-IN')}
 Net Customer Investment: INR ${q.totalAmount.toLocaleString('en-IN')} (incl. 13.8% GST)
 Estimated 25-Year Savings: INR ${Math.round(q.systemCapacityKw * 1450 * 8.2 * 25).toLocaleString('en-IN')}
 ----------------------------------------
@@ -246,7 +262,7 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
     const q = selectedQuoteForPreview;
     const cleanPhone = q.customerPhone.replace(/\D/g, '');
     const phoneWithCountry = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
-    const message = encodeURIComponent(`Hello ${q.leadName}, here is your official solar quotation ${q.quotationNumber} from AB Energy Solutions. System Size: ${q.systemCapacityKw} kW. Net Investment after PM Surya Ghar subsidy is Rs. ${q.totalAmount.toLocaleString('en-IN')}. Please review the attached specification.`);
+    const message = encodeURIComponent(`Hello ${q.leadName}, here is your official solar quotation ${q.quotationNumber} from AB Energy Solutions. System Size: ${q.systemCapacityKw} kW. Net Investment after Govt. subsidy support is Rs. ${q.totalAmount.toLocaleString('en-IN')}. Please review the attached specification.`);
     window.open(`https://wa.me/${phoneWithCountry}?text=${message}`, '_blank');
   };
 
@@ -342,6 +358,13 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
               </span>
               <span className="text-slate-400 hidden sm:inline">•</span>
               <span className="text-slate-600 font-medium truncate max-w-[200px] sm:max-w-xs">{selectedQuoteForPreview.leadName} ({selectedQuoteForPreview.systemCapacityKw} kW)</span>
+
+              {(selectedQuoteForPreview.lastModifiedRole === 'Super Admin' || selectedQuoteForPreview.lastModifiedRole === 'CEO') && (
+                <div className="flex items-center gap-1 px-2 py-0.5 bg-purple-50 border border-purple-200 rounded-md text-purple-900 text-[11px] font-bold shrink-0">
+                  <ShieldCheck className="w-3 h-3 text-purple-600" />
+                  <span>Edited by {selectedQuoteForPreview.lastModifiedRole === 'CEO' ? 'CEO' : 'Super Admin'} ({selectedQuoteForPreview.lastModifiedBy || 'Admin'})</span>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
@@ -441,6 +464,10 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                   onClick={() => {
                     setAcceptanceNotes('');
                     setClientPoNumber('');
+                    const adv = Math.round((selectedQuoteForPreview.totalAmount || 100000) * 0.2);
+                    setAdvanceAmount(adv);
+                    setAdvanceReceived(true);
+                    setAdvanceRef(`ADV-${Date.now().toString().slice(-6)}`);
                     setShowAcceptanceModal(true);
                   }}
                   className="flex items-center gap-1.5 px-3 sm:px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg shadow-xs transition-colors cursor-pointer"
@@ -742,6 +769,7 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                     <div>&bull; Engineering Support</div>
                     <div>&bull; Testing &amp; Commissioning</div>
                     <div>&bull; Supply of Material</div>
+                    <div>&bull; Subsidy Support</div>
                     <div>&bull; Service Support</div>
                   </div>
                 </div>
@@ -754,15 +782,14 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                   </div>
 
                   <div className="overflow-x-auto -mx-2 sm:mx-0 border border-slate-300 rounded-xl shadow-2xs">
-                    <table className="w-full min-w-[540px] text-left text-[11px]">
+                    <table className="w-full min-w-[500px] text-left text-[11px]">
                       <thead className="bg-slate-900 text-white font-black text-[10px] uppercase border-b border-slate-300">
                         <tr>
                           <th className="py-2 px-3 text-center w-12">S.NO</th>
-                          <th className="py-2 px-3 w-40">MATERIALS</th>
+                          <th className="py-2 px-3 w-48">MATERIALS</th>
                           <th className="py-2 px-3">SPECIFICATION</th>
-                          <th className="py-2 px-3 w-36">MAKE</th>
-                          <th className="py-2 px-3 text-center w-16">UNITS</th>
-                          <th className="py-2 px-3 text-center w-16">QUANTITY</th>
+                          <th className="py-2 px-3 text-center w-20">UNITS</th>
+                          <th className="py-2 px-3 text-center w-20">QUANTITY</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200 font-medium">
@@ -773,7 +800,7 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                           if (bItems.length === 0) {
                             return (
                               <tr>
-                                <td colSpan={6} className="py-4 text-center text-slate-400">
+                                <td colSpan={5} className="py-4 text-center text-slate-400">
                                   No BOM items found.
                                 </td>
                               </tr>
@@ -787,8 +814,7 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                               <td className="py-2 px-3 text-slate-700 font-mono text-[11px]">
                                 {item.specification || item.description || item.makeModel}
                               </td>
-                              <td className="py-2 px-3 text-slate-800 font-semibold">{item.make || item.makeModel?.split(' ')[0] || 'Reputed'}</td>
-                              <td className="py-2 px-3 text-center text-slate-600">{item.unit || 'Nos'}</td>
+                              <td className="py-2 px-3 text-center text-slate-600 font-semibold">{item.unit || 'Nos'}</td>
                               <td className="py-2 px-3 text-center font-mono font-black text-black">{item.quantity}</td>
                             </tr>
                           ));
@@ -828,7 +854,7 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                   </h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-slate-800">
                     <div>➢ Provide a shadow-free installation area.</div>
-                    <div>➢ Minor civil works, if required.</div>
+                    <div>➢ Rooftop access and electricity/water for testing.</div>
                     <div>➢ Statutory charges for the Bi-Directional Net Meter.</div>
                     <div>➢ Non-statutory charges related to Net Metering.</div>
                     <div>➢ Additional charges for elevated structures (if applicable).</div>
@@ -852,39 +878,46 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                   </div>
                 </div>
 
-                {/* System Capacity & Pricing Box */}
+                {/* System Capacity & Pricing Box with Explicit Subsidy Details */}
                 <div className="pt-3 border-t border-slate-100">
                   <h3 className="text-sm font-black text-black mb-2 tracking-tight uppercase">
-                    System Capacity &amp; Pricing
+                    System Capacity &amp; Subsidy Details
                   </h3>
                   <div className="overflow-x-auto border border-slate-300 rounded-xl">
                     <table className="w-full text-center text-xs">
                       <thead className="bg-slate-900 text-white font-black border-b border-slate-300">
                         <tr>
-                          <th className="py-2.5 px-4 w-1/3">System Capacity</th>
-                          <th className="py-2.5 px-4 w-1/3">Domestic Price<br /><span className="text-[10px] font-normal text-slate-300">(Including GST)</span></th>
-                          <th className="py-2.5 px-4 w-1/3">{selectedQuoteForPreview.subsidyEligible ? 'Govt Subsidy / Net Cost' : 'Estimated ROI'}</th>
+                          <th className="py-2.5 px-3 w-1/4">System Capacity</th>
+                          <th className="py-2.5 px-3 w-1/4">Domestic Price<br /><span className="text-[10px] font-normal text-slate-300">(Including GST)</span></th>
+                          <th className="py-2.5 px-3 w-1/4">Govt Subsidy Support<br /><span className="text-[10px] font-normal text-emerald-300">(Eligible DBT Subsidy)</span></th>
+                          <th className="py-2.5 px-3 w-1/4">Net Customer Cost<br /><span className="text-[10px] font-normal text-slate-300">(Effective Investment)</span></th>
                         </tr>
                       </thead>
                       <tbody>
-                        <tr className="divide-x divide-slate-200">
-                          <td className="py-3 px-4 font-bold text-black">
-                            {selectedQuoteForPreview.systemCapacityKw}KW On-grid Solar System
-                          </td>
-                          <td className="py-3 px-4 font-mono font-black text-black text-base">
-                            ₹{selectedQuoteForPreview.totalAmount.toLocaleString('en-IN')}/-
-                          </td>
-                          <td className="py-3 px-4 font-bold text-slate-800">
-                            {selectedQuoteForPreview.subsidyEligible && ((selectedQuoteForPreview.subsidyAmount || 0) > 0) ? (
-                              <div>
-                                <span className="text-emerald-700 font-black block">Subsidy: ₹{Math.round(selectedQuoteForPreview.subsidyAmount || 0).toLocaleString('en-IN')}</span>
-                                <span className="text-slate-900 text-xs block">Net Cost: ₹{Math.round(selectedQuoteForPreview.indicativeNetCustomerCost || (selectedQuoteForPreview.totalAmount - (selectedQuoteForPreview.subsidyAmount || 0))).toLocaleString('en-IN')}/-</span>
-                              </div>
-                            ) : (
-                              <span>3.5 - 4.0 Years</span>
-                            )}
-                          </td>
-                        </tr>
+                        {(() => {
+                          const estSubsidy = selectedQuoteForPreview.subsidyAmount || (selectedQuoteForPreview.systemCapacityKw >= 3 ? 78000 : selectedQuoteForPreview.systemCapacityKw * 30000);
+                          const netEffective = Math.max(0, selectedQuoteForPreview.totalAmount - estSubsidy);
+
+                          return (
+                            <tr className="divide-x divide-slate-200">
+                              <td className="py-3 px-3 font-bold text-black">
+                                <span className="text-sm font-black text-slate-900 block">{selectedQuoteForPreview.systemCapacityKw} kW</span>
+                                <span className="text-[10px] text-slate-500 font-normal">On-Grid Rooftop</span>
+                              </td>
+                              <td className="py-3 px-3 font-mono font-black text-black text-sm">
+                                ₹{selectedQuoteForPreview.totalAmount.toLocaleString('en-IN')}/-
+                              </td>
+                              <td className="py-3 px-3 font-bold text-emerald-700">
+                                <span className="text-sm font-black font-mono block">₹{Math.round(estSubsidy).toLocaleString('en-IN')}/-</span>
+                                <span className="text-[10px] text-emerald-600 font-semibold block">Direct DBT to Account</span>
+                              </td>
+                              <td className="py-3 px-3 font-bold text-slate-900">
+                                <span className="text-sm font-black font-mono text-emerald-900 block">₹{Math.round(netEffective).toLocaleString('en-IN')}/-</span>
+                                <span className="text-[10px] text-slate-500 font-normal block">Net Payable Value</span>
+                              </td>
+                            </tr>
+                          );
+                        })()}
                       </tbody>
                     </table>
                   </div>
@@ -928,18 +961,13 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-slate-700 text-[11px]">
                     <div>&bull; Quotation Validity: 7 Days from issue date.</div>
                     <div>&bull; GST is included in the above price.</div>
-                    <div>&bull; Additional civil work will be charged extra 800/kW.</div>
+                    <div>&bull; Custom elevated structures beyond 4 Feet charged extra 2500/kW.</div>
                     <div>&bull; Net Meter approval is subject to TANGEDCO / DISCOM regulations.</div>
                     <div>&bull; Delivery is subject to material readiness and site access.</div>
-                    <div>&bull; Any additional work outside the quoted scope will be charged extra.</div>
-                    <div>&bull; Elevated above 4 Feet mounting structures extra 2500/kW.</div>
+                    <div>&bull; Any additional cabling beyond standard run will be charged extra.</div>
+                    <div>&bull; Pre-engineered HDG solar mounting structures included in scope.</div>
                     <div>&bull; Force majeure conditions and grid outages are excluded.</div>
                   </div>
-                </div>
-
-                {/* Valued Opportunity Thank You Note */}
-                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-center text-emerald-900 font-bold text-xs">
-                  Thank you for your valuable opportunity. We look forward to delivering a reliable solar solution and building a long-term partnership with you.
                 </div>
 
                 {/* Contact Details & Visiting Card */}
@@ -968,6 +996,11 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                       <div className="text-[10px] text-slate-500 font-semibold">Authorized Signatory</div>
                     </div>
                   </div>
+                </div>
+
+                {/* Valued Opportunity Thank You Note - Placed at the bottom */}
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-center text-emerald-900 font-bold text-xs">
+                  Thank you for your valuable opportunity. We look forward to delivering a reliable solar solution and building a long-term partnership with you.
                 </div>
 
                 <div className="text-[10px] text-slate-400 text-right pt-2 border-t border-slate-100">
@@ -1122,7 +1155,7 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                 Solar Proposals &amp; Quotations
               </h1>
               <p className="text-xs text-slate-500 mt-1">
-                Formal EPC estimates, statutory 13.8% composite GST, and PM Surya Ghar central subsidies.
+                Formal EPC estimates, statutory 13.8% composite GST, and Govt. central subsidies.
               </p>
             </div>
 
@@ -1160,7 +1193,7 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
 
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-1">
               <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block">
-                PM Surya Ghar Subsidies
+                Govt. Subsidy Support
               </span>
               <div className="text-2xl font-black text-slate-900 font-mono tracking-tight">
                 ₹{(totalSubsidiesClaimed / 100000).toFixed(1)} Lakhs
@@ -1273,6 +1306,31 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
               <span>Project Completed ({completedCount})</span>
             </button>
+          </div>
+
+          {/* Priority Categorization & Filter Toolbar */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
+            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider shrink-0 mr-1 flex items-center gap-1">
+              <Filter className="w-3.5 h-3.5 text-slate-400" />
+              Priority:
+            </span>
+            {(['All', 'High', 'Medium', 'Low'] as const).map(p => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => setPriorityFilter(p)}
+                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  priorityFilter === p
+                    ? p === 'High' ? 'bg-red-600 text-white shadow-xs' :
+                      p === 'Medium' ? 'bg-amber-600 text-white shadow-xs' :
+                      p === 'Low' ? 'bg-slate-700 text-white shadow-xs' :
+                      'bg-slate-900 text-white shadow-xs'
+                    : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                }`}
+              >
+                {p === 'All' ? `All Priorities (${quotations.length})` : `${p} Priority (${quotations.filter(q => (q.priority || 'Medium') === p).length})`}
+              </button>
+            ))}
           </div>
 
           {/* Full-Width High-Density Table Card */}
@@ -1426,6 +1484,46 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                         </div>
                       </div>
 
+                      {/* Priority and Edit Tracking Tags */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-100" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Priority:</span>
+                          {isSalesManager ? (
+                            <select
+                              value={q.priority || 'Medium'}
+                              onChange={e => handleUpdatePriority(q.id, e.target.value as any)}
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold border cursor-pointer ${
+                                q.priority === 'High' ? 'bg-red-50 text-red-700 border-red-300' :
+                                q.priority === 'Low' ? 'bg-slate-50 text-slate-600 border-slate-300' :
+                                'bg-amber-50 text-amber-800 border-amber-300'
+                              }`}
+                            >
+                              <option value="High">High</option>
+                              <option value="Medium">Medium</option>
+                              <option value="Low">Low</option>
+                            </select>
+                          ) : (
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              q.priority === 'High' ? 'bg-red-100 text-red-800' :
+                              q.priority === 'Low' ? 'bg-slate-100 text-slate-600' :
+                              'bg-amber-100 text-amber-800'
+                            }`}>
+                              {q.priority || 'Medium'}
+                            </span>
+                          )}
+                        </div>
+
+                        {(q.lastModifiedRole === 'Super Admin' || q.lastModifiedRole === 'CEO') && (
+                          <span 
+                            title={`Edited by ${q.lastModifiedBy || q.lastModifiedRole}${q.lastModifiedAt ? ' at ' + new Date(q.lastModifiedAt).toLocaleDateString() : ''}`}
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-100 text-purple-800 border border-purple-300"
+                          >
+                            <ShieldCheck className="w-2.5 h-2.5 text-purple-600" />
+                            <span>Edited by {q.lastModifiedRole === 'CEO' ? 'CEO' : 'Super Admin'} ({q.lastModifiedBy || 'Admin'})</span>
+                          </span>
+                        )}
+                      </div>
+
                       {/* Quick Actions Row */}
                       <div className="flex items-center justify-between gap-2 pt-1" onClick={e => e.stopPropagation()}>
                         <a
@@ -1476,6 +1574,7 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                   <tr>
                     <th className="py-3 px-4">Quote Number</th>
                     <th className="py-3 px-4">Customer &amp; Location</th>
+                    <th className="py-3 px-4 text-center">Priority</th>
                     <th className="py-3 px-4">Assigned To</th>
                     <th className="py-3 px-4">Capacity</th>
                     <th className="py-3 px-4">Inverter / Modules</th>
@@ -1489,7 +1588,7 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                 <tbody className="divide-y divide-slate-100 font-medium">
                   {filteredQuotations.length === 0 ? (
                     <tr>
-                      <td colSpan={10} className="py-12 text-center text-slate-400">
+                      <td colSpan={11} className="py-12 text-center text-slate-400">
                         No quotations match your current search or status filter.
                       </td>
                     </tr>
@@ -1522,6 +1621,42 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                           <td className="py-3.5 px-4">
                             <div className="font-bold text-slate-900">{q.leadName}</div>
                             <div className="text-[11px] text-slate-400">{q.customerAddress || 'Bengaluru, KA'} • {q.customerPhone}</div>
+                            {(q.lastModifiedRole === 'Super Admin' || q.lastModifiedRole === 'CEO') && (
+                              <div className="mt-1">
+                                <span 
+                                  title={`Edited by ${q.lastModifiedBy || q.lastModifiedRole}${q.lastModifiedAt ? ' at ' + new Date(q.lastModifiedAt).toLocaleDateString() : ''}`}
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-100 text-purple-800 border border-purple-300"
+                                >
+                                  <ShieldCheck className="w-2.5 h-2.5 text-purple-600" />
+                                  <span>Edited by {q.lastModifiedRole === 'CEO' ? 'CEO' : 'Super Admin'} ({q.lastModifiedBy || 'Admin'})</span>
+                                </span>
+                              </div>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-4 text-center" onClick={e => e.stopPropagation()}>
+                            {isSalesManager ? (
+                              <select
+                                value={q.priority || 'Medium'}
+                                onChange={e => handleUpdatePriority(q.id, e.target.value as any)}
+                                className={`px-2 py-1 rounded-lg text-[10px] font-bold border cursor-pointer ${
+                                  q.priority === 'High' ? 'bg-red-50 text-red-700 border-red-300' :
+                                  q.priority === 'Low' ? 'bg-slate-50 text-slate-600 border-slate-300' :
+                                  'bg-amber-50 text-amber-800 border-amber-300'
+                                }`}
+                              >
+                                <option value="High">High</option>
+                                <option value="Medium">Medium</option>
+                                <option value="Low">Low</option>
+                              </select>
+                            ) : (
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                q.priority === 'High' ? 'bg-red-100 text-red-800' :
+                                q.priority === 'Low' ? 'bg-slate-100 text-slate-600' :
+                                'bg-amber-100 text-amber-800'
+                              }`}>
+                                {q.priority || 'Medium'}
+                              </span>
+                            )}
                           </td>
                           <td className="py-3.5 px-4">
                             <div className="flex items-center gap-2">
@@ -1614,6 +1749,12 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                                 <button
                                   onClick={() => {
                                     setSelectedQuoteForPreview(q);
+                                    setAcceptanceNotes('');
+                                    setClientPoNumber('');
+                                    const adv = Math.round((q.totalAmount || 100000) * 0.2);
+                                    setAdvanceAmount(adv);
+                                    setAdvanceReceived(true);
+                                    setAdvanceRef(`ADV-${Date.now().toString().slice(-6)}`);
                                     setShowAcceptanceModal(true);
                                   }}
                                   className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg text-xs shadow-xs transition-colors flex items-center gap-1 cursor-pointer"
@@ -1735,7 +1876,7 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
             <div className="flex items-center justify-between mb-4 border-b border-slate-100 pb-3">
               <div>
                 <h3 className="font-bold text-slate-900 text-sm">Generate Solar Proposal</h3>
-                <p className="text-xs text-slate-500 mt-0.5">Automated technical sizing &amp; PM Surya Ghar central subsidy</p>
+                <p className="text-xs text-slate-500 mt-0.5">Automated technical sizing &amp; Govt. central subsidy</p>
               </div>
               <button
                 onClick={() => setShowNewQuoteModal(false)}
@@ -1921,7 +2062,7 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
 
                 {modalCalc.subsidyEligible && modalCalc.subsidyAmount > 0 && (
                   <div className="flex justify-between border-t border-dashed border-emerald-300 pt-1.5 font-bold text-emerald-800 text-xs">
-                    <span>Indicative Net after PM Surya Ghar:</span>
+                    <span>Indicative Net after Govt. Subsidy:</span>
                     <span className="font-mono text-emerald-700 font-extrabold text-sm">₹{modalCalc.indicativeNetCustomerCost.toLocaleString('en-IN')}</span>
                   </div>
                 )}
@@ -2019,6 +2160,79 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                 />
               </div>
 
+              {/* SALES MANAGER ADVANCE PAYMENT GATE (Client & Accounts Integration) */}
+              <div className="p-3.5 bg-amber-50/80 border border-amber-300 rounded-xl space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={advanceReceived}
+                      onChange={e => setAdvanceReceived(e.target.checked)}
+                      className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer"
+                    />
+                    <span className="text-xs font-bold text-amber-950">Record Customer Advance Payment</span>
+                  </label>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-200 text-amber-900 border border-amber-300">
+                    Mandatory for Purchase POs
+                  </span>
+                </div>
+
+                {advanceReceived && (
+                  <div className="space-y-2.5 pt-1">
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 mb-0.5">Advance Amount (₹)</label>
+                        <input
+                          type="number"
+                          value={advanceAmount}
+                          onChange={e => setAdvanceAmount(Number(e.target.value))}
+                          placeholder="e.g. 50000"
+                          className="w-full text-xs font-mono font-bold px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-emerald-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 mb-0.5">Payment Mode</label>
+                        <select
+                          value={advanceMode}
+                          onChange={e => setAdvanceMode(e.target.value)}
+                          className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-emerald-500 font-semibold"
+                        >
+                          <option value="NEFT/RTGS">NEFT / RTGS</option>
+                          <option value="UPI">UPI / QR Code</option>
+                          <option value="Cheque">Cheque</option>
+                          <option value="Net Banking">Net Banking</option>
+                          <option value="Cash Deposit">Bank Cash Deposit</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 mb-0.5">Transaction / Cheque Ref #</label>
+                        <input
+                          type="text"
+                          value={advanceRef}
+                          onChange={e => setAdvanceRef(e.target.value)}
+                          placeholder="e.g. UTR-2026-98412"
+                          className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-emerald-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 mb-0.5">Payment Date</label>
+                        <input
+                          type="date"
+                          value={advanceDate}
+                          onChange={e => setAdvanceDate(e.target.value)}
+                          className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-emerald-500"
+                        />
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-amber-800 leading-tight">
+                      Note: Confirming this advance will automatically create a verified entry under <strong>Customer Advances</strong> in the Accounts panel and unlock Purchase Orders for material procurement.
+                    </p>
+                  </div>
+                )}
+              </div>
+
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Acceptance Notes / Proof of Confirmation
@@ -2049,6 +2263,32 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                   try {
                     const ok = await recordCustomerAcceptance(selectedQuoteForPreview.id, acceptanceNotes, clientPoNumber);
                     if (ok) {
+                      // If advance payment recorded, sync to Accounts and update project
+                      if (advanceReceived && advanceAmount > 0) {
+                        const linkedProj = getLinkedProject(selectedQuoteForPreview);
+                        recordPayment({
+                          projectId: linkedProj?.id || '',
+                          customerId: selectedQuoteForPreview.customerId || '',
+                          customerName: selectedQuoteForPreview.customerName || selectedQuoteForPreview.leadName,
+                          amount: Number(advanceAmount),
+                          paymentMode: advanceMode as any,
+                          transactionReference: advanceRef || `ADV-${Date.now().toString().slice(-6)}`,
+                          paymentDate: advanceDate,
+                          isAdvance: true,
+                          quotationId: selectedQuoteForPreview.id,
+                          recordedBy: currentUser?.name || 'Sales Manager',
+                        });
+                        if (linkedProj?.id) {
+                          updateProject(linkedProj.id, {
+                            advancePaymentReceived: true,
+                            advancePaymentAmount: Number(advanceAmount),
+                            advancePaymentMode: advanceMode,
+                            advancePaymentRef: advanceRef,
+                            advancePaymentDate: advanceDate,
+                            advancePaymentNotes: acceptanceNotes,
+                          });
+                        }
+                      }
                       setSelectedQuoteForPreview({ ...selectedQuoteForPreview, status: 'Customer_Accepted' });
                       setShowAcceptanceModal(false);
                     }

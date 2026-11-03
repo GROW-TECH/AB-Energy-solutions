@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import fs from 'fs';
 import path from 'path';
 import { pool } from '../db.ts';
 import { calculateQuotation } from '../services/quotation-engine.ts';
@@ -41,9 +42,22 @@ export function formatQuotation(q: any) {
     totalSgst: Number(q.total_sgst) || 0,
     totalIgst: Number(q.total_igst) || 0,
     amountInWords: q.amount_in_words || '',
+    priority: q.priority || 'Medium',
+    lastModifiedBy: q.last_modified_by || undefined,
+    lastModifiedRole: q.last_modified_role || undefined,
+    lastModifiedAt: q.last_modified_at || undefined,
+    editHistory: typeof q.edit_history === 'string' ? JSON.parse(q.edit_history) : (q.edit_history || []),
     surveyId: q.survey_id,
     pdfUrl: q.pdf_url,
     convertedToProjectId: q.converted_to_project_id,
+    advancePaymentReceived: Boolean(q.advance_payment_received),
+    advancePaymentAmount: Number(q.advance_payment_amount) || 0,
+    advancePaymentDate: q.advance_payment_date || undefined,
+    advancePaymentMode: q.advance_payment_mode || undefined,
+    advancePaymentRef: q.advance_payment_ref || undefined,
+    materialsPurchasedConfirmed: Boolean(q.materials_purchased_confirmed),
+    materialsPurchasedAt: q.materials_purchased_at || undefined,
+    materialsPurchasedBy: q.materials_purchased_by || undefined,
     createdAt: q.created_at,
   };
 }
@@ -658,12 +672,40 @@ export const updateQuotation = async (req: Request, res: Response) => {
         }
       }
     }
+    if (updates.priority !== undefined) { fields.push('priority = ?'); values.push(updates.priority); }
     if (updates.approvalStatus !== undefined) { fields.push('approval_status = ?'); values.push(updates.approvalStatus); }
     if (updates.status === 'Sent' && (user?.role === 'Sales Manager' || user?.role === 'Super Admin')) {
       fields.push('approval_status = ?');
       values.push('Approved');
       fields.push('discount_approved_by = ?');
       values.push(user?.name || 'Sales Manager');
+    }
+
+    // Super Admin / CEO Edit Tracking
+    if (user?.role === 'Super Admin' || user?.role === 'CEO' || updates.lastModifiedRole === 'Super Admin') {
+      const modifierName = user?.name || updates.lastModifiedBy || 'Super Admin';
+      const modifierRole = user?.role || updates.lastModifiedRole || 'Super Admin';
+      const modifiedAt = new Date().toISOString();
+      fields.push('last_modified_by = ?'); values.push(modifierName);
+      fields.push('last_modified_role = ?'); values.push(modifierRole);
+      fields.push('last_modified_at = ?'); values.push(modifiedAt);
+
+      try {
+        const [currQ]: any = await pool.query('SELECT edit_history FROM quotations WHERE id = ? LIMIT 1', [id]);
+        let history: any[] = [];
+        if (currQ && currQ.length > 0 && currQ[0].edit_history) {
+          history = typeof currQ[0].edit_history === 'string' ? JSON.parse(currQ[0].edit_history) : currQ[0].edit_history;
+        }
+        history.push({
+          timestamp: modifiedAt,
+          editedBy: modifierName,
+          editorRole: modifierRole,
+          changesSummary: Object.keys(updates).filter(k => !['lastModifiedBy', 'lastModifiedRole', 'lastModifiedAt', 'editHistory'].includes(k)).join(', ') || 'Quotation updated'
+        });
+        fields.push('edit_history = ?'); values.push(JSON.stringify(history));
+      } catch (histErr) {
+        console.warn('Could not update quotation edit history:', histErr);
+      }
     }
 
     if (fields.length > 0) {
@@ -1081,6 +1123,55 @@ export const acceptQuotation = async (req: Request, res: Response) => {
 
     await conn.commit();
     conn.release();
+
+    // 8. Auto-link project with subsidy tracking record (non-blocking)
+    try {
+      const capKw = Number(capacityKw) || 3;
+      const isRes = capKw <= 10;
+      const subAmount = isRes ? (capKw <= 1 ? 30000 : (capKw <= 2 ? 60000 : 78000)) : 0;
+      const subsidiesFile = path.resolve(process.cwd(), 'data', 'subsidies.json');
+      let currentSubsidies: any[] = [];
+      if (fs.existsSync(subsidiesFile)) {
+        try {
+          currentSubsidies = JSON.parse(fs.readFileSync(subsidiesFile, 'utf-8'));
+        } catch (_) {}
+      }
+      if (!currentSubsidies.some((s: any) => s.project_id === projectId)) {
+        currentSubsidies.unshift({
+          id: `SUB-${projectId.replace('PROJECT-', '').replace('PRJ-', '')}`,
+          project_id: projectId,
+          project_number: projectId,
+          customer_name: customerName,
+          customer_phone: customerPhone,
+          customer_type: isRes ? 'residential' : 'commercial',
+          is_eligible: isRes,
+          site_address: customerAddress,
+          discom_name: 'TANGEDCO',
+          consumer_number: 'Pending Consumer No',
+          sanctioned_load_kw: capKw,
+          system_capacity_kw: capKw,
+          subsidy_applicable_amount: subAmount,
+          dcr_modules_used: isRes,
+          panel_make_and_model: isRes ? 'Tata Power Solar / Waaree 545W Mono PERC (DCR)' : 'Tier-1 High Efficiency Panels',
+          inverter_make_and_model: `${capKw}kW On-Grid Solar Inverter`,
+          portal_application_no: isRes ? `PMS-TN-${new Date().getFullYear()}-${projectId.replace(/\D/g, '').slice(-5) || Math.floor(10000 + Math.random() * 90000)}` : 'N/A (Commercial Project)',
+          application_submission_date: new Date().toISOString().split('T')[0],
+          current_stage: isRes ? 1 : 0,
+          current_stage_name: isRes ? 'Portal Registration Submitted' : 'Not Eligible (Commercial Project)',
+          stage_status: 'in_progress',
+          days_in_current_stage: 1,
+          is_delayed: false,
+          documents: { electricity_bill: true, aadhaar_card: isRes, cancelled_cheque: false, roof_photo_geotagged: true, dcr_certificate: isRes, tfr_letter: false, wcr_copy: false, net_meter_test_report: false, commissioning_cert: false },
+          notes: `Auto-generated on acceptance of Quotation ${quote.quotation_number}`,
+          last_updated: new Date().toISOString().split('T')[0]
+        });
+        const sDir = path.dirname(subsidiesFile);
+        if (!fs.existsSync(sDir)) fs.mkdirSync(sDir, { recursive: true });
+        fs.writeFileSync(subsidiesFile, JSON.stringify(currentSubsidies, null, 2), 'utf-8');
+      }
+    } catch (subErr) {
+      console.warn('[Subsidy Auto-Sync] Non-blocking notice:', subErr);
+    }
 
     const [projRows]: any = await pool.query('SELECT * FROM projects WHERE id = ? LIMIT 1', [projectId]);
     res.json({

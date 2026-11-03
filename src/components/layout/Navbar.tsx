@@ -275,16 +275,17 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenNewLead, onOpenSearch, onO
                     </button>
                   ))}
                 </div>
-                {previewRole && (
+                {(previewRole || (currentUser && activeRole !== currentUser.role)) && (
                   <div className="p-1.5 bg-amber-50">
                     <button
                       onClick={() => {
                         setDemoPreviewRole(null);
+                        setActiveRole(currentUser?.role || 'Super Admin');
                         setShowRoleDropdown(false);
                       }}
                       className="w-full text-center py-1 text-xs font-semibold text-amber-800 hover:bg-amber-100 rounded transition-colors cursor-pointer"
                     >
-                      Exit Preview Mode
+                      Exit Preview Mode ({currentUser?.role || 'Super Admin'})
                     </button>
                   </div>
                 )}

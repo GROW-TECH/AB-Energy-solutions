@@ -55,6 +55,21 @@ const removeAllHtaccess = (dir) => {
 };
 removeAllHtaccess(scratchDeploy);
 
+// Strip any video or audio files from deployment package
+const removeMediaFiles = (dir) => {
+  if (!fs.existsSync(dir)) return;
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      removeMediaFiles(fullPath);
+    } else if (/\.(mp4|mkv|avi|mov|webm|mp3|wav|ogg|m4a|flac|aac)$/i.test(entry.name)) {
+      fs.unlinkSync(fullPath);
+    }
+  }
+};
+removeMediaFiles(scratchDeploy);
+
 // Copy logos
 if (fs.existsSync(path.join(rootDir, 'dist', 'logo.png'))) {
   fs.copyFileSync(path.join(rootDir, 'dist', 'logo.png'), path.join(scratchDeploy, 'logo.png'));
@@ -78,15 +93,22 @@ console.log('Deploy package staged in scratch/deploy_pkg');
 const zipDest = path.join(rootDir, 'xiadot-AB_Energy_Solutions-DEPLOY.zip');
 const parentZipDest = path.join(rootDir, '..', 'xiadot-AB_Energy_Solutions-DEPLOY.zip');
 const altZipDest = path.join(rootDir, 'ab-energy-solutions-solar-crm-latest.zip');
-const parentAltZipDest = path.join(rootDir, '..', 'ab-energy-solutions-solar-crm-latest.zip');
+const lightweightZipDest = path.join(rootDir, 'cpanel_update_lightweight.zip');
 
 try {
-  execSync(`powershell -Command "Compress-Archive -Path '${scratchDeploy}\\*' -DestinationPath '${zipDest}' -Force"`);
-  fs.copyFileSync(zipDest, parentZipDest);
+  execSync(`powershell -NoProfile -Command "$ProgressPreference = 'SilentlyContinue'; Compress-Archive -Path '${scratchDeploy}\\*' -DestinationPath '${zipDest}' -Force"`);
   fs.copyFileSync(zipDest, altZipDest);
-  fs.copyFileSync(zipDest, parentAltZipDest);
+  fs.copyFileSync(zipDest, lightweightZipDest);
   console.log('Successfully created:', zipDest);
   console.log('Successfully created:', altZipDest);
+  console.log('Successfully created:', lightweightZipDest);
+
+  try {
+    fs.copyFileSync(zipDest, parentZipDest);
+    fs.copyFileSync(zipDest, path.join(rootDir, '..', 'ab-energy-solutions-solar-crm-latest.zip'));
+  } catch (err) {
+    // Parent copy optional
+  }
 } catch (e) {
   console.error('Error creating zip:', e.message);
 }

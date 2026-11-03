@@ -1,0 +1,40 @@
+[
+  {
+    "id": "SUB-2026-026",
+    "project_id": "PROJECT-2026-026",
+    "project_number": "PROJECT-2026-026",
+    "customer_name": "Jaffer",
+    "customer_phone": "9080672291",
+    "customer_type": "residential",
+    "is_eligible": true,
+    "site_address": "ammaplayam,salem, salem",
+    "discom_name": "TANGEDCO",
+    "consumer_number": "Pending Consumer No",
+    "sanctioned_load_kw": 5,
+    "system_capacity_kw": 5,
+    "subsidy_applicable_amount": 78000,
+    "dcr_modules_used": true,
+    "panel_make_and_model": "Tata Power Solar / Waaree 545W Mono PERC (DCR)",
+    "inverter_make_and_model": "5kW On-Grid Solar Inverter",
+    "portal_application_no": "PMS-TN-2026-26026",
+    "application_submission_date": "2026-11-02",
+    "current_stage": 1,
+    "current_stage_name": "Portal Registration Submitted",
+    "stage_status": "in_progress",
+    "days_in_current_stage": 1,
+    "is_delayed": false,
+    "documents": {
+      "electricity_bill": true,
+      "aadhaar_card": true,
+      "cancelled_cheque": false,
+      "roof_photo_geotagged": true,
+      "dcr_certificate": true,
+      "tfr_letter": false,
+      "wcr_copy": false,
+      "net_meter_test_report": false,
+      "commissioning_cert": false
+    },
+    "notes": "Auto-generated on acceptance of Quotation QT-2026-00026-V1",
+    "last_updated": "2026-11-02"
+  }
+]

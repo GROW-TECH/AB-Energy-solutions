@@ -34,6 +34,7 @@ import { ProjectTasksView } from './components/projects/ProjectTasksView';
 import { MaterialsPlanningView } from './components/projects/MaterialsPlanningView';
 import { InvoicesView } from './components/finance/InvoicesView';
 import { PaymentsView } from './components/finance/PaymentsView';
+import { AdvancePaymentsView } from './components/finance/AdvancePaymentsView';
 import { ExpensesView } from './components/finance/ExpensesView';
 import { PurchaseOrdersView } from './components/inventory/PurchaseOrdersView';
 import { StockLevelsView } from './components/inventory/StockLevelsView';
@@ -90,7 +91,7 @@ const AppContent: React.FC = () => {
     return <CustomerGrnSignPortal token={publicSigningToken} />;
   }
 
-  const { isAuthenticated, isRestoringSession, activeRole, currentUser, employees } = useCrm();
+  const { isAuthenticated, isRestoringSession, activeRole, setActiveRole, currentUser, employees } = useCrm();
   const [activeNav, setActiveNav] = useState<NavItemKey>(() => {
     if (activeRole === 'Customer') return 'customer-portal';
     if (activeRole === 'Purchase Team') return 'purchase-orders';
@@ -272,7 +273,24 @@ const AppContent: React.FC = () => {
   const renderMainContent = () => {
     // 1. Customer Persona Panel
     if (activeRole === 'Customer' || activeNav === 'customer-portal') {
-      return <CustomerPanel onBackToAdmin={() => setActiveNav('customers')} />;
+      const handleBackFromCustomer = () => {
+        const targetRole = (currentUser && currentUser.role !== 'Customer') ? currentUser.role : 'Super Admin';
+        setActiveRole(targetRole);
+        setActiveNav('customers');
+      };
+
+      const handleExitToDashboard = () => {
+        const targetRole = (currentUser && currentUser.role !== 'Customer') ? currentUser.role : 'Super Admin';
+        setActiveRole(targetRole);
+        setActiveNav('dashboard');
+      };
+
+      return (
+        <CustomerPanel
+          onBackToAdmin={handleBackFromCustomer}
+          onBackToDashboard={handleExitToDashboard}
+        />
+      );
     }
 
     // 2. Universal Access Views (Accessible across roles when explicitly selected)
@@ -367,6 +385,16 @@ const AppContent: React.FC = () => {
         <SuperAdminPanel
           onOpenNewLead={() => setShowNewLeadModal(true)}
           onNavigateToTab={(tab) => setActiveNav(tab as NavItemKey)}
+        />
+      );
+    }
+
+    // Customer Advances & Advance Payments Panel (Sales & Accounts)
+    if (activeNav === 'customer-advances') {
+      return (
+        <AdvancePaymentsView
+          onNavigateToTab={(tab) => setActiveNav(tab as NavItemKey)}
+          onNavigateToProject={handleNavigateToProject}
         />
       );
     }

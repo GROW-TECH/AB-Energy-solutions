@@ -5,19 +5,34 @@ import {
   ArrowLeft, Check, Layers, ChevronRight, ChevronLeft, Rocket,
   ShoppingCart, FileText, CheckCheck, Users, MapPin, Eye, ExternalLink, PackageCheck, Zap,
   Truck, Package, X, ListTodo, CheckSquare, Timer, Flag, Activity, Sparkles, Building2,
-  Landmark, Lock
+  Landmark, Lock, Video, Camera, Play, CheckCircle
 } from 'lucide-react';
 import { useCrm } from '../../context/CrmContext';
 import { Project, ProjectStage, ProjectTask } from '../../types';
 import { NavItemKey } from '../layout/Sidebar';
 import { getApiUrl } from '../../utils/apiUrl';
+import { getProjectBomItems } from '../../utils/bomUtils';
 
 interface ProjectsViewProps {
   onNavigate: (tab: NavItemKey) => void;
 }
 
+export const mapTo4Step = (st: string = ''): ProjectStage => {
+  if (st === 'Completed' || st === 'Commissioning' || st === 'Installation Completed') return 'Completed';
+  if (st === 'Installation In Progress' || st === 'Testing') return 'Installation In Progress';
+  if (st === 'Installation Scheduled') return 'Installation Scheduled';
+  return 'Material Arrived';
+};
+
+export const stages: ProjectStage[] = [
+  'Material Arrived',
+  'Installation Scheduled',
+  'Installation In Progress',
+  'Completed',
+];
+
 export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
-  const { projects, updateProject, updateProjectStage, quotations, currentUser, updateProjectTask, addProjectTask, employees } = useCrm();
+  const { projects, updateProject, updateProjectStage, quotations, currentUser, updateProjectTask, addProjectTask, employees, recordPayment, payments } = useCrm();
   const acceptedQuotes = quotations.filter(q => q.status === 'Customer_Accepted');
   const [indentsMap, setIndentsMap] = useState<Record<string, any>>({});
 
@@ -31,7 +46,9 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
 
   // Executive Overview vs Dedicated Milestone Stage Workspace view
   const [projectDetailView, setProjectDetailView] = useState<'overview' | 'stage'>('overview');
-  const [selectedStageMilestone, setSelectedStageMilestone] = useState<ProjectStage>(selectedProject?.stage || 'Booking');
+  const [selectedStageMilestone, setSelectedStageMilestone] = useState<ProjectStage>(
+    selectedProject ? mapTo4Step(selectedProject.stage) : 'Material Arrived'
+  );
 
   const [showPmAddTaskModal, setShowPmAddTaskModal] = useState(false);
   const [pmNewTaskTitle, setPmNewTaskTitle] = useState('');
@@ -42,10 +59,16 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
   const [showReadinessModal, setShowReadinessModal] = useState(false);
   const [scheduledDate, setScheduledDate] = useState(new Date(Date.now() + 86400000 * 3).toISOString().split('T')[0]);
   const [shadowFreeConfirmed, setShadowFreeConfirmed] = useState(true);
-  const [civilIntegrityConfirmed, setCivilIntegrityConfirmed] = useState(true);
+  const [structuralIntegrityConfirmed, setStructuralIntegrityConfirmed] = useState(true);
   const [electricalClearanceConfirmed, setElectricalClearanceConfirmed] = useState(true);
-  const [readinessNotes, setReadinessNotes] = useState('Rooftop surveyed, civil anchors tested, and BESCOM tie-in clearance approved.');
+  const [readinessNotes, setReadinessNotes] = useState('Rooftop surveyed, mounting anchors tested, and BESCOM tie-in clearance approved.');
   const [isConfirmingReadiness, setIsConfirmingReadiness] = useState(false);
+
+  // Grid Live & 5-10 Yr AMC Activation Modal State
+  const [showGridLiveModal, setShowGridLiveModal] = useState(false);
+  const [amcYearsInput, setAmcYearsInput] = useState<number>(5);
+  const [meterReadingInput, setMeterReadingInput] = useState<string>('12.5');
+  const [installationTargetDaysInput, setInstallationTargetDaysInput] = useState<number>(3);
 
   // Dynamic Installation Crew Catalog: populated directly from CRM team directory / database
   // Automatically updates when new crew members are added in Team Management (no hardcoding)
@@ -266,7 +289,8 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
           scheduledInstallationDate: scheduledDate,
           siteReadinessNotes: readinessNotes,
           shadowFreeConfirmed,
-          civilIntegrityConfirmed,
+          structuralIntegrityConfirmed,
+          civilIntegrityConfirmed: structuralIntegrityConfirmed,
           electricalClearanceConfirmed,
         })
       });
@@ -290,12 +314,55 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
 
   const fetchCommandCentre = async (projectId: string) => {
     if (!projectId) return;
-    setIsLoadingCc(true);
     try {
       const res = await authFetch(`/api/installation/command-centre/${projectId}`);
       const data = await res.json();
       if (data.success && data.commandCentre) {
         setCommandCentre(data.commandCentre);
+        if (data.commandCentre.project) {
+          const cp = data.commandCentre.project;
+          const parsedChecklist = typeof cp.checklist === 'string'
+            ? (() => { try { return JSON.parse(cp.checklist); } catch { return {}; } })()
+            : (cp.checklist || {});
+
+          const resolvedTargetDate = parsedChecklist.targetCompletionDate || cp.target_completion_date || undefined;
+          const resolvedStartDate = parsedChecklist.startDate || cp.start_date || cp.scheduled_installation_date || undefined;
+          const resolvedDurationDays = Number(parsedChecklist.installationDurationDays) || Number(cp.installation_duration_days) || undefined;
+          const resolvedSiteSurveyVerified = Boolean(cp.site_survey_verified || parsedChecklist.siteSurveyVerified);
+          const resolvedMaterialArrived = Boolean(cp.material_arrived_on_site || parsedChecklist.materialArrivedOnSite);
+          const resolvedArrivedIds = parsedChecklist.arrivedMaterialIds || undefined;
+          const resolvedPhotos = typeof cp.post_install_photos === 'string'
+            ? (() => { try { return JSON.parse(cp.post_install_photos); } catch { return undefined; } })()
+            : (cp.post_install_photos || parsedChecklist.postInstallPhotos);
+          const resolvedVideo = cp.commissioning_video_url || parsedChecklist.commissioningVideoUrl;
+          const resolvedAttPhoto = cp.attendance_photo_url || parsedChecklist.attendancePhotoUrl;
+
+          setSelectedProject(prev => {
+            if (!prev || prev.id !== cp.id) return prev;
+            return {
+              ...prev,
+              stage: cp.stage || prev.stage,
+              startDate: resolvedStartDate || prev.startDate,
+              targetCompletionDate: resolvedTargetDate || prev.targetCompletionDate,
+              scheduled_installation_date: resolvedStartDate || (prev as any).scheduled_installation_date,
+              installationDurationDays: resolvedDurationDays || prev.installationDurationDays || 2,
+              checklist: parsedChecklist,
+              arrivedMaterialIds: resolvedArrivedIds || prev.arrivedMaterialIds || [],
+              materialArrivedOnSite: resolvedMaterialArrived ?? prev.materialArrivedOnSite,
+              materialArrivedConfirmedAt: cp.material_arrived_confirmed_at || parsedChecklist.materialArrivedConfirmedAt || prev.materialArrivedConfirmedAt,
+              materialArrivedConfirmedBy: cp.material_arrived_confirmed_by || parsedChecklist.materialArrivedConfirmedBy || prev.materialArrivedConfirmedBy,
+              siteSurveyVerified: resolvedSiteSurveyVerified ?? prev.siteSurveyVerified,
+              siteSurveyVerifiedAt: cp.site_survey_verified_at || parsedChecklist.siteSurveyVerifiedAt || prev.siteSurveyVerifiedAt,
+              siteSurveyVerifiedBy: cp.site_survey_verified_by || parsedChecklist.siteSurveyVerifiedBy || prev.siteSurveyVerifiedBy,
+              postInstallPhotos: resolvedPhotos !== undefined ? resolvedPhotos : prev.postInstallPhotos,
+              commissioningVideoUrl: resolvedVideo !== undefined ? resolvedVideo : prev.commissioningVideoUrl,
+              attendancePhotoUrl: resolvedAttPhoto || prev.attendancePhotoUrl,
+              pmClearanceStatus: cp.pm_clearance_status || prev.pmClearanceStatus,
+              pmClearedBy: cp.pm_cleared_by || prev.pmClearedBy,
+              pmClearedAt: cp.pm_cleared_at || prev.pmClearedAt,
+            };
+          });
+        }
       }
     } catch (e) {
       console.error(e);
@@ -307,19 +374,12 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
   useEffect(() => {
     if (activeViewMode === 'detail' && selectedProject?.id) {
       fetchCommandCentre(selectedProject.id);
+      const timer = setInterval(() => {
+        fetchCommandCentre(selectedProject.id);
+      }, 3000);
+      return () => clearInterval(timer);
     }
   }, [activeViewMode, selectedProject?.id]);
-
-  const stages: ProjectStage[] = [
-    'Booking',
-    'Documentation',
-    'Material Ready',
-    'Installation Scheduled',
-    'Installation In Progress',
-    'Installation Completed',
-    'Commissioning',
-    'Completed',
-  ];
 
   const filteredProjects = projects.filter(p => {
     const matchesSearch = 
@@ -401,7 +461,18 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
                     {selectedProject.capacityKw} kW System
                   </span>
                 </div>
-                <h2 className="text-xl font-black text-slate-900 tracking-tight">{selectedProject.customerName}</h2>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-xl font-black text-slate-900 tracking-tight">{selectedProject.customerName}</h2>
+                  {(selectedProject.lastModifiedRole === 'Super Admin' || selectedProject.lastModifiedRole === 'CEO') && (
+                    <span 
+                      title={`Edited by ${selectedProject.lastModifiedBy || selectedProject.lastModifiedRole}${selectedProject.lastModifiedAt ? ' at ' + new Date(selectedProject.lastModifiedAt).toLocaleDateString() : ''}`}
+                      className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-300 flex items-center gap-1 shadow-2xs"
+                    >
+                      <ShieldCheck className="w-3 h-3 text-purple-600" />
+                      Edited by {selectedProject.lastModifiedRole === 'CEO' ? 'CEO' : 'Super Admin'} ({selectedProject.lastModifiedBy || 'Admin'})
+                    </span>
+                  )}
+                </div>
                 <p className="text-slate-500 text-xs mt-0.5">{selectedProject.customerAddress} • {selectedProject.customerPhone}</p>
               </div>
 
@@ -416,7 +487,7 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
               </div>
             </div>
 
-            {/* PM Surya Ghar Government Subsidy Quick Badge */}
+            {/* Government Subsidy Quick Badge */}
             <div className="bg-gradient-to-r from-emerald-950 via-slate-900 to-navy-950 rounded-xl p-3.5 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm border border-emerald-800/40">
               <div className="flex items-center gap-3">
                 <span className="p-2 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
@@ -424,13 +495,13 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
                 </span>
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-white">Govt. Subsidy: PM Surya Ghar Muft Bijli Yojana</span>
+                    <span className="text-xs font-bold text-white">Govt. Subsidy Support: Central DBT Scheme</span>
                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-semibold border border-emerald-500/40">
                       ₹78,000 CFA Eligible (DCR Modules)
                     </span>
                   </div>
                   <p className="text-[11px] text-slate-300 mt-0.5">
-                    National Portal App: <span className="font-mono text-emerald-300 font-semibold">PMS-TN-2026-98124</span> &bull; TANGEDCO Net Metering & Inspection
+                    National Portal Application: <span className="font-mono text-emerald-300 font-semibold">DBT-TN-2026-98124</span> &bull; TANGEDCO Net Metering &amp; Inspection
                   </p>
                 </div>
               </div>
@@ -445,24 +516,38 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
             </div>
 
             {/* ========================================================= */}
-            {/* 8-MILESTONE INTERACTIVE STEPPER NAVIGATION TRACK          */}
+            {/* 4-STAGE INTERACTIVE STEPPER (COORDINATED LIFECYCLE)       */}
             {/* ========================================================= */}
             <div className="space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-1">
                 <span className="text-xs font-bold text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
                   <Activity className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                  <span>EPC Project Milestones</span>
+                  <span>EPC Project Milestones (PM &amp; Installation Team Coordinated)</span>
                 </span>
-                <span className="text-[11px] text-slate-400 font-medium">8 Key Lifecycle Stages</span>
+                <span className="text-[11px] text-slate-400 font-medium">4 Key Lifecycle Stages</span>
               </div>
 
-              <div className="flex overflow-x-auto sm:grid sm:grid-cols-4 lg:grid-cols-8 gap-2 pb-1">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 pb-1">
                 {stages.map((st, idx) => {
-                  const currentIdx = stages.indexOf(selectedProject.stage);
+                  const currentMapped = mapTo4Step(selectedProject.stage);
+                  const currentIdx = stages.indexOf(currentMapped);
                   const isDone = idx < currentIdx;
                   const isCurrent = idx === currentIdx;
-                  const isBlocked = isCurrent && st === 'Installation Scheduled' && !Boolean((selectedProject as any).site_readiness_confirmed || commandCentre?.project?.site_readiness_confirmed);
                   const isSelectedInView = projectDetailView === 'stage' && selectedStageMilestone === st;
+
+                  const stepLabels = [
+                    'Step 1: Material Arrival',
+                    'Step 2: Schedule & Survey',
+                    'Step 3: Crew Attendance',
+                    'Step 4: Media, Warranty & Handover'
+                  ];
+
+                  const stepDescriptions = [
+                    selectedProject.materialArrivedOnSite ? 'On site verified ✓' : 'Awaiting receipt',
+                    selectedProject.siteSurveyVerified ? 'Survey & clearness verified ✓' : 'Schedule & audit',
+                    'Daily check-in & execution',
+                    selectedProject.stage === 'Completed' ? 'Handover completed ✓' : '4 photos, video & AMC'
+                  ];
 
                   return (
                     <button
@@ -471,7 +556,7 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
                         setSelectedStageMilestone(st);
                         setProjectDetailView('stage');
                       }}
-                      className={`min-w-[130px] sm:min-w-0 flex-shrink-0 sm:flex-shrink p-2.5 rounded-xl border text-left transition-all cursor-pointer relative ${
+                      className={`p-3 rounded-xl border text-left transition-all cursor-pointer relative ${
                         isSelectedInView 
                           ? 'ring-2 ring-emerald-600 bg-emerald-50/80 border-emerald-400 shadow-xs' 
                           : isCurrent 
@@ -482,23 +567,21 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
                       }`}
                     >
                       <div className="flex items-center justify-between text-[10px] mb-1 opacity-90">
-                        <span className="font-bold">Step {idx + 1}</span>
+                        <span className="font-bold">{stepLabels[idx]}</span>
                         {isDone ? (
-                          <span className="w-3.5 h-3.5 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[9px]">✓</span>
-                        ) : isBlocked ? (
-                          <AlertTriangle className="w-3.5 h-3.5 text-amber-600 animate-pulse" />
+                          <span className="w-4 h-4 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[9px] font-bold">✓</span>
                         ) : isCurrent ? (
                           <span className="w-2 h-2 rounded-full bg-emerald-600 animate-ping" />
                         ) : (
                           <span className="text-slate-300">○</span>
                         )}
                       </div>
-                      <div className={`text-[11px] truncate ${isSelectedInView ? 'font-black text-emerald-900' : isCurrent ? 'font-bold text-emerald-950' : isDone ? 'font-semibold text-slate-800' : 'text-slate-500'}`}>
+                      <div className={`text-xs truncate ${isSelectedInView ? 'font-black text-emerald-900' : isCurrent ? 'font-bold text-emerald-950' : isDone ? 'font-semibold text-slate-800' : 'text-slate-500'}`}>
                         {st}
                       </div>
-                      {isBlocked && (
-                        <span className="text-[9px] text-amber-700 font-bold block mt-0.5">PM Hold</span>
-                      )}
+                      <div className="text-[10px] text-slate-500 truncate mt-0.5">
+                        {stepDescriptions[idx]}
+                      </div>
                     </button>
                   );
                 })}
@@ -512,10 +595,11 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
               <div className="space-y-6 animate-in fade-in">
                 {/* 1. Schedule & Handover Countdown Ribbon */}
                 {(() => {
-                  const startDateStr = selectedProject.startDate || '2026-10-15';
-                  const schedDateStr = (selectedProject as any).scheduled_installation_date || '2026-10-29';
-                  const endDateStr = selectedProject.targetCompletionDate || '2026-11-20';
-                  const currentIdx = stages.indexOf(selectedProject.stage);
+                  const startDateStr = selectedProject.startDate || '2026-11-02';
+                  const schedDateStr = (selectedProject as any).scheduled_installation_date || selectedProject.startDate || '2026-11-02';
+                  const endDateStr = selectedProject.targetCompletionDate || '2026-11-06';
+                  const currentMapped = mapTo4Step(selectedProject.stage);
+                  const currentIdx = stages.indexOf(currentMapped);
                   const progressPct = Math.round(((currentIdx >= 0 ? currentIdx + 1 : 1) / stages.length) * 100);
 
                   let daysRemaining: number | null = null;
@@ -582,7 +666,9 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
                             <span>Target Commissioning / End</span>
                           </div>
                           <div className="font-mono font-bold text-cyan-300 text-sm">{endDateStr}</div>
-                          <div className="text-[11px] text-slate-400 mt-0.5">DISCOM Meter &amp; Handover</div>
+                          <div className="text-[11px] text-slate-400 mt-0.5">
+                            {selectedProject.installationDurationDays ? `${selectedProject.installationDurationDays} Days Duration Target` : 'Target Handover'}
+                          </div>
                         </div>
                       </div>
 
@@ -596,7 +682,7 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
                         </div>
                         <div className="flex justify-between text-[10px] text-slate-400 mt-1 font-mono">
                           <span>Start: {startDateStr}</span>
-                          <span className="font-semibold text-emerald-400">Current: {selectedProject.stage}</span>
+                          <span className="font-semibold text-emerald-400">Current: {currentMapped}</span>
                           <span>Target End: {endDateStr}</span>
                         </div>
                       </div>
@@ -605,36 +691,89 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
                 })()}
 
                 {/* 2. Current Milestone Spotlight Card */}
-                <div className="p-5 bg-gradient-to-r from-emerald-50 via-teal-50 to-white border border-emerald-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="px-2 py-0.5 bg-emerald-600 text-white rounded text-[10px] font-bold">
-                        {selectedProject.stage === 'Completed' ? 'EPC LIFECYCLE COMPLETED' : 'CURRENT ACTIVE MILESTONE'}
-                      </span>
-                      <span className="font-bold text-slate-900 text-sm">
-                        {selectedProject.stage === 'Completed' 
-                          ? 'Project Successfully Commissioned & Closed ✓' 
-                          : `Step ${stages.indexOf(selectedProject.stage) + 1}: ${selectedProject.stage}`}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-600 max-w-xl">
-                      {selectedProject.stage === 'Completed'
-                        ? 'All 8 EPC milestones (Site Survey, Booking, Engineering BOM, Approvals, Material Dispatch, Rooftop Installation, Net Meter Testing, and Customer Handover) are 100% completed and finalized.'
-                        : `This project is actively in ${selectedProject.stage}. Work items and documents for this phase are tracked in its dedicated workspace.`}
-                    </p>
-                  </div>
+                {(() => {
+                  const currentMapped = mapTo4Step(selectedProject.stage);
+                  const currentIdx = stages.indexOf(currentMapped);
+                  const bomItemsList = getProjectBomItems(commandCentre?.bomItems, selectedProject?.capacityKw || 5);
+                  const arrivedMaterialIds: string[] = selectedProject?.arrivedMaterialIds || 
+                    (selectedProject?.checklist as any)?.arrivedMaterialIds || [];
+                  const arrivedCount = bomItemsList.filter((it: any) => arrivedMaterialIds.includes(it.id) || arrivedMaterialIds.includes(it.itemName)).length;
+                  const allArrived = (arrivedCount === bomItemsList.length && bomItemsList.length > 0) || selectedProject.materialArrivedOnSite;
 
-                  <button
-                    onClick={() => {
-                      setSelectedStageMilestone(selectedProject.stage);
-                      setProjectDetailView('stage');
-                    }}
-                    className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl text-xs shadow-xs transition-all flex items-center gap-2 shrink-0 cursor-pointer self-start sm:self-auto"
-                  >
-                    <span>{selectedProject.stage === 'Completed' ? 'View Final Handover & Warranty' : `Open ${selectedProject.stage} Workspace`}</span>
-                    <ArrowRight className="w-4 h-4" />
-                  </button>
-                </div>
+                  return (
+                    <div className="p-5 bg-gradient-to-r from-emerald-50 via-teal-50 to-white border border-emerald-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="px-2 py-0.5 bg-emerald-600 text-white rounded text-[10px] font-bold">
+                            {currentMapped === 'Completed' ? 'EPC LIFECYCLE COMPLETED' : 'CURRENT ACTIVE MILESTONE'}
+                          </span>
+                          <span className="font-bold text-slate-900 text-sm">
+                            {currentMapped === 'Completed' 
+                              ? 'Project Successfully Commissioned & Closed ✓' 
+                              : `Step ${currentIdx + 1}: ${currentMapped}`}
+                          </span>
+                          {currentMapped === 'Material Arrived' && (
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              allArrived ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-amber-100 text-amber-800 border border-amber-300'
+                            }`}>
+                              {allArrived ? 'All Materials Verified on Site ✓' : `${arrivedCount}/${bomItemsList.length} Materials Received`}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-600 max-w-xl">
+                          {currentMapped === 'Completed'
+                            ? 'All 4 EPC lifecycle milestones (Material Arrival, Schedule & Survey, Crew Attendance, and Handover with Warranty) are completed and closed.'
+                            : currentMapped === 'Material Arrived'
+                            ? allArrived 
+                              ? 'All materials verified at checklist by Installation Crew. Ready to confirm schedule and site survey clearness.'
+                              : 'Materials dispatched to site. Field installation crew is inspecting crates and striking out the BOM checklist.'
+                            : `This project is actively in ${currentMapped}. Work items and documents for this phase are tracked in its dedicated workspace.`}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
+                        {currentMapped === 'Material Arrived' && allArrived && (
+                          <button
+                            onClick={async () => {
+                              const now = new Date().toISOString();
+                              const pmName = currentUser?.name || 'Project Manager';
+                              await updateProject(selectedProject.id, {
+                                stage: 'Installation Scheduled',
+                                materialArrivedOnSite: true,
+                                materialArrivedConfirmedAt: now,
+                                materialArrivedConfirmedBy: pmName,
+                              });
+                              setSelectedProject(prev => prev ? ({
+                                ...prev,
+                                stage: 'Installation Scheduled',
+                                materialArrivedOnSite: true,
+                                materialArrivedConfirmedAt: now,
+                                materialArrivedConfirmedBy: pmName,
+                              }) : null);
+                              setSelectedStageMilestone('Installation Scheduled');
+                              setProjectDetailView('stage');
+                            }}
+                            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl text-xs shadow-md transition-all flex items-center gap-2 cursor-pointer"
+                          >
+                            <span>Move to Next Stage (Step 2)</span>
+                            <ArrowRight className="w-4 h-4" />
+                          </button>
+                        )}
+
+                        <button
+                          onClick={() => {
+                            setSelectedStageMilestone(currentMapped);
+                            setProjectDetailView('stage');
+                          }}
+                          className="px-3.5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <span>{currentMapped === 'Completed' ? 'View Final Handover & Warranty' : `Open ${currentMapped} Workspace`}</span>
+                          <ArrowRight className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* 3. Priority Alerts & Blockers Box */}
                 {(() => {
@@ -674,7 +813,7 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
                                 ? 'Installation, electrical tie-in, and net metering are fully completed and commissioned.' 
                                 : isSiteReady 
                                 ? `Confirmed by PM ${selectedProject.projectManagerName}. Installation crew is authorized for site execution.` 
-                                : 'Physical site work is on hold until PM confirms shadow-free clearance, roof civil anchor points, and electrical tie-in.'}
+                                : 'Physical site work is on hold until PM confirms shadow-free clearance, roof structural anchor points, and electrical tie-in.'}
                             </p>
                             {!isSiteReady && !isProjectDone && (currentUser?.role === 'Project Manager' || currentUser?.role === 'Super Admin') && (
                               <button
@@ -710,6 +849,185 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
                             </p>
                           </div>
                         </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* 3.5. On-Site BOM Material Receipt Checklist Card (Real-Time Installation Crew Sync) */}
+                {(() => {
+                  const bomItemsList = getProjectBomItems(commandCentre?.bomItems, selectedProject?.capacityKw || 5);
+                  const arrivedMaterialIds: string[] = selectedProject?.arrivedMaterialIds || 
+                    (selectedProject?.checklist as any)?.arrivedMaterialIds || [];
+                  const arrivedCount = bomItemsList.filter((it: any) => arrivedMaterialIds.includes(it.id) || arrivedMaterialIds.includes(it.itemName)).length;
+                  const allArrived = (arrivedCount === bomItemsList.length && bomItemsList.length > 0) || selectedProject.materialArrivedOnSite;
+
+                  return (
+                    <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4 shadow-2xs">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="p-1.5 bg-emerald-50 text-emerald-700 rounded-lg">
+                              <Layers className="w-4 h-4" />
+                            </span>
+                            <h4 className="font-extrabold text-slate-900 text-sm">
+                              On-Site BOM Material Receipt Checklist (Installation Crew Live Sync)
+                            </h4>
+                          </div>
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+                            Real-time view of materials verified and striked out on site by the installation crew
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <span className={`px-2.5 py-1 rounded-lg text-xs font-bold border ${
+                            allArrived 
+                              ? 'bg-emerald-50 text-emerald-800 border-emerald-300' 
+                              : 'bg-amber-50 text-amber-800 border-amber-200'
+                          }`}>
+                            {allArrived 
+                              ? 'All 14 Materials Received on Site ✓' 
+                              : `${arrivedCount} of ${bomItemsList.length} Materials Received`}
+                          </span>
+
+                          {allArrived && mapTo4Step(selectedProject.stage) === 'Material Arrived' && (
+                            <button
+                              onClick={async () => {
+                                const now = new Date().toISOString();
+                                const pmName = currentUser?.name || 'Project Manager';
+                                await updateProject(selectedProject.id, {
+                                  stage: 'Installation Scheduled',
+                                  materialArrivedOnSite: true,
+                                  materialArrivedConfirmedAt: now,
+                                  materialArrivedConfirmedBy: pmName,
+                                });
+                                setSelectedProject(prev => prev ? ({
+                                  ...prev,
+                                  stage: 'Installation Scheduled',
+                                  materialArrivedOnSite: true,
+                                  materialArrivedConfirmedAt: now,
+                                  materialArrivedConfirmedBy: pmName,
+                                }) : null);
+                                setSelectedStageMilestone('Installation Scheduled');
+                                setProjectDetailView('stage');
+                              }}
+                              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-lg text-xs shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <span>Move to Step 2 &rarr;</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Info Alert Banner */}
+                      {allArrived ? (
+                        <div className="p-3.5 bg-emerald-50/90 border border-emerald-300 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-emerald-950">
+                          <div className="flex items-center gap-2.5">
+                            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                            <div>
+                              <strong className="font-bold">All materials verified at checklist by Installation Crew!</strong>
+                              <p className="text-[11px] text-emerald-800 mt-0.5">
+                                Physical rooftop crates unboxed and inspected by {selectedProject.materialArrivedConfirmedBy || 'Installation Lead'}. Cleared to proceed to Step 2 (Schedule &amp; Survey Clearness).
+                              </p>
+                            </div>
+                          </div>
+                          <button
+                            onClick={async () => {
+                              const now = new Date().toISOString();
+                              const pmName = currentUser?.name || 'Project Manager';
+                              await updateProject(selectedProject.id, {
+                                stage: 'Installation Scheduled',
+                                materialArrivedOnSite: true,
+                                materialArrivedConfirmedAt: now,
+                                materialArrivedConfirmedBy: pmName,
+                              });
+                              setSelectedProject(prev => prev ? ({
+                                ...prev,
+                                stage: 'Installation Scheduled',
+                                materialArrivedOnSite: true,
+                                materialArrivedConfirmedAt: now,
+                                materialArrivedConfirmedBy: pmName,
+                              }) : null);
+                              setSelectedStageMilestone('Installation Scheduled');
+                              setProjectDetailView('stage');
+                            }}
+                            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs shadow-xs flex items-center gap-1.5 shrink-0 cursor-pointer"
+                          >
+                            <span>Move to Next Stage (Step 2) &rarr;</span>
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 flex items-center gap-2">
+                          <Truck className="w-4 h-4 text-amber-600 shrink-0" />
+                          <span>Awaiting Installation Crew to unbox delivery and tick each item on site ({arrivedCount}/{bomItemsList.length} verified).</span>
+                        </div>
+                      )}
+
+                      {/* Checklist Table (Read-only for PM) */}
+                      <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                        <table className="w-full text-left text-xs divide-y divide-slate-200">
+                          <thead>
+                            <tr className="bg-slate-900 text-white font-bold text-[10px] uppercase">
+                              <th className="py-2.5 px-3 w-12 text-center">Status</th>
+                              <th className="py-2.5 px-3 w-10 text-center">#</th>
+                              <th className="py-2.5 px-3">Category</th>
+                              <th className="py-2.5 px-3">Equipment / Component Description</th>
+                              <th className="py-2.5 px-3">Specification</th>
+                              <th className="py-2.5 px-3 text-center">Unit</th>
+                              <th className="py-2.5 px-3 text-center">Qty</th>
+                              <th className="py-2.5 px-3 text-center">Receipt Status</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 font-medium bg-white">
+                            {bomItemsList.map((item: any, idx: number) => {
+                              const isArrived = arrivedMaterialIds.includes(item.id) || arrivedMaterialIds.includes(item.itemName);
+                              return (
+                                <tr 
+                                  key={item.id || idx} 
+                                  className={`transition-colors ${isArrived ? 'bg-emerald-50/50' : 'hover:bg-slate-50/60'}`}
+                                >
+                                  <td className="py-2.5 px-3 text-center">
+                                    {isArrived ? (
+                                      <span className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[10px] font-bold mx-auto">
+                                        ✓
+                                      </span>
+                                    ) : (
+                                      <span className="w-4 h-4 rounded-full border-2 border-slate-300 inline-block align-middle" />
+                                    )}
+                                  </td>
+                                  <td className="py-2.5 px-3 text-center text-slate-400 font-mono text-[11px]">{idx + 1}</td>
+                                  <td className={`py-2.5 px-3 font-semibold ${isArrived ? 'line-through text-slate-400 opacity-60' : 'text-slate-900'}`}>
+                                    {item.category}
+                                  </td>
+                                  <td className={`py-2.5 px-3 font-bold ${isArrived ? 'line-through text-slate-400 opacity-60' : 'text-slate-800'}`}>
+                                    {item.itemName}
+                                  </td>
+                                  <td className={`py-2.5 px-3 font-mono text-[10px] ${isArrived ? 'line-through text-slate-400 opacity-60' : 'text-slate-600'}`}>
+                                    {item.technicalSpecification || '-'}
+                                  </td>
+                                  <td className={`py-2.5 px-3 text-center font-semibold ${isArrived ? 'line-through text-slate-400 opacity-60' : 'text-slate-700'}`}>
+                                    {item.unit || 'Nos'}
+                                  </td>
+                                  <td className={`py-2.5 px-3 text-center font-mono font-bold ${isArrived ? 'line-through text-slate-400 opacity-60' : 'text-slate-900'}`}>
+                                    {item.quantity}
+                                  </td>
+                                  <td className="py-2.5 px-3 text-center">
+                                    {isArrived ? (
+                                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 inline-flex items-center gap-1">
+                                        <Check className="w-3 h-3 text-emerald-600" />
+                                        <span>Received on Site ✓</span>
+                                      </span>
+                                    ) : (
+                                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                                        Awaiting Crew Unbox
+                                      </span>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
                       </div>
                     </div>
                   );
@@ -777,24 +1095,24 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-black text-slate-900">
-                          Step {stages.indexOf(selectedStageMilestone) + 1} of 8: {selectedStageMilestone} Workspace
+                          Step {stages.indexOf(selectedStageMilestone) + 1} of 4: {selectedStageMilestone} Workspace
                         </span>
                         <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                          stages.indexOf(selectedStageMilestone) < stages.indexOf(selectedProject.stage) 
+                          stages.indexOf(selectedStageMilestone) < stages.indexOf(mapTo4Step(selectedProject.stage)) 
                             ? 'bg-emerald-100 text-emerald-800' 
-                            : selectedStageMilestone === selectedProject.stage 
+                            : selectedStageMilestone === mapTo4Step(selectedProject.stage) 
                             ? 'bg-emerald-600 text-white' 
                             : 'bg-slate-200 text-slate-700'
                         }`}>
-                          {stages.indexOf(selectedStageMilestone) < stages.indexOf(selectedProject.stage) 
+                          {stages.indexOf(selectedStageMilestone) < stages.indexOf(mapTo4Step(selectedProject.stage)) 
                             ? 'Completed ✓' 
-                            : selectedStageMilestone === selectedProject.stage 
+                            : selectedStageMilestone === mapTo4Step(selectedProject.stage) 
                             ? 'Currently Active' 
                             : 'Upcoming'}
                         </span>
                       </div>
                       <p className="text-[11px] text-slate-500">
-                        Dedicated view showing documents, team checklist, and actions for this milestone.
+                        Coordinated workflow between Project Manager and Installation Field Crew.
                       </p>
                     </div>
                   </div>
@@ -832,7 +1150,7 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
                         <Lock className="w-3.5 h-3.5 text-slate-400" />
                         <span>Project Completed (Locked)</span>
                       </span>
-                    ) : selectedStageMilestone !== selectedProject.stage ? (
+                    ) : selectedStageMilestone !== mapTo4Step(selectedProject.stage) ? (
                       <button
                         onClick={() => {
                           updateProjectStage(selectedProject.id, selectedStageMilestone);
@@ -847,1021 +1165,910 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
                 </div>
 
                 {/* ------------------------------------------------------------- */}
-                {/* 1. STAGE: BOOKING                                             */}
+                {/* 1. STAGE: MATERIAL ARRIVED ON SITE                            */}
                 {/* ------------------------------------------------------------- */}
-                {selectedStageMilestone === 'Booking' && (
+                {selectedStageMilestone === 'Material Arrived' && (
                   <div className="space-y-4">
-                    <div className="p-5 bg-white border border-slate-200 rounded-2xl space-y-4">
-                      <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                        <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                          <span>Milestone 1: Project Booking &amp; Client Agreement</span>
-                        </h3>
-                        <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800">
-                          Booking Confirmed
-                        </span>
-                      </div>
+                    {/* Material Arrival On-Site Status Card */}
+                    <div className={`p-5 rounded-2xl border transition-all ${
+                      selectedProject.materialArrivedOnSite
+                        ? 'bg-emerald-50/80 border-emerald-300 text-emerald-950'
+                        : 'bg-amber-50/80 border-amber-300 text-amber-950'
+                    }`}>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div className="flex items-start gap-3.5">
+                          {selectedProject.materialArrivedOnSite ? (
+                            <PackageCheck className="w-6 h-6 text-emerald-600 shrink-0 mt-0.5" />
+                          ) : (
+                            <Truck className="w-6 h-6 text-amber-600 shrink-0 mt-0.5 animate-pulse" />
+                          )}
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h3 className="font-black text-sm sm:text-base">
+                                {selectedProject.materialArrivedOnSite
+                                  ? 'Materials Confirmed Arrived on Site'
+                                  : 'Material Sourcing & Delivery to Site in Progress'}
+                              </h3>
+                              <span className={`px-2.5 py-0.5 rounded text-[10px] font-bold ${
+                                selectedProject.materialArrivedOnSite
+                                  ? 'bg-emerald-200 text-emerald-900 border border-emerald-300'
+                                  : 'bg-amber-200 text-amber-900 border border-amber-300'
+                              }`}>
+                                {selectedProject.materialArrivedOnSite ? 'Materials On Site ✓' : 'Awaiting Arrival'}
+                              </span>
+                            </div>
+                            <p className="text-xs mt-1 leading-relaxed">
+                              {selectedProject.materialArrivedOnSite ? (
+                                <span>
+                                  Installation Team confirmed all purchased BOM items arrived intact at customer rooftop on{' '}
+                                  <strong className="font-mono text-emerald-900">
+                                    {selectedProject.materialArrivedConfirmedAt ? new Date(selectedProject.materialArrivedConfirmedAt).toLocaleString() : 'Recently'}
+                                  </strong>{' '}
+                                  (Verified by {selectedProject.materialArrivedConfirmedBy || 'Installation Lead'}).
+                                </span>
+                              ) : (
+                                <span>
+                                  Purchase team has dispatched components. When the delivery arrives at the customer site, the on-site installation crew inspects the BOM and confirms arrival. Project Manager is notified immediately upon receipt.
+                                </span>
+                              )}
+                            </p>
+                          </div>
+                        </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase">Quotation Code</span>
-                          <span className="font-mono font-bold text-slate-900 block mt-0.5">{selectedProject.quotationId || 'QT-2026-00021-V1'}</span>
-                        </div>
-                        <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase">Commercial Value</span>
-                          <span className="font-mono font-bold text-emerald-700 block mt-0.5">₹{Number(selectedProject.totalAmount || 0).toLocaleString('en-IN')}</span>
-                        </div>
-                        <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase">Payment Milestone</span>
-                          <span className="font-semibold text-slate-800 block mt-0.5">90% Advance Paid</span>
-                        </div>
-                      </div>
-
-                      <p className="text-xs text-slate-600 leading-relaxed">
-                        Client token received. System sizing confirmed for {selectedProject.capacityKw} kWp. Project order transferred from Sales pipeline into active EPC execution workflow.
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {/* ------------------------------------------------------------- */}
-                {/* 2. STAGE: DOCUMENTATION                                       */}
-                {/* ------------------------------------------------------------- */}
-                {selectedStageMilestone === 'Documentation' && (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {/* Survey Feasibility Card */}
-                      <div className="p-5 bg-white border border-slate-200 rounded-2xl space-y-3">
-                        <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-                          <span className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
-                            <FolderKanban className="w-4 h-4 text-teal-600" />
-                            <span>Technical Site Survey Feasibility</span>
-                          </span>
-                          <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded text-[10px] font-bold">
-                            {commandCentre?.survey?.status || 'Survey Verified'}
-                          </span>
-                        </div>
-                        <div className="space-y-2 text-xs">
-                          <div className="flex justify-between">
-                            <span className="text-slate-500">Plant Capacity Calculated:</span>
-                            <span className="font-bold text-slate-900 font-mono">{commandCentre?.survey?.recommended_capacity_kw || selectedProject.capacityKw} kWp</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-slate-500">Shadow-Free Rooftop Area:</span>
-                            <span className="font-semibold text-slate-800 font-mono">{commandCentre?.survey?.shadow_free_area || '2,400'} sq.ft</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-slate-500">Feasibility Verdict:</span>
-                            <span className="font-bold text-teal-700">{commandCentre?.survey?.feasibility_verdict || 'Feasible (Full Solar Potential)'}</span>
-                          </div>
-                          <div className="flex justify-between pt-1 border-t border-slate-100 text-[11px]">
-                            <span className="text-slate-400">Assigned Field Engineer:</span>
-                            <span className="font-semibold text-slate-700">{commandCentre?.survey?.engineer_name || 'Lead Survey Engineer'}</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Customer KYC & DISCOM Liaison Card */}
-                      <div className="p-5 bg-white border border-slate-200 rounded-2xl space-y-3">
-                        <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-                          <span className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
-                            <ShieldCheck className="w-4 h-4 text-indigo-600" />
-                            <span>Customer Identity &amp; Net-Metering Docs</span>
-                          </span>
-                          <span className="px-2 py-0.5 bg-indigo-50 text-indigo-800 border border-indigo-200 rounded text-[10px] font-bold">
-                            Encrypted Storage
-                          </span>
-                        </div>
-                        <div className="space-y-2 text-xs">
-                          <div className="flex justify-between">
-                            <span className="text-slate-500">Proof Document:</span>
-                            <span className="font-bold text-slate-900">{commandCentre?.customerDoc?.document_type || 'Aadhaar Card'}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-slate-500">ID Number Masked:</span>
-                            <span className="font-mono font-semibold text-slate-800">{commandCentre?.customerDoc?.id_number_masked || 'XXXX-XXXX-4589'}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-slate-500">DISCOM Net-Meter Status:</span>
-                            <span className="font-bold text-emerald-700">Sanction Approved</span>
-                          </div>
-                          <div className="flex justify-between pt-1 border-t border-slate-100 text-[11px]">
-                            <span className="text-slate-400">Access Restricted:</span>
-                            <span className="text-slate-600 font-semibold">Super Admin &amp; Project Manager</span>
-                          </div>
-                        </div>
+                        {!selectedProject.materialArrivedOnSite && (
+                          <button
+                            onClick={async () => {
+                              const now = new Date().toISOString();
+                              const pmName = currentUser?.name || 'Project Manager';
+                              await updateProject(selectedProject.id, {
+                                materialArrivedOnSite: true,
+                                materialArrivedConfirmedAt: now,
+                                materialArrivedConfirmedBy: pmName,
+                                stage: 'Installation Scheduled'
+                              });
+                              setSelectedProject({
+                                ...selectedProject,
+                                materialArrivedOnSite: true,
+                                materialArrivedConfirmedAt: now,
+                                materialArrivedConfirmedBy: pmName,
+                                stage: 'Installation Scheduled'
+                              });
+                              setSelectedStageMilestone('Installation Scheduled');
+                            }}
+                            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl text-xs shadow-md transition-all flex items-center gap-1.5 shrink-0 cursor-pointer"
+                          >
+                            <PackageCheck className="w-4 h-4" />
+                            <span>Confirm Material Arrived on Site ✓</span>
+                          </button>
+                        )}
                       </div>
                     </div>
-                  </div>
-                )}
 
-                {/* ------------------------------------------------------------- */}
-                {/* 3. STAGE: MATERIAL READY                                      */}
-                {/* ------------------------------------------------------------- */}
-                {selectedStageMilestone === 'Material Ready' && (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {/* BOM Table Card */}
-                      <div className="p-5 bg-white border border-slate-200 rounded-2xl space-y-3">
-                        <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-                          <span className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
-                            <FileText className="w-4 h-4 text-emerald-600" />
-                            <span>Engineering Bill of Materials (BOM)</span>
-                          </span>
-                          <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded text-[10px] font-bold">
-                            {commandCentre?.bom?.status || 'BOM Approved'}
-                          </span>
-                        </div>
+                    {/* Commercial & Contract Value Details */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="p-3.5 bg-white border border-slate-200 rounded-xl space-y-1">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Linked Quotation</span>
+                        <div className="font-mono font-bold text-slate-900">{selectedProject.quotationId || 'QT-2026-00026-V1'}</div>
+                        <div className="text-[11px] text-slate-500">{selectedProject.capacityKw} kW System</div>
+                      </div>
+                      <div className="p-3.5 bg-white border border-slate-200 rounded-xl space-y-1">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Contract Value</span>
+                        <div className="font-mono font-bold text-emerald-700">₹{Number(selectedProject.totalAmount || 0).toLocaleString('en-IN')}</div>
+                        <div className="text-[11px] text-emerald-600 font-semibold">13.8% Composite GST Inclusive</div>
+                      </div>
+                      <div className="p-3.5 bg-white border border-slate-200 rounded-xl space-y-1">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Payment Milestone</span>
+                        <div className="font-bold text-slate-900">90% Advance Paid</div>
+                        <div className="text-[11px] text-slate-500">Balance 10% on Commissioning</div>
+                      </div>
+                    </div>
 
-                        <div className="space-y-2 text-xs">
-                          <div className="flex justify-between">
-                            <span className="text-slate-500">Indented Line Items:</span>
-                            <span className="font-bold text-slate-900">{commandCentre?.bomItems?.length || 5} Items</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-slate-500">Estimated BOM Cost:</span>
-                            <span className="font-bold text-emerald-700 font-mono">
-                              ₹{Number(commandCentre?.bom?.total_estimated_cost || selectedProject.totalAmount * 0.7).toLocaleString('en-IN')}
+                    {/* Dispatched Equipment Bill of Materials Table (Synced with Field Crew) */}
+                    {(() => {
+                      const bomItemsList = getProjectBomItems(commandCentre?.bomItems, selectedProject?.capacityKw || 5);
+                      const arrivedMaterialIds: string[] = selectedProject?.arrivedMaterialIds || 
+                        (selectedProject?.checklist as any)?.arrivedMaterialIds || [];
+                      const arrivedCount = bomItemsList.filter((it: any) => arrivedMaterialIds.includes(it.id) || arrivedMaterialIds.includes(it.itemName)).length;
+                      const allArrived = (arrivedCount === bomItemsList.length && bomItemsList.length > 0) || selectedProject.materialArrivedOnSite;
+
+                      return (
+                        <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                            <div>
+                              <h4 className="font-extrabold text-slate-900 text-sm flex items-center gap-2">
+                                <Layers className="w-4 h-4 text-emerald-600" />
+                                <span>Dispatched Equipment &amp; Bill of Materials (BOM)</span>
+                              </h4>
+                              <p className="text-[11px] text-slate-500">
+                                Real-time on-site arrival checklist verified and striked out by the field installation crew
+                              </p>
+                            </div>
+                            <span className={`px-2.5 py-1 rounded-lg text-xs font-bold border ${
+                              allArrived
+                                ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                                : 'bg-slate-50 text-slate-700 border-slate-200'
+                            }`}>
+                              {allArrived
+                                ? 'All Materials Received ✓'
+                                : `${arrivedCount} of ${bomItemsList.length} Received on Site`}
                             </span>
                           </div>
-                          <div className="divide-y divide-slate-100 pt-1 text-[11px] max-h-48 overflow-y-auto">
-                            {(commandCentre?.bomItems && commandCentre.bomItems.length > 0 ? commandCentre.bomItems : [
-                              { item_name: '550W Mono PERC Bifacial Modules', quantity: 20, unit: 'Nos' },
-                              { item_name: '15kW On-Grid 3-Phase String Inverter', quantity: 1, unit: 'Nos' },
-                              { item_name: 'HDG Elevated Mounting Structure', quantity: 1, unit: 'Set' },
-                              { item_name: '4 sq.mm 1000V DC Solar Cable', quantity: 120, unit: 'Mtrs' },
-                              { item_name: 'Chemical Earthing Pit Kit (Copper)', quantity: 3, unit: 'Sets' }
-                            ]).map((item: any, idx: number) => (
-                              <div key={idx} className="py-1.5 flex justify-between">
-                                <span className="text-slate-700 truncate pr-2">{item.item_name}</span>
-                                <span className="font-bold text-slate-900 shrink-0">{item.quantity} {item.unit}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
 
-                      {/* PO & GRN Card */}
-                      <div className="p-5 bg-white border border-slate-200 rounded-2xl space-y-3">
-                        <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-                          <span className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
-                            <ShoppingCart className="w-4 h-4 text-blue-600" />
-                            <span>Procurement &amp; Goods Receipt (GRN)</span>
-                          </span>
-                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
-                            commandCentre?.materialReadiness === 'Fully Received at Site' ? 'bg-emerald-100 text-emerald-800' :
-                            'bg-blue-100 text-blue-800'
-                          }`}>
-                            {commandCentre?.materialReadiness || 'Ready in Warehouse'}
-                          </span>
-                        </div>
+                          {/* Field Crew Receipt Progress Bar */}
+                          <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="font-bold text-slate-700 flex items-center gap-1.5">
+                                <span>Field Crew Receipt Progress:</span>
+                                <span className="font-mono text-emerald-700 font-extrabold">{arrivedCount} / {bomItemsList.length} Items Striked Out</span>
+                              </span>
+                              <span className="font-mono font-bold text-slate-600 text-xs">
+                                {Math.round((arrivedCount / (bomItemsList.length || 1)) * 100)}%
+                              </span>
+                            </div>
+                            <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
+                              <div 
+                                className="bg-emerald-600 h-full rounded-full transition-all duration-300"
+                                style={{ width: `${Math.round((arrivedCount / (bomItemsList.length || 1)) * 100)}%` }}
+                              />
+                            </div>
+                            <p className="text-[10px] text-slate-400">
+                              (Read-only for Project Manager. Checklist updates live as the installation crew inspects and ticks each item on site.)
+                            </p>
+                          </div>
 
-                        <div className="space-y-2 text-xs">
-                          <div className="flex justify-between">
-                            <span className="text-slate-500">Purchase Orders Issued:</span>
-                            <span className="font-bold text-slate-900">{commandCentre?.purchaseOrders?.length || 1} PO(s)</span>
+                          <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                            <table className="w-full text-left text-xs divide-y divide-slate-200">
+                              <thead>
+                                <tr className="bg-slate-900 text-white font-bold text-[10px] uppercase">
+                                  <th className="py-2.5 px-3 w-12 text-center">Status</th>
+                                  <th className="py-2.5 px-3 w-10 text-center">#</th>
+                                  <th className="py-2.5 px-3">Category</th>
+                                  <th className="py-2.5 px-3">Equipment / Component Description</th>
+                                  <th className="py-2.5 px-3">Specification</th>
+                                  <th className="py-2.5 px-3 text-center">Unit</th>
+                                  <th className="py-2.5 px-3 text-center">Qty Dispatched</th>
+                                  <th className="py-2.5 px-3 text-center">Receipt Status</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100 font-medium bg-white">
+                                {bomItemsList.map((item: any, idx: number) => {
+                                  const isArrived = arrivedMaterialIds.includes(item.id) || arrivedMaterialIds.includes(item.itemName);
+                                  return (
+                                    <tr 
+                                      key={item.id || idx} 
+                                      className={`transition-colors ${isArrived ? 'bg-emerald-50/50' : 'hover:bg-slate-50/60'}`}
+                                    >
+                                      <td className="py-2.5 px-3 text-center">
+                                        {isArrived ? (
+                                          <span className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[10px] font-bold mx-auto">
+                                            ✓
+                                          </span>
+                                        ) : (
+                                          <span className="w-4 h-4 rounded-full border-2 border-slate-300 inline-block align-middle" />
+                                        )}
+                                      </td>
+                                      <td className="py-2.5 px-3 text-center text-slate-400 font-mono text-[11px]">{idx + 1}</td>
+                                      <td className={`py-2.5 px-3 font-semibold ${isArrived ? 'line-through text-slate-400 opacity-60' : 'text-slate-900'}`}>
+                                        {item.category}
+                                      </td>
+                                      <td className={`py-2.5 px-3 font-bold ${isArrived ? 'line-through text-slate-400 opacity-60' : 'text-slate-800'}`}>
+                                        {item.itemName}
+                                      </td>
+                                      <td className={`py-2.5 px-3 font-mono text-[10px] ${isArrived ? 'line-through text-slate-400 opacity-60' : 'text-slate-600'}`}>
+                                        {item.technicalSpecification || '-'}
+                                      </td>
+                                      <td className={`py-2.5 px-3 text-center font-semibold ${isArrived ? 'line-through text-slate-400 opacity-60' : 'text-slate-700'}`}>
+                                        {item.unit || 'Nos'}
+                                      </td>
+                                      <td className={`py-2.5 px-3 text-center font-mono font-bold ${isArrived ? 'line-through text-slate-400 opacity-60' : 'text-slate-900'}`}>
+                                        {item.quantity}
+                                      </td>
+                                      <td className="py-2.5 px-3 text-center">
+                                        {isArrived ? (
+                                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 inline-flex items-center gap-1">
+                                            <Check className="w-3 h-3 text-emerald-600" />
+                                            <span>Received on Site ✓</span>
+                                          </span>
+                                        ) : (
+                                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                                            Awaiting Crew Unbox
+                                          </span>
+                                        )}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
                           </div>
-                          <div className="flex justify-between">
-                            <span className="text-slate-500">Goods Receipt Notes (GRN):</span>
-                            <span className="font-semibold text-emerald-700">{commandCentre?.goodsReceiptNotes?.length || 1} GRN Verified</span>
-                          </div>
-                          <div className="pt-1.5 border-t border-slate-100 text-[11px] flex justify-between">
-                            <span className="text-slate-400">Site Delivery Destination:</span>
-                            <span className="font-semibold text-slate-800">{selectedProject.customerAddress || 'Customer Rooftop'}</span>
-                          </div>
-                          <div className="flex justify-end pt-2">
+
+                          <div className="pt-2 flex justify-between items-center">
+                            <div>
+                              {allArrived ? (
+                                <span className="text-xs font-bold text-emerald-700 flex items-center gap-1.5">
+                                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                                  <span>All materials received on site. Cleared for installation scheduling.</span>
+                                </span>
+                              ) : (
+                                <span className="text-xs text-amber-700 font-medium">
+                                  Awaiting installation crew to unbox and strike out all {bomItemsList.length} items.
+                                </span>
+                              )}
+                            </div>
+
                             <button
-                              onClick={() => onNavigate('purchase-orders' as any)}
-                              className="text-xs font-bold text-emerald-700 hover:text-emerald-800 flex items-center gap-1 cursor-pointer"
+                              onClick={() => setSelectedStageMilestone('Installation Scheduled')}
+                              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer shadow-xs"
                             >
-                              <span>Open Procurement Hub</span>
-                              <ArrowRight className="w-3.5 h-3.5" />
+                              <span>Proceed to Step 2: Schedule &amp; Survey Clearness</span>
+                              <ArrowRight className="w-4 h-4" />
                             </button>
                           </div>
                         </div>
+                      );
+                    })()}
+                  </div>
+                )}
+
+                {/* ------------------------------------------------------------- */}
+                {/* 2. STAGE: INSTALLATION SCHEDULED & SURVEY VERIFIED             */}
+                {/* ------------------------------------------------------------- */}
+                {selectedStageMilestone === 'Installation Scheduled' && (
+                  <div className="space-y-4">
+                    {/* Schedule & Duration Card */}
+                    <div className="p-5 bg-white border border-slate-200 rounded-2xl space-y-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                        <div>
+                          <h3 className="font-extrabold text-slate-900 text-sm flex items-center gap-2">
+                            <Calendar className="w-4 h-4 text-emerald-600" />
+                            <span>Installation Execution Schedule &amp; Duration</span>
+                          </h3>
+                          <p className="text-[11px] text-slate-500">
+                            Determined by the Installation Team based on system capacity and site conditions
+                          </p>
+                        </div>
+                        <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800">
+                          {selectedProject.siteSurveyVerified ? 'Schedule Locked ✓' : 'Kickoff Scheduled'}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
+                        <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase">Kickoff Date</span>
+                          <div className="font-mono font-bold text-slate-900 text-sm">
+                            {selectedProject.startDate || '2026-11-05'}
+                          </div>
+                          <div className="text-[10px] text-slate-500">Installation Start</div>
+                        </div>
+
+                        <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase">Duration Required</span>
+                          <div className="font-mono font-bold text-emerald-700 text-sm">
+                            {selectedProject.installationDurationDays || 2} Days
+                          </div>
+                          <div className="text-[10px] text-emerald-600 font-semibold">Decided by Field Crew</div>
+                        </div>
+
+                        <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase">Target Handover</span>
+                          <div className="font-mono font-bold text-slate-900 text-sm">
+                            {selectedProject.targetCompletionDate || '2026-11-07'}
+                          </div>
+                          <div className="text-[10px] text-slate-500">Target Completion</div>
+                        </div>
+
+                        <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase">Assigned Field Lead</span>
+                          <div className="font-bold text-slate-900 truncate">
+                            {selectedProject.installationLeadName || 'Muthu Vel'}
+                          </div>
+                          <div className="text-[10px] text-slate-500">Field Operations</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Site Survey Clearness Verification Card */}
+                    <div className={`p-5 rounded-2xl border transition-all ${
+                      selectedProject.siteSurveyVerified
+                        ? 'bg-emerald-50/80 border-emerald-300 text-emerald-950'
+                        : 'bg-amber-50/80 border-amber-300 text-amber-950'
+                    }`}>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div className="flex items-start gap-3.5">
+                          {selectedProject.siteSurveyVerified ? (
+                            <CheckCheck className="w-6 h-6 text-emerald-600 shrink-0 mt-0.5" />
+                          ) : (
+                            <AlertTriangle className="w-6 h-6 text-amber-600 shrink-0 mt-0.5 animate-pulse" />
+                          )}
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h3 className="font-black text-sm sm:text-base">
+                                Site Survey Measurements &amp; Clearness Verification
+                              </h3>
+                              <span className={`px-2.5 py-0.5 rounded text-[10px] font-bold ${
+                                selectedProject.siteSurveyVerified
+                                  ? 'bg-emerald-200 text-emerald-900 border border-emerald-300'
+                                  : 'bg-amber-200 text-amber-900 border border-amber-300'
+                              }`}>
+                                {selectedProject.siteSurveyVerified ? 'Clearness Verified ✓' : 'Verification Required'}
+                              </span>
+                            </div>
+                            <p className="text-xs mt-1 leading-relaxed">
+                              {selectedProject.siteSurveyVerified ? (
+                                <span>
+                                  Installation team verified site survey measurements, shadow-free area, and structural anchors on{' '}
+                                  <strong className="font-mono text-emerald-900">
+                                    {selectedProject.siteSurveyVerifiedAt ? new Date(selectedProject.siteSurveyVerifiedAt).toLocaleString() : 'Recently'}
+                                  </strong>{' '}
+                                  (Verified by {selectedProject.siteSurveyVerifiedBy || 'Installation Lead'}).
+                                </span>
+                              ) : (
+                                <span>
+                                  The technical survey conducted by the survey engineer is shown below. The installation team reviews dimensions and clicks &quot;Verified Site Clearness &amp; Measurements&quot; to authorize commencement.
+                                </span>
+                              )}
+                            </p>
+                          </div>
+                        </div>
+
+                        {!selectedProject.siteSurveyVerified && (
+                          <button
+                            onClick={async () => {
+                              const now = new Date().toISOString();
+                              const pmName = currentUser?.name || 'Project Manager';
+                              await updateProject(selectedProject.id, {
+                                siteSurveyVerified: true,
+                                siteSurveyVerifiedAt: now,
+                                siteSurveyVerifiedBy: pmName,
+                                stage: 'Installation In Progress'
+                              });
+                              setSelectedProject({
+                                ...selectedProject,
+                                siteSurveyVerified: true,
+                                siteSurveyVerifiedAt: now,
+                                siteSurveyVerifiedBy: pmName,
+                                stage: 'Installation In Progress'
+                              });
+                              setSelectedStageMilestone('Installation In Progress');
+                            }}
+                            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl text-xs shadow-md transition-all flex items-center gap-1.5 shrink-0 cursor-pointer"
+                          >
+                            <ShieldCheck className="w-4 h-4" />
+                            <span>Confirm Site Clearness &amp; Authorize Crew ✓</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Direct Technical Survey Audit (Readout from Survey Engineer) */}
+                    <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                        <div>
+                          <h4 className="font-extrabold text-slate-900 text-sm flex items-center gap-2">
+                            <FolderKanban className="w-4 h-4 text-teal-600" />
+                            <span>Technical Site Survey Audit (Engineer Survey Readout)</span>
+                          </h4>
+                          <p className="text-[11px] text-slate-500">
+                            Direct technical audit captured during the initial on-site engineering survey
+                          </p>
+                        </div>
+                        <span className="px-2.5 py-0.5 rounded text-[10px] font-bold bg-teal-50 text-teal-800 border border-teal-200">
+                          Survey Ref: SRV-2026-009
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                        <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+                          <div className="font-bold text-slate-800 text-[11px] flex items-center gap-1.5">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>Rooftop Structural &amp; Orientation Details</span>
+                          </div>
+                          <div className="space-y-1.5 text-slate-600">
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">Roof Surface Type:</span>
+                              <span className="font-bold text-slate-900">RCC Flat Roof (Waterproofed)</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">Feasible Shadow-Free Area:</span>
+                              <span className="font-mono font-bold text-slate-900">278 sq.ft Unobstructed</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">True South Orientation:</span>
+                              <span className="font-bold text-emerald-700">Azimuth 180° / 12° Optimal Tilt</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">Structure Anchoring:</span>
+                              <span className="font-bold text-slate-800">Pre-Engineered Fasteners (Non-Penetrating)</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+                          <div className="font-bold text-slate-800 text-[11px] flex items-center gap-1.5">
+                            <Zap className="w-3.5 h-3.5 text-amber-600" />
+                            <span>Electrical &amp; Grid Interconnect Clearances</span>
+                          </div>
+                          <div className="space-y-1.5 text-slate-600">
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">Inverter Mounting Location:</span>
+                              <span className="font-bold text-slate-900">Covered Utility Wall (Shaded)</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">DC Cable Route Length:</span>
+                              <span className="font-mono font-bold text-slate-900">25 Meters (4 sq.mm UV)</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">AC Cable Route Length:</span>
+                              <span className="font-mono font-bold text-slate-900">12 Meters (6 sq.mm Copper)</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">DISCOM Grid Sanction:</span>
+                              <span className="font-mono font-bold text-emerald-700">{selectedProject.discomSanctionNumber || 'BESCOM-SANC-2026-9941'}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="pt-2 flex justify-end">
+                        <button
+                          onClick={() => setSelectedStageMilestone('Installation In Progress')}
+                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer shadow-xs"
+                        >
+                          <span>Proceed to Step 3: Daily Crew Attendance &amp; Tasks</span>
+                          <ArrowRight className="w-4 h-4" />
+                        </button>
                       </div>
                     </div>
                   </div>
                 )}
 
                 {/* ------------------------------------------------------------- */}
-                {/* 4. STAGE: INSTALLATION SCHEDULED                              */}
+                {/* 3. STAGE: DAILY ATTENDANCE & INSTALLATION EXECUTION            */}
                 {/* ------------------------------------------------------------- */}
-                {selectedStageMilestone === 'Installation Scheduled' && (
+                {selectedStageMilestone === 'Installation In Progress' && (
                   <div className="space-y-4">
-                    {/* Site Readiness Card */}
+                    {/* Daily Field Crew Attendance Card */}
                     {(() => {
-                      const isSiteReady = Boolean((selectedProject as any).site_readiness_confirmed || commandCentre?.project?.site_readiness_confirmed);
-                      const schedDate = schedDateInput || (selectedProject as any).scheduled_installation_date || commandCentre?.project?.scheduled_installation_date || selectedProject.targetCompletionDate;
+                      const latestAtt = commandCentre?.attendance?.[0];
+                      const isCheckedIn = Boolean(latestAtt || selectedProject.attendancePhotoUrl);
+                      const gpsText = latestAtt?.latitude 
+                        ? `${Number(latestAtt.latitude).toFixed(4)}° N, ${Number(latestAtt.longitude).toFixed(4)}° E`
+                        : (selectedProject.attendanceGpsCoords || null);
+                      const timeText = latestAtt?.checkInTime 
+                        ? `${latestAtt.date || 'Today'}, ${latestAtt.checkInTime}`
+                        : latestAtt?.date 
+                        ? latestAtt.date 
+                        : null;
+                      const checkInPhoto = selectedProject.attendancePhotoUrl || latestAtt?.selfieUrl || latestAtt?.photoUrl || null;
+                      const siteLead = latestAtt?.siteLeadName || selectedProject.installationLeadName || 'Muthu Vel';
 
                       return (
-                        <div className={`p-5 rounded-2xl border transition-all ${
-                          isSiteReady 
-                            ? 'bg-emerald-50/70 border-emerald-300 text-emerald-950' 
-                            : 'bg-amber-50/70 border-amber-300 text-amber-950 shadow-xs'
-                        }`}>
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                            <div className="flex items-start gap-3.5">
-                              {isSiteReady ? (
-                                <CheckCheck className="w-6 h-6 text-emerald-600 shrink-0 mt-0.5" />
-                              ) : (
-                                <AlertTriangle className="w-6 h-6 text-amber-600 shrink-0 mt-0.5 animate-pulse" />
-                              )}
-                              <div>
-                                <div className="flex items-center gap-2">
-                                  <h3 className="font-black text-base">PM Site Readiness &amp; Execution Clearance</h3>
-                                  <span className={`px-2.5 py-0.5 rounded text-[10px] font-bold ${
-                                    isSiteReady ? 'bg-emerald-200 text-emerald-900' : 'bg-amber-200 text-amber-900'
-                                  }`}>
-                                    {isSiteReady ? 'Site Cleared ✓' : 'Hold: Awaiting PM Confirmation'}
-                                  </span>
+                        <div className="p-5 bg-white border border-slate-200 rounded-2xl space-y-4">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                            <div>
+                              <h3 className="font-extrabold text-slate-900 text-sm flex items-center gap-2">
+                                <Users className="w-4 h-4 text-emerald-600" />
+                                <span>Daily Field Crew Attendance &amp; On-Site Verification</span>
+                              </h3>
+                              <p className="text-[11px] text-slate-500">
+                                Rooftop labor crew check-in with live photographic evidence and GPS timestamp
+                              </p>
+                            </div>
+                            <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                              isCheckedIn 
+                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' 
+                                : 'bg-amber-100 text-amber-800 border border-amber-300'
+                            }`}>
+                              {isCheckedIn ? 'Crew Checked-In ✓' : 'Awaiting Field Crew Check-In'}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            {/* Attendance Details */}
+                            <div className="md:col-span-2 space-y-3 text-xs">
+                              <div className="grid grid-cols-2 gap-3">
+                                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                                  <span className="text-[10px] font-bold text-slate-400 uppercase">Site Lead</span>
+                                  <div className="font-bold text-slate-900 block mt-0.5">{siteLead}</div>
+                                  <div className="text-[10px] text-slate-500">Team Commander</div>
                                 </div>
-                                <p className="text-xs mt-1 leading-relaxed">
-                                  {isSiteReady ? (
-                                    <span>
-                                      Site readiness verified by Project Manager {selectedProject.projectManagerName}. Physical installation scheduled for <strong className="font-mono text-emerald-800">{schedDate || 'Upcoming'}</strong>. Field crew is cleared for execution.
-                                    </span>
+                                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                                  <span className="text-[10px] font-bold text-slate-400 uppercase">Check-In GPS &amp; Timestamp</span>
+                                  {isCheckedIn && (gpsText || timeText) ? (
+                                    <>
+                                      <div className="font-mono font-bold text-emerald-700 block mt-0.5">
+                                        {gpsText || 'GPS Captured on Submit'}
+                                      </div>
+                                      <div className="text-[10px] text-slate-500">{timeText || 'Verified Today'}</div>
+                                    </>
                                   ) : (
-                                    <span>
-                                      Physical rooftop work is locked. The Project Manager must verify shadow-free clearance, roof civil anchor points, and electrical tie-in clearance before physical dispatch.
-                                    </span>
+                                    <>
+                                      <div className="font-bold text-amber-700 block mt-0.5">
+                                        Pending Check-In
+                                      </div>
+                                      <div className="text-[10px] text-slate-500">Awaiting site arrival check-in</div>
+                                    </>
                                   )}
-                                </p>
+                                </div>
+                              </div>
+
+                              <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-1.5">
+                                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Assigned Rooftop Crew Members</span>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                                  {(selectedProject.assigned_crew_members && selectedProject.assigned_crew_members.length > 0
+                                    ? selectedProject.assigned_crew_members
+                                    : ['Muthu Vel (Site Lead)', 'Karthik Mani (Inverter / Cabling)', 'Saravanan Perumal (Earthing / BOS)', 'Rajesh Varma (Structure Mounts)']
+                                  ).map((memberStr: string, mIdx: number) => (
+                                    <div key={mIdx} className="flex items-center gap-2 p-1.5 bg-white rounded-lg border border-slate-200">
+                                      <span className={`w-2 h-2 rounded-full ${isCheckedIn ? 'bg-emerald-500' : 'bg-amber-400 animate-pulse'}`} />
+                                      <span className="font-semibold text-slate-800">{memberStr}</span>
+                                    </div>
+                                  ))}
+                                </div>
                               </div>
                             </div>
 
-                            {!isSiteReady && (currentUser?.role === 'Project Manager' || currentUser?.role === 'Super Admin') && (
+                            {/* On-Site Verification Selfie Photo */}
+                            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex flex-col items-center justify-center text-center">
+                              <span className="text-[10px] font-bold text-slate-500 uppercase mb-2 block">Live Rooftop Check-In Photo</span>
+                              {checkInPhoto ? (
+                                <>
+                                  <img
+                                    src={checkInPhoto}
+                                    alt="Field Crew Check-In"
+                                    className="w-full h-32 object-cover rounded-lg border border-slate-200 shadow-2xs mb-2"
+                                  />
+                                  <span className="text-[10px] text-emerald-700 font-bold flex items-center gap-1">
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                    <span>Photo Verified with Geotag</span>
+                                  </span>
+                                </>
+                              ) : (
+                                <div className="w-full h-32 rounded-lg border-2 border-dashed border-slate-300 flex flex-col items-center justify-center p-3 text-slate-400 bg-white/60 mb-2">
+                                  <Camera className="w-6 h-6 text-slate-300 mb-1" />
+                                  <span className="text-[11px] font-bold text-slate-600">Awaiting Live Selfie</span>
+                                  <span className="text-[9px] text-slate-400 mt-0.5">Appears immediately upon field check-in</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Live Installation Tasks & Quality Checklist */}
+                    <div className="p-5 bg-white border border-slate-200 rounded-2xl space-y-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                        <div>
+                          <h4 className="font-extrabold text-slate-900 text-sm flex items-center gap-2">
+                            <ListTodo className="w-4 h-4 text-emerald-600" />
+                            <span>Installation Execution Tasks &amp; Quality Checklist</span>
+                          </h4>
+                          <p className="text-[11px] text-slate-500">
+                            Field tasks tracked in real-time between Project Manager and Installation Crew
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => setShowPmAddTaskModal(true)}
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer shadow-xs self-start sm:self-auto"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Assign New Task</span>
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                        {[
+                          { id: 't1', title: 'Pre-engineered aluminum mounting structure & anchor bolting', category: 'Structure', done: true },
+                          { id: 't2', title: 'Tier-1 solar PV modules mounted, aligned, and clamped', category: 'Structure', done: true },
+                          { id: 't3', title: 'DC string cabling, conduit routing, and MC4 connectors crimped', category: 'Electrical', done: true },
+                          { id: 't4', title: 'Dual chemical earthing pits installed with copper electrodes', category: 'BOS', done: true },
+                          { id: 't5', title: 'Inverter mounted on wall, ACDB/DCDB connected, and isolators wired', category: 'Inverter', done: true },
+                          { id: 't6', title: 'Pre-commissioning test: Voc, Isc, and earth resistance check (< 5 ohms)', category: 'Safety', done: true },
+                        ].map(task => (
+                          <div key={task.id} className="p-3 rounded-xl border border-slate-200 bg-slate-50/60 flex items-start gap-3">
+                            <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">
+                              ✓
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <span className="font-semibold text-slate-800 text-xs block leading-snug">{task.title}</span>
+                              <div className="flex items-center gap-2 mt-1">
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-700">{task.category}</span>
+                                <span className="text-[10px] text-emerald-600 font-semibold">Completed on Site</span>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="pt-2 flex justify-end">
+                        <button
+                          onClick={() => setSelectedStageMilestone('Completed')}
+                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer shadow-xs"
+                        >
+                          <span>Proceed to Step 4: Media, Warranty &amp; Handover</span>
+                          <ArrowRight className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ------------------------------------------------------------- */}
+                {/* 4. STAGE: MEDIA EVIDENCE, WARRANTY & SERVICE HANDOVER          */}
+                {/* ------------------------------------------------------------- */}
+                {selectedStageMilestone === 'Completed' && (() => {
+                  const photos = selectedProject.postInstallPhotos || {};
+                  const isRealMediaUrl = (v?: string | null) => {
+                    if (!v || typeof v !== 'string') return false;
+                    const trimmed = v.trim();
+                    if (trimmed.length < 5) return false;
+                    return trimmed.startsWith('data:') || trimmed.startsWith('http') || trimmed.startsWith('/uploads') || trimmed.startsWith('blob:');
+                  };
+
+                  const p1 = isRealMediaUrl(photos.panelFixing) ? photos.panelFixing : null;
+                  const p2 = isRealMediaUrl(photos.inverterCabling) ? photos.inverterCabling : null;
+                  const p3 = isRealMediaUrl(photos.earthingProtection) ? photos.earthingProtection : null;
+                  const p4 = isRealMediaUrl(photos.plantWithCustomer) ? photos.plantWithCustomer : null;
+
+                  const uploadedCount = [p1, p2, p3, p4].filter(Boolean).length;
+                  const allPhotosUploaded = uploadedCount === 4;
+                  const videoUrl = isRealMediaUrl(selectedProject.commissioningVideoUrl) ? selectedProject.commissioningVideoUrl : null;
+                  const hasVideo = Boolean(videoUrl);
+                  const allEvidenceReady = allPhotosUploaded && hasVideo;
+                  const isCleared = selectedProject.pmClearanceStatus === 'Cleared' || selectedProject.stage === 'Completed';
+
+                  return (
+                    <div className="space-y-4">
+                      {/* PM Field Review & Leave-Site Clearance Status */}
+                      <div className={`p-5 rounded-2xl border transition-all ${
+                        allEvidenceReady
+                          ? 'bg-emerald-50/80 border-emerald-300 text-emerald-950'
+                          : 'bg-amber-50/80 border-amber-300 text-amber-950'
+                      }`}>
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                          <div className="flex items-start gap-3.5">
+                            {allEvidenceReady ? (
+                              <CheckCheck className="w-6 h-6 text-emerald-600 shrink-0 mt-0.5" />
+                            ) : (
+                              <AlertTriangle className="w-6 h-6 text-amber-600 shrink-0 mt-0.5" />
+                            )}
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <h3 className="font-black text-sm sm:text-base">PM Field Clearance &amp; Photographic Evidence Review</h3>
+                                <span className={`px-2.5 py-0.5 rounded text-[10px] font-bold ${
+                                  isCleared
+                                    ? 'bg-emerald-200 text-emerald-900 border border-emerald-300'
+                                    : allEvidenceReady
+                                    ? 'bg-blue-100 text-blue-900 border border-blue-300'
+                                    : 'bg-amber-200 text-amber-900 border border-amber-300'
+                                }`}>
+                                  {isCleared
+                                    ? 'Crew Cleared to Leave Site ✓'
+                                    : allEvidenceReady
+                                    ? 'Evidence Ready for PM Sign-Off'
+                                    : 'Awaiting Crew Uploads'}
+                                </span>
+                              </div>
+                              <p className="text-xs mt-1 leading-relaxed">
+                                {isCleared ? (
+                                  <span>Site photos and live commissioning video reviewed and verified. Field installation crew is cleared for demobilization. Ready for final Grid Live sync and Service Team warranty transfer.</span>
+                                ) : allEvidenceReady ? (
+                                  <span>All 4 rooftop photos and client confirmation video have been uploaded by the installation crew. Review below and grant leave-site clearance.</span>
+                                ) : (
+                                  <span>Installation in progress. Field crew must upload 4 geotagged rooftop photos and client confirmation video before demobilization clearance can be granted ({uploadedCount}/4 photos uploaded, {hasVideo ? 'video ready ✓' : 'video pending'}).</span>
+                                )}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
+                            {!isCleared && allEvidenceReady && (
                               <button
-                                onClick={() => setShowReadinessModal(true)}
-                                className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-extrabold rounded-xl text-xs shadow-md transition-all flex items-center gap-1.5 shrink-0 cursor-pointer animate-pulse"
+                                onClick={async () => {
+                                  const now = new Date().toISOString();
+                                  const pmName = currentUser?.name || 'Project Manager';
+                                  await updateProject(selectedProject.id, {
+                                    pmClearanceStatus: 'Cleared',
+                                    pmClearedBy: pmName,
+                                    pmClearedAt: now,
+                                  });
+                                  setSelectedProject(prev => prev ? ({
+                                    ...prev,
+                                    pmClearanceStatus: 'Cleared',
+                                    pmClearedBy: pmName,
+                                    pmClearedAt: now,
+                                  }) : null);
+                                }}
+                                className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-extrabold rounded-xl text-xs shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
                               >
                                 <ShieldCheck className="w-4 h-4" />
-                                <span>Confirm Site Readiness</span>
+                                <span>Grant Leave-Site Clearance ✓</span>
+                              </button>
+                            )}
+
+                            {selectedProject.stage !== 'Completed' && (
+                              <button
+                                onClick={() => setShowGridLiveModal(true)}
+                                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl text-xs shadow-md transition-all flex items-center gap-1.5 shrink-0 cursor-pointer"
+                              >
+                                <Zap className="w-4 h-4" />
+                                <span>Activate Grid Live &amp; Handover to Service</span>
                               </button>
                             )}
                           </div>
                         </div>
-                      );
-                    })()}
+                      </div>
 
-                    {/* Step 4 Interactive PM Control Panel: Installation Schedule Date & Crew Member Assignment */}
-                    <div className="p-5 bg-white border border-slate-200 rounded-2xl shadow-xs space-y-4">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
-                        <div>
-                          <h4 className="font-extrabold text-slate-900 text-sm flex items-center gap-2">
-                            <Calendar className="w-4 h-4 text-emerald-600" />
-                            <span>Schedule Installation Date &amp; Assign Field Crew</span>
-                          </h4>
-                          <p className="text-slate-500 text-xs mt-0.5">
-                            Set the official physical kickoff date and assign the rooftop installation lead and technicians.
-                          </p>
-                        </div>
-                        {scheduleSaveSuccess && (
-                          <div className="px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-xl text-xs font-bold flex items-center gap-1.5 animate-in fade-in">
-                            <Check className="w-4 h-4 text-emerald-600" />
-                            <span>Schedule &amp; Crew Saved!</span>
+                      {/* 4 Geotagged Installed Photos from 4 Angles (Empty until uploaded by Install Crew) */}
+                      <div className="p-5 bg-white border border-slate-200 rounded-2xl space-y-3">
+                        <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                          <div>
+                            <h4 className="font-extrabold text-slate-900 text-sm flex items-center gap-2">
+                              <Camera className="w-4 h-4 text-emerald-600" />
+                              <span>Post-Installation Photographic Evidence (4 Angles)</span>
+                            </h4>
+                            <p className="text-[11px] text-slate-500">
+                              Geotagged high-resolution evidence captured before demobilizing crew
+                            </p>
                           </div>
-                        )}
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {/* 1. Installation Schedule Date */}
-                        <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
-                          <label className="block text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                            <Clock className="w-3.5 h-3.5 text-emerald-600" />
-                            <span>Installation Kickoff / Target Date *</span>
-                          </label>
-                          <input
-                            type="date"
-                            value={schedDateInput}
-                            onChange={e => setSchedDateInput(e.target.value)}
-                            className="w-full p-2.5 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-emerald-500 shadow-2xs"
-                          />
-                          <p className="text-[11px] text-slate-500">
-                            The target date on-site mounting begins. This syncs with customer timeline and materials delivery.
-                          </p>
-                        </div>
-
-                        {/* 2. Assigned Installation Lead */}
-                        <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
-                          <label className="block text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                            <User className="w-3.5 h-3.5 text-emerald-600" />
-                            <span>Assigned Installation Lead (Site In-Charge) *</span>
-                          </label>
-                          <select
-                            value={schedLeadInput}
-                            onChange={e => {
-                              const val = e.target.value;
-                              setSchedLeadInput(val);
-                              if (!schedCrewMembers.some(m => m.includes(val))) {
-                                setSchedCrewMembers(prev => [`${val} (Lead)`, ...prev.filter(m => !m.includes('(Lead)'))]);
-                              }
-                            }}
-                            className="w-full p-2.5 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-emerald-500 shadow-2xs cursor-pointer"
-                          >
-                            {realCrewCatalog.map(member => (
-                              <option key={member.name} value={member.name}>
-                                {member.name} — {member.department}
-                              </option>
-                            ))}
-                          </select>
-                          <p className="text-[11px] text-slate-500">
-                            Responsible for on-site checklist execution, daily attendance stamping, and safety compliance.
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* 3. Assign Crew Members Roster */}
-                      <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
-                        <div className="flex items-center justify-between">
-                          <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                            <Users className="w-3.5 h-3.5 text-indigo-600" />
-                            <span>Assigned Field Crew Members ({schedCrewMembers.length} Members)</span>
-                          </label>
-                          <span className="text-[11px] text-slate-400">
-                            Will appear in Step 5 attendance roster
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                            allPhotosUploaded 
+                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' 
+                              : 'bg-amber-100 text-amber-800 border border-amber-300'
+                          }`}>
+                            {allPhotosUploaded ? 'All 4 Angles Uploaded ✓' : `${uploadedCount} of 4 Angles Uploaded`}
                           </span>
                         </div>
 
-                        {/* Current Member Chips */}
-                        <div className="flex flex-wrap items-center gap-2">
-                          {schedCrewMembers.map((m, idx) => (
-                            <span 
-                              key={idx} 
-                              className="px-3 py-1.5 bg-white border border-slate-300 text-slate-800 rounded-xl text-xs font-bold flex items-center gap-2 shadow-2xs"
-                            >
-                              <User className="w-3.5 h-3.5 text-slate-400" />
-                              <span>{m}</span>
-                              <button
-                                type="button"
-                                onClick={() => setSchedCrewMembers(prev => prev.filter((_, i) => i !== idx))}
-                                className="text-slate-400 hover:text-red-600 transition-colors cursor-pointer p-0.5 rounded-full hover:bg-red-50"
-                                title={`Remove ${m}`}
-                              >
-                                <X className="w-3 h-3" />
-                              </button>
-                            </span>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                          {[
+                            { title: 'Angle 1: PV Array & Tilt', desc: 'Solar Module Layout', url: p1 },
+                            { title: 'Angle 2: Inverter & Wiring', desc: 'ACDB/DCDB Dressing', url: p2 },
+                            { title: 'Angle 3: Earthing Pit', desc: 'Dual Electrodes & Arrestor', url: p3 },
+                            { title: 'Angle 4: Net-Meter & Plant', desc: 'With Customer On Site', url: p4 },
+                          ].map((item, idx) => (
+                            <div key={idx} className="space-y-1.5">
+                              {item.url ? (
+                                <div className="h-32 rounded-xl bg-slate-900 overflow-hidden relative group border border-slate-200 shadow-2xs">
+                                  <img
+                                    src={item.url}
+                                    alt={item.title}
+                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                                  />
+                                  <div className="absolute inset-0 bg-black/40 flex items-end p-2">
+                                    <span className="text-[10px] font-bold text-white truncate">{item.title}</span>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="h-32 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50/70 flex flex-col items-center justify-center p-2.5 text-center text-slate-400">
+                                  <Camera className="w-6 h-6 text-slate-300 mb-1.5" />
+                                  <span className="text-[11px] font-bold text-slate-600 block leading-tight">{item.title}</span>
+                                  <span className="text-[9px] text-slate-400 mt-1">Awaiting field crew upload</span>
+                                </div>
+                              )}
+                              <span className="text-[10px] text-slate-500 font-semibold block text-center truncate">{item.desc}</span>
+                            </div>
                           ))}
                         </div>
-
-                        {/* Company Real Installation Crew Presets */}
-                        <div className="space-y-1.5 pt-1">
-                          <span className="font-bold text-slate-700 text-xs flex items-center gap-1.5">
-                            <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                            <span>Company Registered Installation Crew:</span>
-                          </span>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            {realCrewCatalog.map(member => {
-                              const isAssigned = schedCrewMembers.some(m => m.toLowerCase().includes(member.name.toLowerCase()));
-                              return (
-                                <button
-                                  key={member.name}
-                                  type="button"
-                                  onClick={() => {
-                                    if (isAssigned) {
-                                      setSchedCrewMembers(prev => prev.filter(m => !m.toLowerCase().includes(member.name.toLowerCase())));
-                                    } else {
-                                      setSchedCrewMembers(prev => [...prev, `${member.name} (${member.department.split('&')[0].trim()})`]);
-                                    }
-                                  }}
-                                  className={`p-2.5 rounded-xl border text-left flex items-center justify-between transition-all cursor-pointer ${
-                                    isAssigned 
-                                      ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-bold shadow-2xs' 
-                                      : 'bg-white hover:bg-slate-100 border-slate-200 text-slate-700'
-                                  }`}
-                                >
-                                  <div className="truncate pr-2">
-                                    <span className="block text-xs font-extrabold truncate">{member.name}</span>
-                                    <span className="block text-[10px] text-slate-500 truncate">{member.department}</span>
-                                  </div>
-                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold shrink-0 ${
-                                    isAssigned ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-600'
-                                  }`}>
-                                    {isAssigned ? 'Assigned ✓' : '+ Assign'}
-                                  </span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-
-                        {/* Add Custom Member Bar */}
-                        <div className="flex items-center gap-2 pt-1">
-                          <input
-                            type="text"
-                            placeholder="Add custom technician / helper name & role, e.g. Prakash (Rigger)"
-                            value={newCrewName}
-                            onChange={e => setNewCrewName(e.target.value)}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault();
-                                if (newCrewName.trim()) {
-                                  setSchedCrewMembers(prev => [...prev, newCrewName.trim()]);
-                                  setNewCrewName('');
-                                }
-                              }
-                            }}
-                            className="flex-1 p-2 bg-white border border-slate-300 rounded-xl text-xs font-medium focus:ring-2 focus:ring-emerald-500 shadow-2xs"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (newCrewName.trim()) {
-                                setSchedCrewMembers(prev => [...prev, newCrewName.trim()]);
-                                setNewCrewName('');
-                              }
-                            }}
-                            className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs flex items-center gap-1 cursor-pointer shrink-0 shadow-2xs"
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                            <span>Add</span>
-                          </button>
-                        </div>
                       </div>
 
-                      {/* Save Button */}
-                      <div className="flex items-center justify-end gap-3 pt-2">
-                        {scheduleSaveSuccess && (
-                          <span className="text-xs font-bold text-emerald-700 flex items-center gap-1.5 animate-in fade-in">
-                            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                            <span>Schedule &amp; Crew assignments recorded!</span>
+                      {/* Rooftop Client Confirmation Video Player (Empty until uploaded) */}
+                      <div className="p-5 bg-white border border-slate-200 rounded-2xl space-y-3">
+                        <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                          <div>
+                            <h4 className="font-extrabold text-slate-900 text-sm flex items-center gap-2">
+                              <Video className="w-4 h-4 text-emerald-600" />
+                              <span>Rooftop Client Confirmation Video (Walkthrough &amp; Sign-off)</span>
+                            </h4>
+                            <p className="text-[11px] text-slate-500">
+                              Live on-site video confirming customer satisfaction and plant operation (up to 5 mins or any length)
+                            </p>
+                          </div>
+                          <span className={`px-2.5 py-0.5 rounded text-[10px] font-bold ${
+                            hasVideo 
+                              ? 'bg-purple-100 text-purple-800 border border-purple-300' 
+                              : 'bg-amber-100 text-amber-800 border border-amber-300'
+                          }`}>
+                            {hasVideo ? 'Video Confirmed ✓' : 'Awaiting Video Upload'}
                           </span>
+                        </div>
+
+                        {hasVideo ? (
+                          <div className="bg-slate-900 rounded-xl overflow-hidden aspect-video max-h-72 flex items-center justify-center relative shadow-sm">
+                            <video
+                              controls
+                              src={videoUrl!.startsWith('http') || videoUrl!.startsWith('blob:') ? videoUrl! : getApiUrl(videoUrl!)}
+                              className="w-full h-full object-cover"
+                            >
+                              Your browser does not support HTML5 video.
+                            </video>
+                          </div>
+                        ) : (
+                          <div className="rounded-xl border-2 border-dashed border-slate-300 bg-slate-50/70 p-8 flex flex-col items-center justify-center text-center">
+                            <Video className="w-8 h-8 text-slate-300 mb-2" />
+                            <span className="text-xs font-bold text-slate-700">No Client Confirmation Video Uploaded Yet</span>
+                            <p className="text-[11px] text-slate-400 mt-1 max-w-sm">
+                              The installation crew will record an on-site walkthrough video (up to 5 mins) with the customer and upload it. It will appear here immediately for review.
+                            </p>
+                          </div>
                         )}
-                        <button
-                          type="button"
-                          onClick={handleSaveStep4ScheduleAndCrew}
-                          disabled={isSavingSchedule}
-                          className={`px-6 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-2 cursor-pointer shadow-md transition-all disabled:opacity-50 ${
-                            scheduleSaveSuccess
-                              ? 'bg-emerald-700 text-white ring-2 ring-emerald-300'
-                              : 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                          }`}
-                        >
-                          {scheduleSaveSuccess ? (
-                            <>
-                              <CheckCircle2 className="w-4 h-4 text-emerald-300" />
-                              <span>Saved ✓</span>
-                            </>
-                          ) : isSavingSchedule ? (
-                            <>
-                              <Clock className="w-4 h-4 animate-spin" />
-                              <span>Saving...</span>
-                            </>
-                          ) : (
-                            <>
-                              <Check className="w-4 h-4" />
-                              <span>Save Schedule &amp; Crew Assignments</span>
-                            </>
-                          )}
-                        </button>
                       </div>
-                    </div>
-                  </div>
-                )}
 
-                {/* ------------------------------------------------------------- */}
-                {/* 5. STAGE: INSTALLATION IN PROGRESS                            */}
-                {/* ------------------------------------------------------------- */}
-                {selectedStageMilestone === 'Installation In Progress' && (
-                  <div className="space-y-4">
-                    {/* Live Crew Attendance & Site Roster Card */}
-                    {(() => {
-                      const todayStr = new Date().toISOString().split('T')[0];
-                      const activeAttDate = attendanceViewDate || todayStr;
-                      const allAttendanceLogs: any[] = commandCentre?.attendance || [];
-                      
-                      // Filter attendance logs STRICTLY for the active attendance date
-                      const targetDateLogs = allAttendanceLogs.filter(log => {
-                        if (!log.date) return false;
-                        const d = String(log.date).split('T')[0];
-                        return d === activeAttDate;
-                      });
-
-                      // Build a map of only members checked in on THIS specific date
-                      const checkedInMap: Record<string, {
-                        checkInTime: string;
-                        date: string;
-                        latitude?: number;
-                        longitude?: number;
-                        siteLeadName: string;
-                        notes?: string;
-                      }> = {};
-
-                      targetDateLogs.forEach(log => {
-                        const logDate = String(log.date).split('T')[0];
-                        const time = log.checkInTime || log.check_in_time || '09:00';
-                        const members = Array.isArray(log.presentTeamMembers) ? log.presentTeamMembers : [];
-                        
-                        // Register individual members
-                        members.forEach((m: string) => {
-                          const key = m.trim().toLowerCase();
-                          const simpleKey = m.split('(')[0].trim().toLowerCase();
-                          checkedInMap[key] = {
-                            checkInTime: time,
-                            date: logDate,
-                            latitude: log.latitude || log.gps_lat,
-                            longitude: log.longitude || log.gps_lng,
-                            siteLeadName: log.siteLeadName || log.team_lead_name || 'Field Lead',
-                            notes: log.notes
-                          };
-                          checkedInMap[simpleKey] = checkedInMap[key];
-                        });
-
-                        // Register site lead
-                        if (log.siteLeadName) {
-                          const leadKey = log.siteLeadName.trim().toLowerCase();
-                          checkedInMap[leadKey] = {
-                            checkInTime: time,
-                            date: logDate,
-                            latitude: log.latitude || log.gps_lat,
-                            longitude: log.longitude || log.gps_lng,
-                            siteLeadName: log.siteLeadName,
-                            notes: log.notes
-                          };
-                        }
-                      });
-
-                      // Assigned crew members
-                      const assignedCrew: string[] = (selectedProject as any).assigned_crew_members?.length
-                        ? (selectedProject as any).assigned_crew_members
-                        : [
-                            `${selectedProject.installationLeadName || 'Muthu Vel'} (Lead)`,
-                            'Karthik Mani (Inverter & Wiring)',
-                            'Saravanan Perumal (Earthing & BOS)',
-                            'Rajesh Varma (Structure & Foundation)',
-                            'Vijay Anand (Safety & QA)'
-                          ];
-
-                      // Also include any person who checked in on this date
-                      const allDisplayMembers = [...assignedCrew];
-                      targetDateLogs.forEach(log => {
-                        const members = Array.isArray(log.presentTeamMembers) ? log.presentTeamMembers : [log.siteLeadName];
-                        members.forEach((m: string) => {
-                          if (m && !allDisplayMembers.some(em => em.toLowerCase().includes(m.toLowerCase()) || m.toLowerCase().includes(em.toLowerCase()))) {
-                            allDisplayMembers.push(m);
-                          }
-                        });
-                      });
-
-                      const checkedInCount = allDisplayMembers.filter(m => {
-                        const key = m.trim().toLowerCase();
-                        const simpleKey = m.split('(')[0].trim().toLowerCase();
-                        return Boolean(checkedInMap[key] || checkedInMap[simpleKey]);
-                      }).length;
-
-                      const totalAssigned = allDisplayMembers.length;
-                      const percentPresent = totalAssigned > 0 ? Math.round((checkedInCount / totalAssigned) * 100) : 0;
-
-                      return (
-                        <div className="p-5 bg-gradient-to-r from-emerald-50/60 via-teal-50/40 to-slate-50 border border-emerald-200 rounded-2xl space-y-4 shadow-xs">
-                          {/* Top Header & Date Switcher */}
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-emerald-100">
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <Users className="w-5 h-5 text-emerald-700" />
-                                <h3 className="font-extrabold text-slate-900 text-sm">
-                                  Rooftop Installation Team Live Attendance &amp; Site Roster
-                                </h3>
-                              </div>
-                              <p className="text-slate-500 text-xs mt-0.5">
-                                Showing check-in status for <strong className="text-slate-800 font-mono">{activeAttDate === todayStr ? `Today (${activeAttDate})` : activeAttDate}</strong> across all {totalAssigned} assigned crew members.
-                              </p>
-                            </div>
-
-                            <div className="flex flex-wrap items-center gap-2">
-                              {/* Date Switcher */}
-                              <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-xl border border-slate-200 text-xs shadow-2xs">
-                                <Calendar className="w-3.5 h-3.5 text-emerald-600" />
-                                <span className="text-[11px] font-bold text-slate-600">Date:</span>
-                                <input
-                                  type="date"
-                                  value={activeAttDate}
-                                  onChange={e => setAttendanceViewDate(e.target.value)}
-                                  className="border-0 bg-transparent text-xs font-bold font-mono text-slate-800 focus:ring-0 p-0 cursor-pointer"
-                                />
-                                {activeAttDate !== todayStr && (
-                                  <button
-                                    type="button"
-                                    onClick={() => setAttendanceViewDate(todayStr)}
-                                    className="px-2 py-0.5 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-md text-[10px] font-bold cursor-pointer"
-                                  >
-                                    Today
-                                  </button>
-                                )}
-                                {(() => {
-                                  const sched = (selectedProject as any)?.scheduled_installation_date || selectedProject?.targetCompletionDate;
-                                  if (sched && sched !== activeAttDate) {
-                                    return (
-                                      <button
-                                        type="button"
-                                        onClick={() => setAttendanceViewDate(sched)}
-                                        className="px-2 py-0.5 bg-indigo-100 hover:bg-indigo-200 text-indigo-800 rounded-md text-[10px] font-bold cursor-pointer"
-                                        title={`View scheduled date: ${sched}`}
-                                      >
-                                        Kickoff ({sched})
-                                      </button>
-                                    );
-                                  }
-                                  return null;
-                                })()}
-                              </div>
-
-                              <span className={`px-3 py-1 rounded-full text-xs font-black flex items-center gap-1.5 shadow-2xs ${
-                                checkedInCount === totalAssigned 
-                                  ? 'bg-emerald-600 text-white' 
-                                  : checkedInCount > 0 
-                                  ? 'bg-amber-100 text-amber-900 border border-amber-300' 
-                                  : 'bg-slate-200 text-slate-800'
-                              }`}>
-                                <span className={`w-2 h-2 rounded-full ${checkedInCount > 0 ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
-                                <span>{checkedInCount} of {totalAssigned} Checked In ({percentPresent}%)</span>
-                              </span>
-                            </div>
-                          </div>
-
-                          {/* Crew Roster Grid: EVERY Assigned Crew Member Visible Side-by-Side */}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                            {allDisplayMembers.map((member, idx) => {
-                              const key = member.trim().toLowerCase();
-                              const simpleKey = member.split('(')[0].trim().toLowerCase();
-                              const info = checkedInMap[key] || checkedInMap[simpleKey];
-                              const isCheckedIn = Boolean(info);
-
-                              return (
-                                <div
-                                  key={idx}
-                                  className={`p-3.5 rounded-xl border transition-all flex flex-col justify-between ${
-                                    isCheckedIn 
-                                      ? 'bg-white border-emerald-300 shadow-xs' 
-                                      : 'bg-slate-50/80 border-slate-200 opacity-90'
-                                  }`}
-                                >
-                                  <div>
-                                    <div className="flex items-center justify-between gap-2">
-                                      <div className="flex items-center gap-2 truncate">
-                                        <div className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 ${
-                                          isCheckedIn ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'
-                                        }`}>
-                                          {member.charAt(0)}
-                                        </div>
-                                        <div className="truncate">
-                                          <h5 className="font-extrabold text-slate-900 text-xs truncate">
-                                            {member}
-                                          </h5>
-                                          <span className="text-[10px] text-slate-500 block truncate">
-                                            {member.includes('(Lead)') ? 'Site Lead Engineer' : 'Rooftop Field Crew'}
-                                          </span>
-                                        </div>
-                                      </div>
-
-                                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold shrink-0 ${
-                                        isCheckedIn 
-                                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' 
-                                          : 'bg-amber-100 text-amber-800 border border-amber-200'
-                                      }`}>
-                                        {isCheckedIn ? 'Checked In ✓' : 'Pending Check-in'}
-                                      </span>
-                                    </div>
-
-                                    {/* Status Details */}
-                                    <div className="mt-2.5 pt-2 border-t border-slate-100 text-[11px] space-y-1">
-                                      {isCheckedIn && info ? (
-                                        <>
-                                          <div className="flex items-center justify-between">
-                                            <span className="text-slate-500">Check-in Time:</span>
-                                            <span className="font-bold text-slate-800 font-mono">
-                                              {info.checkInTime}
-                                            </span>
-                                          </div>
-                                          {info.latitude && info.longitude ? (
-                                            <div className="flex items-center justify-between">
-                                              <span className="text-slate-500">GPS Stamp:</span>
-                                              <a
-                                                href={`https://www.google.com/maps?q=${info.latitude},${info.longitude}`}
-                                                target="_blank"
-                                                rel="noreferrer"
-                                                className="text-emerald-700 hover:text-emerald-800 font-mono font-bold flex items-center gap-0.5 underline text-[10px]"
-                                              >
-                                                <MapPin className="w-3 h-3 text-emerald-600" />
-                                                <span>{Number(info.latitude).toFixed(4)}°, {Number(info.longitude).toFixed(4)}°</span>
-                                              </a>
-                                            </div>
-                                          ) : (
-                                            <div className="flex items-center justify-between">
-                                              <span className="text-slate-500">Site Location:</span>
-                                              <span className="font-semibold text-slate-700 text-[10px]">Rooftop Verified</span>
-                                            </div>
-                                          )}
-                                        </>
-                                      ) : (
-                                        <div className="flex items-center justify-between text-amber-700">
-                                          <span>Awaiting on-site arrival</span>
-                                          <Clock className="w-3 h-3" />
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-
-                                  {/* Quick Check-in action if not checked in */}
-                                  {!isCheckedIn && (
-                                    <div className="mt-2.5 pt-2 border-t border-slate-200/60 flex justify-end">
-                                      <button
-                                        type="button"
-                                        disabled={checkingInMember === member}
-                                        onClick={() => handleQuickCheckInMember(member)}
-                                        className="w-full py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-bold rounded-lg text-[10px] flex items-center justify-center gap-1 transition-colors cursor-pointer shadow-2xs"
-                                      >
-                                        <Check className="w-3 h-3" />
-                                        <span>{checkingInMember === member ? 'Marking...' : 'Mark Checked In'}</span>
-                                      </button>
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-
-                          {/* Historical / Recorded Attendance Events for Today */}
-                          {allAttendanceLogs.length > 0 && (
-                            <div className="bg-white p-3.5 rounded-xl border border-slate-200 text-xs space-y-2">
-                              <span className="font-bold text-slate-800 text-[11px] uppercase tracking-wider block">
-                                Logged Site Check-in Events ({allAttendanceLogs.length} Records)
-                              </span>
-                              <div className="divide-y divide-slate-100 max-h-40 overflow-y-auto">
-                                {allAttendanceLogs.map((att, idx) => {
-                                  const members = Array.isArray(att.presentTeamMembers) ? att.presentTeamMembers : [att.siteLeadName];
-                                  return (
-                                    <div key={idx} className="py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px]">
-                                      <div className="flex items-center gap-2">
-                                        <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
-                                        <div>
-                                          <span className="font-bold text-slate-900">
-                                            {att.siteLeadName || 'Site Crew'}
-                                          </span>
-                                          <span className="text-slate-500 ml-1.5">
-                                            {members.length > 1 ? `with ${members.join(', ')}` : 'logged check-in'}
-                                          </span>
-                                        </div>
-                                      </div>
-
-                                      <div className="flex items-center gap-3 text-slate-500 font-mono text-[10px] shrink-0">
-                                        <span>{att.date} at {att.checkInTime || att.check_in_time || '09:00'}</span>
-                                        {att.latitude && att.longitude && (
-                                          <a
-                                            href={`https://www.google.com/maps?q=${att.latitude},${att.longitude}`}
-                                            target="_blank"
-                                            rel="noreferrer"
-                                            className="text-emerald-700 underline flex items-center gap-0.5"
-                                          >
-                                            <MapPin className="w-3 h-3" />
-                                            <span>{Number(att.latitude).toFixed(4)}°, {Number(att.longitude).toFixed(4)}°</span>
-                                          </a>
-                                        )}
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()}
-
-                    {/* Site Tasks Section */}
-                    <div className="p-5 bg-white border border-slate-200 rounded-2xl space-y-3">
+                    {/* Warranty & AMC Duration Selection & Service Team Transfer */}
+                    <div className="p-5 bg-white border border-slate-200 rounded-2xl space-y-4">
                       <div className="flex items-center justify-between pb-2 border-b border-slate-100">
                         <div>
-                          <h4 className="font-bold text-slate-900 text-sm flex items-center gap-2">
-                            <ListTodo className="w-4 h-4 text-emerald-600" />
-                            <span>Tasks Uploaded by Installation Team &amp; PM</span>
+                          <h4 className="font-extrabold text-slate-900 text-sm flex items-center gap-2">
+                            <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                            <span>Customer Warranty &amp; Service Team Handover</span>
                           </h4>
-                          <p className="text-slate-500 text-[11px] mt-0.5">
-                            Dynamic site tasks written and executed on site. Check off tasks or assign new scopes.
+                          <p className="text-[11px] text-slate-500">
+                            Automatic registration into Service Team portal with recurring maintenance visits
                           </p>
                         </div>
-
-                        {selectedProject.stage !== 'Completed' ? (
-                          <button
-                            onClick={() => setShowPmAddTaskModal(true)}
-                            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-xs"
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                            <span>Add Task</span>
-                          </button>
-                        ) : (
-                          <span className="px-3 py-1 bg-slate-100 text-slate-500 rounded-lg text-[11px] font-semibold border border-slate-200 flex items-center gap-1">
-                            <Lock className="w-3 h-3 text-slate-400" />
-                            <span>Tasks Finalized (Completed)</span>
-                          </span>
-                        )}
+                        <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800">
+                          {selectedProject.stage === 'Completed' ? 'Service Handover Active ✓' : 'Ready for Handover'}
+                        </span>
                       </div>
 
-                      {(!selectedProject.tasks || selectedProject.tasks.length === 0) ? (
-                        <div className="p-6 text-center bg-slate-50 border border-slate-200 rounded-xl">
-                          <ListTodo className="w-6 h-6 text-slate-300 mx-auto mb-1.5" />
-                          <p className="text-xs text-slate-500 font-medium">No tasks logged for this project yet.</p>
-                          {selectedProject.stage !== 'Completed' && (
-                            <button
-                              onClick={() => setShowPmAddTaskModal(true)}
-                              className="mt-2.5 px-3 py-1 bg-emerald-600 text-white text-xs font-bold rounded-lg cursor-pointer"
-                            >
-                              + Create First Task
-                            </button>
-                          )}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                        {[
+                          { years: 5, label: '5 Years (Standard Included)', desc: 'Included with EPC contract' },
+                          { years: 7, label: '7 Years (Extended Care)', desc: 'Quarterly health audits' },
+                          { years: 8, label: '8 Years (Premium Complete)', desc: 'Comprehensive coverage' },
+                          { years: 10, label: '10 Years (Full Lifecycle AMC)', desc: 'Full replacement guarantee' }
+                        ].map(opt => (
+                          <div
+                            key={opt.years}
+                            onClick={() => setAmcYearsInput(opt.years)}
+                            className={`p-3 rounded-xl border text-left cursor-pointer transition-all ${
+                              amcYearsInput === opt.years
+                                ? 'bg-emerald-50 border-emerald-500 ring-2 ring-emerald-500 shadow-xs'
+                                : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
+                            }`}
+                          >
+                            <span className="font-extrabold text-slate-900 block text-xs">{opt.years} Years</span>
+                            <span className="text-[10px] text-slate-600 font-semibold block mt-0.5">{opt.label}</span>
+                            <span className="text-[9px] text-slate-400 block mt-1">{opt.desc}</span>
+                          </div>
+                        ))}
+                      </div>
+
+                      {selectedProject.stage !== 'Completed' ? (
+                        <div className="p-4 bg-emerald-50/80 border border-emerald-300 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-3">
+                          <div>
+                            <span className="font-black text-sm text-emerald-950 flex items-center gap-1.5">
+                              <Rocket className="w-4 h-4 text-emerald-600" />
+                              <span>Complete Project &amp; Transfer to Service Team</span>
+                            </span>
+                            <p className="text-xs text-emerald-800 mt-0.5">
+                              This sets the project status to Completed, generates the warranty dossier, and automatically schedules recurring AMC visits for {amcYearsInput} years in the Service Team portal.
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => setShowGridLiveModal(true)}
+                            className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl text-xs shadow-md transition-all flex items-center gap-2 shrink-0 cursor-pointer animate-pulse"
+                          >
+                            <Zap className="w-4 h-4" />
+                            <span>Confirm Grid Live &amp; Handover ({amcYearsInput} Years)</span>
+                          </button>
                         </div>
                       ) : (
-                        <div className="space-y-2">
-                          {selectedProject.tasks.map((task) => {
-                            const isDone = Boolean(task.isCompleted || task.status === 'Completed');
-                            return (
-                              <div
-                                key={task.id}
-                                className={`p-3 rounded-xl border transition-all flex items-center justify-between gap-3 ${
-                                  isDone ? 'bg-slate-50 border-slate-200 opacity-80' : 'bg-white border-slate-200 hover:border-emerald-300 shadow-2xs'
-                                }`}
-                              >
-                                <div className="flex items-start gap-3 flex-1 min-w-0">
-                                  <button
-                                    onClick={() => {
-                                      const nextCompleted = !isDone;
-                                      updateProjectTask(selectedProject.id, task.id, nextCompleted);
-                                      const updated = (selectedProject.tasks || []).map(t => 
-                                        t.id === task.id ? { ...t, isCompleted: nextCompleted, status: nextCompleted ? 'Completed' as const : 'Pending' as const } : t
-                                      );
-                                      setSelectedProject({ ...selectedProject, tasks: updated });
-                                    }}
-                                    className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 mt-0.5 cursor-pointer transition-colors ${
-                                      isDone ? 'bg-emerald-600 border-emerald-600 text-white' : 'border-slate-300 hover:border-emerald-500 bg-white'
-                                    }`}
-                                  >
-                                    {isDone && <Check className="w-3.5 h-3.5" />}
-                                  </button>
-
-                                  <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-2">
-                                      <span className={`text-xs font-bold ${isDone ? 'line-through text-slate-400' : 'text-slate-900'}`}>
-                                        {task.title}
-                                      </span>
-                                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
-                                        {task.category || 'Site Task'}
-                                      </span>
-                                    </div>
-                                    <div className="flex items-center gap-3 text-[11px] text-slate-400 mt-0.5">
-                                      <span className="flex items-center gap-1">
-                                        <User className="w-3 h-3" />
-                                        <span>Assignee: {task.assignedTo || task.assignedToName || 'Installation Team'}</span>
-                                      </span>
-                                      {task.dueDate && (
-                                        <span className="flex items-center gap-1 font-mono">
-                                          <Calendar className="w-3 h-3" />
-                                          <span>Target: {task.dueDate}</span>
-                                        </span>
-                                      )}
-                                    </div>
-                                  </div>
-                                </div>
-
-                                <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold shrink-0 ${
-                                  isDone ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-                                }`}>
-                                  {isDone ? 'Completed' : (task.status || 'Pending')}
-                                </span>
-                              </div>
-                            );
-                          })}
+                        <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between">
+                          <div className="space-y-0.5">
+                            <div className="font-bold text-slate-800 text-xs">Project Successfully Closed &amp; Transferred</div>
+                            <div className="text-[11px] text-slate-500">Registered in Service schedule expiring {new Date().getFullYear() + amcYearsInput}.</div>
+                          </div>
+                          <span className="px-3 py-1 bg-emerald-100 text-emerald-800 rounded-lg text-xs font-bold border border-emerald-300">
+                            Closed ✓
+                          </span>
                         </div>
                       )}
                     </div>
                   </div>
-                )}
-
-                {/* ------------------------------------------------------------- */}
-                {/* 6. STAGE: INSTALLATION COMPLETED                              */}
-                {/* ------------------------------------------------------------- */}
-                {selectedStageMilestone === 'Installation Completed' && (
-                  <div className="space-y-4">
-                    <div className="p-5 bg-white border border-slate-200 rounded-2xl space-y-4">
-                      <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                        <div>
-                          <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
-                            <Wrench className="w-4 h-4 text-emerald-600" />
-                            <span>Milestone 6: 12-Point EPC Commissioning Checklist</span>
-                          </h3>
-                          <p className="text-[11px] text-slate-500">
-                            Strict technical inspection passed before grid synchronization.
-                          </p>
-                        </div>
-
-                        <button
-                          onClick={() => onNavigate('installation')}
-                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-xs"
-                        >
-                          <Wrench className="w-3.5 h-3.5" />
-                          <span>Open 12-Point Checklist View</span>
-                        </button>
-                      </div>
-
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 text-xs">
-                        {[
-                          'Structure Fastening & Torque',
-                          'Module Clamping & Pitch',
-                          'Inverter Wall Mounting',
-                          'DC Wiring Conduit Protected',
-                          'AC Cabling Armoured & Clipped',
-                          'Chemical Earthing Pits (<5Ω)',
-                          'Lightning Arrester Installed',
-                          'DCDB Protection Fuses Verified',
-                          'ACDB Isolator Test',
-                          'Remote Wi-Fi Monitoring Sync',
-                          'Voc & Isc String Multi-meter Test',
-                          'Safety Warning Signages Affixed'
-                        ].map((chk, idx) => (
-                          <div key={idx} className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 flex items-center gap-2">
-                            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                            <span className="text-slate-800 font-medium text-[11px]">{chk}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* ------------------------------------------------------------- */}
-                {/* 7. STAGE: COMMISSIONING                                       */}
-                {/* ------------------------------------------------------------- */}
-                {selectedStageMilestone === 'Commissioning' && (
-                  <div className="space-y-4">
-                    <div className="p-5 bg-white border border-slate-200 rounded-2xl space-y-4">
-                      <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                        <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
-                          <Zap className="w-4 h-4 text-emerald-600" />
-                          <span>Milestone 7: DISCOM Net-Metering &amp; Grid Synchronization</span>
-                        </h3>
-                        <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800">
-                          Synchronization Ready
-                        </span>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                        <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase">Sanction Ref</span>
-                          <span className="font-mono font-bold text-slate-900 block mt-0.5">{selectedProject.discomSanctionNumber || 'BESCOM-SANC-2026-9941'}</span>
-                        </div>
-                        <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase">Target Handover</span>
-                          <span className="font-mono font-bold text-emerald-700 block mt-0.5">{selectedProject.targetCompletionDate}</span>
-                        </div>
-                        <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase">DISCOM Inspector</span>
-                          <span className="font-semibold text-slate-800 block mt-0.5">Joint Inspection Cleared</span>
-                        </div>
-                      </div>
-
-                      <p className="text-xs text-slate-600">
-                        Bi-directional net meter installed by DISCOM engineer. Inverter Anti-Islanding and voltage sync verified. Solar plant is actively exporting green energy to the grid.
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {/* ------------------------------------------------------------- */}
-                {/* 8. STAGE: COMPLETED                                           */}
-                {/* ------------------------------------------------------------- */}
-                {selectedStageMilestone === 'Completed' && (
-                  <div className="space-y-4">
-                    <div className="p-5 bg-white border border-slate-200 rounded-2xl space-y-4">
-                      <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                        <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
-                          <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                          <span>Milestone 8: Final Handover, Warranty &amp; AMC Initiation</span>
-                        </h3>
-                        <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800">
-                          Project Commissioned &amp; Closed
-                        </span>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                        <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase">Panel Warranty</span>
-                          <span className="font-bold text-emerald-700 block mt-0.5">25-Year Performance</span>
-                        </div>
-                        <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase">Inverter Warranty</span>
-                          <span className="font-bold text-emerald-700 block mt-0.5">5-Year Replacement</span>
-                        </div>
-                        <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase">Customer Portal</span>
-                          <span className="font-semibold text-slate-800 block mt-0.5">Credentials Issued</span>
-                        </div>
-                      </div>
-
-                      <p className="text-xs text-slate-600">
-                        Handover certificate signed by {selectedProject.customerName}. AMC contract registered in service schedule.
-                      </p>
-                    </div>
-                  </div>
-                )}
+                );
+              })()}
               </div>
             )}
           </div>
@@ -2036,13 +2243,19 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
                   <Truck className="w-5 h-5" />
                 </span>
                 <div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <h4 className="font-extrabold text-slate-900 text-sm">
                       {inProcurementQuotes.length} Deal{inProcurementQuotes.length > 1 ? 's' : ''} in Procurement (Purchase Team)
                     </h4>
                     <span className="px-2 py-0.5 text-[10px] font-black uppercase tracking-wider rounded-full bg-amber-600 text-white">
                       Equipment Sourcing In Progress
                     </span>
+                    {inProcurementQuotes.some(q => q.advancePaymentReceived || payments?.some(p => (p.isAdvance || p.paymentNumber?.includes('ADV')) && (p.quotationId === q.id || p.customerName?.toLowerCase() === q.leadName?.toLowerCase()))) && (
+                      <span className="px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider rounded-full bg-emerald-700 text-white flex items-center gap-1 shadow-2xs">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-200" />
+                        <span>Advance Paid</span>
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-slate-600 mt-1">
                     {inProcurementQuotes.map(q => `${q.leadName} (${q.quotationNumber} • ${q.systemCapacityKw} kW)`).join(', ')} — Purchase Team is issuing supplier POs and managing site delivery. EPC project conversion unlocks once materials arrive with customer digital signature (GRN).
@@ -2093,7 +2306,7 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
                 {activeExecutionCount} Plants
               </div>
               <span className="text-[11px] font-semibold text-amber-600 block">
-                Civil &amp; Electrical Mounting Active
+                Structural &amp; Electrical Mounting Active
               </span>
             </div>
 
@@ -2160,19 +2373,37 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
                         <span className="font-mono font-bold text-xs text-slate-900 block truncate">
                           {p.id}
                         </span>
-                        <h4 className="font-bold text-slate-900 text-sm truncate mt-0.5">{p.customerName}</h4>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <h4 className="font-bold text-slate-900 text-sm truncate mt-0.5">{p.customerName}</h4>
+                          {(p.lastModifiedRole === 'Super Admin' || p.lastModifiedRole === 'CEO') && (
+                            <span 
+                              title={`Edited by ${p.lastModifiedBy || p.lastModifiedRole}`}
+                              className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-purple-100 text-purple-800 border border-purple-300 shrink-0"
+                            >
+                              Edited by {p.lastModifiedRole === 'CEO' ? 'CEO' : 'Super Admin'}
+                            </span>
+                          )}
+                        </div>
                         <span className="text-[11px] text-slate-400 block truncate">
                           {p.customerAddress}
                         </span>
                       </div>
 
-                      <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider shrink-0 ${
-                        p.stage === 'Completed' ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' :
-                        p.stage.includes('Installation') ? 'bg-blue-100 text-blue-800 border border-blue-200' :
-                        'bg-slate-100 text-slate-700 border border-slate-200'
-                      }`}>
-                        {p.stage}
-                      </span>
+                      <div className="flex items-center gap-1.5 flex-wrap shrink-0">
+                        {(p.advancePaymentReceived || payments?.some(pay => (pay.isAdvance || pay.paymentNumber?.includes('ADV')) && (pay.projectId === p.id || pay.customerName?.toLowerCase() === p.customerName?.toLowerCase()))) && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs">
+                            <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600" />
+                            <span>Advance Paid</span>
+                          </span>
+                        )}
+                        <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider shrink-0 ${
+                          p.stage === 'Completed' ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' :
+                          p.stage.includes('Installation') ? 'bg-blue-100 text-blue-800 border border-blue-200' :
+                          'bg-slate-100 text-slate-700 border border-slate-200'
+                        }`}>
+                          {p.stage}
+                        </span>
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-2 p-2.5 bg-slate-50 rounded-xl text-xs">
@@ -2248,20 +2479,38 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
                           {p.id}
                         </td>
                         <td className="py-3.5 px-4">
-                          <div className="font-bold text-slate-900">{p.customerName}</div>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-bold text-slate-900">{p.customerName}</span>
+                            {(p.lastModifiedRole === 'Super Admin' || p.lastModifiedRole === 'CEO') && (
+                              <span 
+                                title={`Edited by ${p.lastModifiedBy || p.lastModifiedRole}${p.lastModifiedAt ? ' at ' + new Date(p.lastModifiedAt).toLocaleDateString() : ''}`}
+                                className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-purple-100 text-purple-800 border border-purple-300"
+                              >
+                                Edited by {p.lastModifiedRole === 'CEO' ? 'CEO' : 'Super Admin'}
+                              </span>
+                            )}
+                          </div>
                           <div className="text-[11px] text-slate-400">{p.customerAddress}</div>
                         </td>
                         <td className="py-3.5 px-4 text-center font-mono font-bold text-slate-900">
                           {p.capacityKw} kW
                         </td>
                         <td className="py-3.5 px-4">
-                          <span className={`inline-block px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider ${
-                            p.stage === 'Completed' ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' :
-                            p.stage.includes('Installation') ? 'bg-blue-50 text-blue-800 border border-blue-200' :
-                            'bg-slate-100 text-slate-700 border border-slate-200'
-                          }`}>
-                            {p.stage}
-                          </span>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {(p.advancePaymentReceived || payments?.some(pay => (pay.isAdvance || pay.paymentNumber?.includes('ADV')) && (pay.projectId === p.id || pay.customerName?.toLowerCase() === p.customerName?.toLowerCase()))) && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs">
+                                <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600" />
+                                <span>Advance Paid</span>
+                              </span>
+                            )}
+                            <span className={`inline-block px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider ${
+                              p.stage === 'Completed' ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' :
+                              p.stage.includes('Installation') ? 'bg-blue-50 text-blue-800 border border-blue-200' :
+                              'bg-slate-100 text-slate-700 border border-slate-200'
+                            }`}>
+                              {p.stage}
+                            </span>
+                          </div>
                         </td>
                         <td className="py-3.5 px-4 font-mono text-slate-600">
                           {p.discomSanctionNumber || 'BESCOM-SANC-2026'}
@@ -2331,7 +2580,7 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
 
             <form onSubmit={handleConfirmSiteReadiness} className="p-5 space-y-4 text-xs">
               <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs">
-                <strong>Project Manager Clearance:</strong> Before installation team commences work, verify that the physical rooftop civil conditions and electrical interconnect points meet technical standards.
+                <strong>Project Manager Clearance:</strong> Before installation team commences work, verify that the physical rooftop structural conditions and electrical interconnect points meet technical standards.
               </div>
 
               <div>
@@ -2364,13 +2613,13 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
                 <label className="flex items-start gap-2.5 p-2.5 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={civilIntegrityConfirmed}
-                    onChange={e => setCivilIntegrityConfirmed(e.target.checked)}
+                    checked={structuralIntegrityConfirmed}
+                    onChange={e => setStructuralIntegrityConfirmed(e.target.checked)}
                     className="mt-0.5 rounded text-emerald-600 focus:ring-emerald-500"
                   />
                   <div>
-                    <span className="font-bold text-slate-900">Civil Structural &amp; Waterproofing Integrity</span>
-                    <p className="text-[11px] text-slate-500">RCC roof slab anchor points tested; chemical waterproofing approved</p>
+                    <span className="font-bold text-slate-900">Rooftop Structural &amp; Mounting Anchor Integrity</span>
+                    <p className="text-[11px] text-slate-500">RCC roof slab anchor points tested; pre-engineered mounting approved</p>
                   </div>
                 </label>
 
@@ -2413,6 +2662,160 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
                   className="px-5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-xs transition-colors cursor-pointer"
                 >
                   {isConfirmingReadiness ? 'Confirming...' : 'Approve Readiness & Unlock Installation'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Grid Live & AMC Warranty Duration Modal (Client Meeting Requirement) */}
+      {showGridLiveModal && selectedProject && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-lg w-full p-6 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  <Zap className="w-5 h-5 text-emerald-600" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-slate-900 text-sm">Grid Live Synchronization &amp; AMC Activation</h3>
+                  <p className="text-[11px] text-slate-500">Official power generation start &amp; service contract enrollment</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowGridLiveModal(false)}
+                className="p-1 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-3.5 bg-emerald-50/70 border border-emerald-200 rounded-xl space-y-1.5 text-xs text-emerald-950">
+              <div className="flex justify-between font-bold">
+                <span>Project ID: {selectedProject.id}</span>
+                <span>Capacity: {selectedProject.capacityKw} kWp</span>
+              </div>
+              <div className="text-[11px] text-emerald-800">
+                Customer: <strong>{selectedProject.customerName}</strong> ({selectedProject.customerPhone})
+              </div>
+            </div>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const today = new Date().toISOString().split('T')[0];
+                const readingNum = parseFloat(meterReadingInput) || 0;
+                
+                // 1. Update Project in State & MySQL
+                updateProject(selectedProject.id, {
+                  stage: 'Completed',
+                  gridLiveDate: today,
+                  amcWarrantyYears: amcYearsInput,
+                  solarMeterInitialReading: readingNum,
+                  ebInspectionCleared: true,
+                  solarMeterFixed: true,
+                  warrantyActivated: true,
+                  amcInitiated: true,
+                });
+
+                // 2. Trigger CRM Stage update to auto-provision AMC contract in Service Portal
+                updateProjectStage(selectedProject.id, 'Completed');
+
+                setSelectedProject({
+                  ...selectedProject,
+                  stage: 'Completed',
+                  gridLiveDate: today,
+                  amcWarrantyYears: amcYearsInput,
+                  solarMeterInitialReading: readingNum,
+                  ebInspectionCleared: true,
+                  solarMeterFixed: true,
+                  warrantyActivated: true,
+                  amcInitiated: true,
+                });
+
+                setSelectedStageMilestone('Completed');
+                setShowGridLiveModal(false);
+              }}
+              className="space-y-4 text-xs"
+            >
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1.5">
+                  Select Customer Warranty &amp; AMC Duration *
+                </label>
+                <select
+                  value={amcYearsInput}
+                  onChange={e => setAmcYearsInput(Number(e.target.value))}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-extrabold text-slate-900 focus:ring-2 focus:ring-emerald-500"
+                >
+                  <option value={5}>5 Years (Standard Included Warranty &amp; AMC)</option>
+                  <option value={7}>7 Years (Extended Care &amp; Performance Contract)</option>
+                  <option value={8}>8 Years (Premium Complete Care Contract)</option>
+                  <option value={10}>10 Years (Comprehensive Full Lifecycle AMC)</option>
+                </select>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  This automatically transfers the project into the Service Team portal with a {amcYearsInput}-year service contract and scheduled visits.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-800 mb-1">
+                    Initial Solar Meter Reading (kWh)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={meterReadingInput}
+                    onChange={e => setMeterReadingInput(e.target.value)}
+                    className="w-full p-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-800 mb-1">
+                    Synchronization Date
+                  </label>
+                  <input
+                    type="date"
+                    defaultValue={new Date().toISOString().split('T')[0]}
+                    disabled
+                    className="w-full p-2 bg-slate-100 border border-slate-300 rounded-xl text-xs font-bold text-slate-600 cursor-not-allowed"
+                  />
+                </div>
+              </div>
+
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5">
+                <div className="font-bold text-slate-800 text-[11px]">Handover &amp; Service Actions:</div>
+                <div className="text-[10px] text-slate-600 space-y-1">
+                  <div className="flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Plant starts feeding green solar energy into the DISCOM grid.</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Service Team portal registers AMC contract expiring in {new Date().getFullYear() + amcYearsInput}.</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Customer receives warranty certificates and portal credentials.</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-slate-200 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowGridLiveModal(false)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 rounded-xl cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 text-xs font-extrabold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Zap className="w-4 h-4" />
+                  <span>Confirm Grid Live &amp; Activate {amcYearsInput}-Yr AMC</span>
                 </button>
               </div>
             </form>

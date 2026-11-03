@@ -142,6 +142,7 @@ export const createLead = async (req: Request, res: Response) => {
 
     const customerType = l.customerType || l.customer_type || 'Residential';
     const systemType = l.systemType || l.system_type || 'On-Grid';
+    const connectionSpace = l.connectionSpace || l.connection_space || 'Single Space';
 
     let finalAssignedId = l.assignedToId;
     let finalAssignedName = l.assignedToName;
@@ -174,14 +175,14 @@ export const createLead = async (req: Request, res: Response) => {
     l.assignedToName = finalAssignedName;
 
     await pool.query(
-      `INSERT INTO leads (id, name, email, phone, city, state, address, pincode, source, status, priority, recommended_priority, priority_override_reason, buying_intent, assigned_to_id, assigned_to_name, monthly_bill, sanction_load, roof_area_sqft, roof_type, recommended_kw, estimated_budget, notes, customer_type, system_type, created_at, updated_at, last_contacted_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO leads (id, name, email, phone, city, state, address, pincode, source, status, priority, recommended_priority, priority_override_reason, buying_intent, assigned_to_id, assigned_to_name, monthly_bill, sanction_load, roof_area_sqft, roof_type, connection_space, recommended_kw, estimated_budget, notes, customer_type, system_type, created_at, updated_at, last_contacted_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         l.id, l.name.trim(), l.email || null, cleanPhone, l.city || '', l.state || '', l.address || '', l.pincode.toString().trim(),
         l.source || 'Website', l.status || 'New', l.priority || 'Medium',
         l.recommendedPriority || null, l.priorityOverrideReason || null, l.buyingIntent || null,
         finalAssignedId, finalAssignedName, l.monthlyBill || 0,
-        l.sanctionLoad || 0, l.roofAreaSqFt || 0, l.roofType || null, l.recommendedKw || 0,
+        l.sanctionLoad || 0, l.roofAreaSqFt || 0, l.roofType || null, connectionSpace, l.recommendedKw || 0,
         l.estimatedBudget || 0, l.notes || '', customerType, systemType,
         l.createdAt || new Date().toISOString(), l.updatedAt || new Date().toISOString(), l.lastContactedAt || null
       ]
@@ -189,6 +190,7 @@ export const createLead = async (req: Request, res: Response) => {
 
     l.customerType = customerType;
     l.systemType = systemType;
+    l.connectionSpace = connectionSpace;
     res.json({ success: true, lead: l });
   } catch (err: any) {
     console.error('Error creating lead:', err);
@@ -200,6 +202,7 @@ export const updateLead = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const updates = req.body;
+    const user = (req as any).user;
     const fields: string[] = [];
     const values: any[] = [];
 
@@ -226,10 +229,41 @@ export const updateLead = async (req: Request, res: Response) => {
     if (updates.systemType !== undefined || updates.system_type !== undefined) {
       fields.push('system_type = ?'); values.push(updates.systemType || updates.system_type);
     }
+    if (updates.connectionSpace !== undefined || updates.connection_space !== undefined) {
+      fields.push('connection_space = ?'); values.push(updates.connectionSpace || updates.connection_space);
+    }
     if (updates.notes !== undefined) { fields.push('notes = ?'); values.push(updates.notes); }
     if (updates.updatedAt !== undefined) { fields.push('updated_at = ?'); values.push(updates.updatedAt); }
     if (updates.assignedToId !== undefined) { fields.push('assigned_to_id = ?'); values.push(updates.assignedToId); }
     if (updates.assignedToName !== undefined) { fields.push('assigned_to_name = ?'); values.push(updates.assignedToName); }
+
+    // Super Admin / CEO Edit Tracking
+    if (user?.role === 'Super Admin' || user?.role === 'CEO' || updates.lastModifiedRole === 'Super Admin') {
+      const modifierName = user?.name || updates.lastModifiedBy || 'Super Admin';
+      const modifierRole = user?.role || updates.lastModifiedRole || 'Super Admin';
+      const modifiedAt = new Date().toISOString();
+      fields.push('last_modified_by = ?'); values.push(modifierName);
+      fields.push('last_modified_role = ?'); values.push(modifierRole);
+      fields.push('last_modified_at = ?'); values.push(modifiedAt);
+
+      // Append to edit_history
+      try {
+        const [currLead]: any = await pool.query('SELECT edit_history FROM leads WHERE id = ? LIMIT 1', [id]);
+        let history: any[] = [];
+        if (currLead && currLead.length > 0 && currLead[0].edit_history) {
+          history = typeof currLead[0].edit_history === 'string' ? JSON.parse(currLead[0].edit_history) : currLead[0].edit_history;
+        }
+        history.push({
+          timestamp: modifiedAt,
+          editedBy: modifierName,
+          editorRole: modifierRole,
+          changesSummary: Object.keys(updates).filter(k => !['lastModifiedBy', 'lastModifiedRole', 'lastModifiedAt', 'editHistory'].includes(k)).join(', ') || 'Lead details updated'
+        });
+        fields.push('edit_history = ?'); values.push(JSON.stringify(history));
+      } catch (histErr) {
+        console.warn('Could not update lead edit history:', histErr);
+      }
+    }
 
     if (fields.length > 0) {
       values.push(id);

@@ -11,9 +11,10 @@ import { InvoicesView } from '../../components/finance/InvoicesView';
 import { PaymentsView } from '../../components/finance/PaymentsView';
 import { ExpensesView } from '../../components/finance/ExpensesView';
 import { PurchaseOrdersView } from '../../components/inventory/PurchaseOrdersView';
+import { AdvancePaymentsView } from '../../components/finance/AdvancePaymentsView';
 
 interface AccountsPanelProps {
-  initialSubTab?: 'dashboard' | 'invoices' | 'payments' | 'expenses' | 'pos';
+  initialSubTab?: 'dashboard' | 'invoices' | 'payments' | 'expenses' | 'pos' | 'advances';
   onTabChange?: (tab: string) => void;
 }
 
@@ -23,7 +24,7 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({
 }) => {
   const { invoices } = useCrm();
   const [activeSubTab, setActiveSubTab] = useState<
-    'dashboard' | 'invoices' | 'payments' | 'expenses' | 'pos'
+    'dashboard' | 'invoices' | 'payments' | 'expenses' | 'pos' | 'advances'
   >(initialSubTab);
 
   React.useEffect(() => {
@@ -104,6 +105,8 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({
         )}
 
         {activeSubTab === 'invoices' && <InvoicesView />}
+
+        {activeSubTab === 'advances' && <AdvancePaymentsView onNavigateToTab={onTabChange} />}
 
         {activeSubTab === 'payments' && <PaymentsView />}
 
