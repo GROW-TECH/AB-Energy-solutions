@@ -104,7 +104,9 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
       const data = await res.json();
       if (data.success && data.quotation) {
         setActiveQuotation(data.quotation);
-        setQuotations(prev => prev.map(q => q.id === data.quotation.id ? { ...q, ...data.quotation } : q));
+        if (typeof setQuotations === 'function') {
+          setQuotations(prev => prev.map(q => q.id === data.quotation.id ? { ...q, ...data.quotation } : q));
+        }
         return true;
       }
     } catch (err) {

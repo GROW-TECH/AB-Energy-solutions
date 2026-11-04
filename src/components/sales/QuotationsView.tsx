@@ -25,7 +25,7 @@ export const QuotationsView: React.FC<QuotationsViewProps> = ({
   onNavigateToProject,
 }) => {
   const { 
-    quotations, leads, surveys, projects, sendQuotation, acceptQuotation, 
+    quotations, setQuotations, leads, surveys, projects, sendQuotation, acceptQuotation, 
     createQuotation, approveQuotationDiscount, recordCustomerAcceptance,
     editQuotationData, updateQuotationPriority, currentUser, activeRole,
     recordPayment, updateProject
@@ -123,7 +123,9 @@ export const QuotationsView: React.FC<QuotationsViewProps> = ({
       const data = await res.json();
       if (data.success && data.quotation) {
         setSelectedQuoteForPreview(data.quotation);
-        setQuotations(prev => prev.map(q => q.id === data.quotation.id ? { ...q, ...data.quotation } : q));
+        if (typeof setQuotations === 'function') {
+          setQuotations(prev => prev.map(q => q.id === data.quotation.id ? { ...q, ...data.quotation } : q));
+        }
         return true;
       }
     } catch (err) {

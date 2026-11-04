@@ -97,6 +97,7 @@ interface CrmContextType {
   deleteSiteSurvey: (surveyId: string) => Promise<{ success: boolean; error?: string }>;
   reloadSurvey: (surveyId: string) => Promise<SiteSurvey | null>;
   createQuotation: (quoteData: Partial<Quotation>) => Quotation;
+  setQuotations: React.Dispatch<React.SetStateAction<Quotation[]>>;
   createQuotationRevision: (quotationId: string, revisionData: Partial<Quotation>) => Promise<void>;
   approveQuotationDiscount: (quotationId: string) => Promise<boolean>;
   sendQuotation: (quotationId: string) => void;
@@ -2689,6 +2690,7 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       deleteSiteSurvey,
       reloadSurvey,
       createQuotation,
+      setQuotations,
       createQuotationRevision,
       approveQuotationDiscount,
       sendQuotation,
