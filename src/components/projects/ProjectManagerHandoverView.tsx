@@ -20,7 +20,7 @@ export const ProjectManagerHandoverView: React.FC<ProjectManagerHandoverViewProp
   onNavigateToTab,
   onNavigateToProject,
 }) => {
-  const { quotations, projects, acceptQuotation, surveys, currentUser, refreshData, payments } = useCrm();
+  const { quotations, projects, acceptQuotation, surveys, currentUser, refreshData, payments, authFetch } = useCrm();
 
   // Group quotations by PM lifecycle
   const incomingAcceptedQuotes = quotations.filter(q => q.status === 'Customer_Accepted');
@@ -40,22 +40,20 @@ export const ProjectManagerHandoverView: React.FC<ProjectManagerHandoverViewProp
   const [indentsMap, setIndentsMap] = useState<Record<string, any>>({});
 
   useEffect(() => {
-    const token = localStorage.getItem('ab_solar_token') || localStorage.getItem('ab_energy_auth_token') || '';
-    fetch('/api/procurement/pending-indents', {
-      headers: { Authorization: `Bearer ${token}` }
-    })
+    authFetch('/api/procurement/pending-indents')
       .then(res => res.json())
       .then(data => {
         if (data.success && data.indents) {
           const map: Record<string, any> = {};
           data.indents.forEach((ind: any) => {
             if (ind.quotation_id) map[ind.quotation_id] = ind;
+            if (ind.quotation_number) map[ind.quotation_number] = ind;
           });
           setIndentsMap(map);
         }
       })
       .catch(err => console.error('Error fetching indents in PM handover:', err));
-  }, []);
+  }, [authFetch]);
 
   // PM KPIs
   const totalAgreedValue = incomingAcceptedQuotes.reduce((sum, q) => sum + q.totalAmount, 0);
@@ -504,7 +502,7 @@ export const ProjectManagerHandoverView: React.FC<ProjectManagerHandoverViewProp
                     (p.quotationId === q.id || p.customerName?.toLowerCase() === q.leadName?.toLowerCase() || (q.convertedToProjectId && p.projectId === q.convertedToProjectId))
                   )
                 );
-                const indent = indentsMap[q.id];
+                const indent = indentsMap[q.id] || (q.quotationNumber ? indentsMap[q.quotationNumber] : null);
                 const isMaterialsReady = Boolean(
                   indent?.materials_purchased_confirmed || 
                   indent?.has_signed_grn || 
