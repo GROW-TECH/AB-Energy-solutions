@@ -110,6 +110,8 @@ interface CrmContextType {
   updateProjectTask: (projectId: string, taskId: string, isCompleted: boolean) => void;
   addProjectTask: (projectId: string, task: Partial<ProjectTask>) => void;
   recordPayment: (paymentData: Partial<Payment>) => Payment;
+  verifyPaymentScreenshot: (paymentId: string, notes?: string) => Promise<boolean>;
+  sendQuotationToAuditor: (quotationId: string, auditorPhone?: string, notes?: string) => Promise<boolean>;
   createInvoice: (invoiceData: Partial<Invoice>) => Invoice;
   addExpense: (expenseData: Partial<ExpenseItem>) => ExpenseItem;
   addSupplier: (supplierData: Partial<Supplier>) => Supplier;
@@ -2138,6 +2140,7 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const recordPayment = (paymentData: Partial<Payment>): Payment => {
     const paymentId = `PAY-2026-${String(payments.length + 1).padStart(3, '0')}`;
     const pNumber = `PAY-2026-000${String(payments.length + 1).padStart(2, '0')}`;
+    const hasScreenshot = Boolean(paymentData.paymentScreenshot);
 
     const newPayment: Payment = {
       id: paymentId,
@@ -2151,16 +2154,53 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       paymentMode: paymentData.paymentMode || 'NEFT/RTGS',
       transactionReference: paymentData.transactionReference || `TXN-${Date.now().toString().slice(-6)}`,
       bankName: paymentData.bankName || 'HDFC Bank',
-      status: 'Verified',
+      status: paymentData.status || (hasScreenshot && !paymentData.verifiedByAccounts ? 'Pending Verification' : 'Verified'),
       recordedBy: paymentData.recordedBy || activeRole,
       isAdvance: Boolean(paymentData.isAdvance),
       quotationId: paymentData.quotationId || undefined,
+      paymentScreenshot: paymentData.paymentScreenshot || undefined,
+      leadId: paymentData.leadId || undefined,
+      verifiedByAccounts: Boolean(paymentData.verifiedByAccounts),
+      verifiedBy: paymentData.verifiedBy || undefined,
+      verifiedAt: paymentData.verifiedAt || undefined,
+      verificationNotes: paymentData.verificationNotes || undefined,
       reconciled: Boolean(paymentData.reconciled || paymentData.isAdvance),
       reconciledAt: paymentData.reconciledAt || (paymentData.isAdvance ? new Date().toISOString() : undefined),
       reconciledBy: paymentData.reconciledBy || (paymentData.isAdvance ? 'Accounts Engine' : undefined),
     };
 
     setPayments(prev => [newPayment, ...prev]);
+
+    // If payment screenshot uploaded, sync screenshot and status to linked Lead, Quotation & Project
+    if (newPayment.paymentScreenshot) {
+      if (newPayment.leadId) {
+        setLeads(prev => prev.map(l => l.id === newPayment.leadId ? {
+          ...l,
+          advancePaymentScreenshot: newPayment.paymentScreenshot,
+          advancePaymentAmount: newPayment.amount,
+          advancePaymentRef: newPayment.transactionReference,
+          advancePaymentVerified: Boolean(newPayment.verifiedByAccounts)
+        } : l));
+      }
+      if (newPayment.quotationId) {
+        setQuotations(prev => prev.map(q => q.id === newPayment.quotationId ? {
+          ...q,
+          advancePaymentScreenshot: newPayment.paymentScreenshot,
+          advancePaymentAmount: newPayment.amount,
+          advancePaymentRef: newPayment.transactionReference,
+          advancePaymentVerified: Boolean(newPayment.verifiedByAccounts)
+        } : q));
+      }
+      if (newPayment.projectId) {
+        setProjects(prev => prev.map(p => p.id === newPayment.projectId ? {
+          ...p,
+          advancePaymentScreenshot: newPayment.paymentScreenshot,
+          advancePaymentAmount: newPayment.amount,
+          advancePaymentRef: newPayment.transactionReference,
+          advancePaymentVerified: Boolean(newPayment.verifiedByAccounts)
+        } : p));
+      }
+    }
 
     // Persist Payment to MySQL
     authFetch('/api/payments', {
@@ -2219,9 +2259,137 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       addTimelineItem('Customer', newPayment.customerId, `Payment Received: ₹${newPayment.amount.toLocaleString('en-IN')}`, `Ref: ${newPayment.transactionReference} via ${newPayment.paymentMode}.`, 'Accounts Dept', 'payment');
     }
 
-    addNotification('Payment Received', `₹${newPayment.amount.toLocaleString('en-IN')} verified for ${newPayment.customerName}.`, 'Payment', newPayment.id, 'Payment');
+    addNotification('Payment Received', `₹${newPayment.amount.toLocaleString('en-IN')} recorded for ${newPayment.customerName}.`, 'Payment', newPayment.id, 'Payment');
 
     return newPayment;
+  };
+
+  // Verify Payment Screenshot by Accounts Team
+  const verifyPaymentScreenshot = async (paymentId: string, notes?: string): Promise<boolean> => {
+    const verifier = currentUser?.name || activeRole || 'Accounts Team';
+    const nowIso = new Date().toISOString();
+
+    setPayments(prev => prev.map(p => {
+      if (p.id === paymentId) {
+        return {
+          ...p,
+          status: 'Verified',
+          verifiedByAccounts: true,
+          verifiedBy: verifier,
+          verifiedAt: nowIso,
+          verificationNotes: notes || p.verificationNotes
+        };
+      }
+      return p;
+    }));
+
+    // Find payment to sync with linked quotation/lead/project
+    const targetPayment = payments.find(p => p.id === paymentId);
+    if (targetPayment) {
+      if (targetPayment.quotationId) {
+        setQuotations(prev => prev.map(q => q.id === targetPayment.quotationId ? {
+          ...q,
+          advancePaymentVerified: true,
+          advancePaymentVerifiedBy: verifier,
+          advancePaymentVerifiedAt: nowIso
+        } : q));
+      }
+      if (targetPayment.leadId) {
+        setLeads(prev => prev.map(l => l.id === targetPayment.leadId ? {
+          ...l,
+          advancePaymentVerified: true,
+          advancePaymentVerifiedBy: verifier,
+          advancePaymentVerifiedAt: nowIso
+        } : l));
+      }
+      if (targetPayment.projectId) {
+        setProjects(prev => prev.map(p => p.id === targetPayment.projectId ? {
+          ...p,
+          advancePaymentVerified: true,
+          advancePaymentVerifiedBy: verifier,
+          advancePaymentVerifiedAt: nowIso
+        } : p));
+      }
+
+      addTimelineItem(
+        'Customer',
+        targetPayment.customerId || targetPayment.id,
+        'Advance Payment Screenshot Verified',
+        `Payment proof of ₹${targetPayment.amount.toLocaleString('en-IN')} verified by ${verifier}.`,
+        verifier,
+        'payment'
+      );
+    }
+
+    addNotification(
+      'Payment Proof Verified',
+      `Advance payment proof verified by ${verifier}.`,
+      'Payment',
+      paymentId,
+      'Payment'
+    );
+
+    // Persist to backend
+    authFetch(`/api/payments/${paymentId}/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ verifiedBy: verifier, verifiedAt: nowIso, notes })
+    }).catch(err => console.warn('[Payment Verification Sync]', err.message));
+
+    return true;
+  };
+
+  // Send Quotation to Auditor via WhatsApp & Track Status
+  const sendQuotationToAuditor = async (quotationId: string, auditorPhone?: string, notes?: string): Promise<boolean> => {
+    const nowIso = new Date().toISOString();
+    const sender = currentUser?.name || activeRole || 'Sales Desk';
+
+    setQuotations(prev => prev.map(q => {
+      if (q.id === quotationId) {
+        return {
+          ...q,
+          sentToAuditor: true,
+          sentToAuditorAt: nowIso,
+          auditorPhone: auditorPhone || q.auditorPhone,
+          auditorNotes: notes || q.auditorNotes
+        };
+      }
+      return q;
+    }));
+
+    const targetQuote = quotations.find(q => q.id === quotationId);
+    if (targetQuote) {
+      addTimelineItem(
+        'Lead',
+        targetQuote.leadId,
+        'Quotation Sent to Auditor',
+        `Quotation ${targetQuote.quotationNumber} (${targetQuote.systemCapacityKw} kW - ₹${targetQuote.totalAmount.toLocaleString('en-IN')}) shared with Auditor via WhatsApp.`,
+        sender,
+        'quote'
+      );
+    }
+
+    addNotification(
+      'Sent to Auditor',
+      `Quotation ${targetQuote?.quotationNumber || quotationId} shared with Auditor via WhatsApp.`,
+      'Quotation',
+      quotationId,
+      'Quotation'
+    );
+
+    // Persist to backend
+    authFetch(`/api/quotations/${quotationId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sentToAuditor: true,
+        sentToAuditorAt: nowIso,
+        auditorPhone,
+        auditorNotes: notes
+      })
+    }).catch(err => console.warn('[Auditor Sync]', err.message));
+
+    return true;
   };
 
   const createInvoice = (invoiceData: Partial<Invoice>): Invoice => {
@@ -2790,6 +2958,8 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       updateProjectTask,
       addProjectTask,
       recordPayment,
+      verifyPaymentScreenshot,
+      sendQuotationToAuditor,
       createInvoice,
       addExpense,
       addSupplier,

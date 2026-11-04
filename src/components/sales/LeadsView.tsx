@@ -3,7 +3,7 @@ import {
   Users, Plus, Search, Filter, Phone, Mail, MapPin, 
   CheckCircle2, ChevronRight, ChevronLeft, X, Calendar, 
   ArrowRight, Clock, ShieldAlert, ShieldCheck, FileText, Send, Sun, Compass, Trash2, UserCheck,
-  Sparkles, AlertCircle
+  Sparkles, AlertCircle, Pencil
 } from 'lucide-react';
 import { useCrm } from '../../context/CrmContext';
 import { Lead, LeadStatus, Priority, CustomerApplicationType, SolarSystemType, SiteSurvey } from '../../types';
@@ -79,6 +79,52 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
   const [viewMode, setViewMode] = useState<'table' | 'kanban'>('table');
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [leadToDelete, setLeadToDelete] = useState<Lead | null>(null);
+  const [editingLead, setEditingLead] = useState<Lead | null>(null);
+  const [editForm, setEditForm] = useState({
+    name: '',
+    phone: '',
+    email: '',
+    city: '',
+    address: '',
+    monthlyBill: 0,
+    sanctionLoad: 0,
+    recommendedKw: 5,
+    roofType: 'RCC Flat' as Lead['roofType'],
+    roofAreaSqFt: 0,
+    priority: 'Medium' as Priority,
+    source: 'Website' as LeadSource,
+    notes: '',
+  });
+
+  const handleOpenEditLead = (lead: Lead) => {
+    setEditingLead(lead);
+    setEditForm({
+      name: lead.name || '',
+      phone: lead.phone || '',
+      email: lead.email || '',
+      city: lead.city || '',
+      address: lead.address || '',
+      monthlyBill: lead.monthlyBill || 0,
+      sanctionLoad: lead.sanctionLoad || 0,
+      recommendedKw: lead.recommendedKw || 5,
+      roofType: lead.roofType || 'RCC Flat',
+      roofAreaSqFt: lead.roofAreaSqFt || 0,
+      priority: lead.priority || 'Medium',
+      source: lead.source || 'Website',
+      notes: lead.notes || '',
+    });
+  };
+
+  const handleSaveEditLead = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingLead) return;
+    updateLead(editingLead.id, editForm);
+    if (selectedLead?.id === editingLead.id) {
+      setSelectedLead({ ...selectedLead, ...editForm });
+    }
+    showToast(`Lead ${editingLead.name} (${editingLead.id}) updated successfully!`, 'success');
+    setEditingLead(null);
+  };
 
   const handleAutoAssignLeads = () => {
     if (salesExecutives.length === 0) {
@@ -578,6 +624,14 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                       )}
 
                       <button
+                        onClick={() => handleOpenEditLead(lead)}
+                        className="p-1.5 text-slate-400 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg text-xs transition-colors cursor-pointer"
+                        title="Edit Lead"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+
+                      <button
                         onClick={() => setLeadToDelete(lead)}
                         className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg text-xs"
                         title="Delete Lead"
@@ -852,6 +906,14 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                                 <span>{lead.quotationId ? 'View Quote' : 'Quote'}</span>
                               </button>
                             ) : null}
+
+                            <button
+                              onClick={() => handleOpenEditLead(lead)}
+                              className="p-1.5 text-slate-400 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                              title="Edit Solar Lead Details"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
 
                             <button
                               onClick={() => setLeadToDelete(lead)}
@@ -1369,11 +1431,18 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                 </div>
               </div>
 
-              {/* Danger Zone: Delete Lead */}
-              <div className="pt-4 border-t border-slate-200">
+              {/* Actions: Edit & Delete Lead */}
+              <div className="pt-4 border-t border-slate-200 flex items-center gap-2">
+                <button
+                  onClick={() => handleOpenEditLead(selectedLead)}
+                  className="flex-1 flex items-center justify-center gap-2 py-2 text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 border border-emerald-300 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                  <span>Edit Lead Details</span>
+                </button>
                 <button
                   onClick={() => setLeadToDelete(selectedLead)}
-                  className="w-full flex items-center justify-center gap-2 py-2 text-red-600 hover:text-red-700 hover:bg-red-50 border border-red-200 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                  className="flex-1 flex items-center justify-center gap-2 py-2 text-red-600 hover:text-red-700 hover:bg-red-50 border border-red-200 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   <span>Delete This Lead</span>
@@ -1384,7 +1453,176 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
+      {/* Edit Lead Modal */}
+      {editingLead && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center">
+                  <Pencil className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 text-sm">Edit Solar Lead</h3>
+                  <span className="font-mono text-[10px] text-slate-400">{editingLead.id}</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingLead(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditLead} className="space-y-3.5 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Customer Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editForm.name}
+                    onChange={e => setEditForm({ ...editForm, name: e.target.value })}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 font-semibold"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Phone Number *</label>
+                  <input
+                    type="tel"
+                    required
+                    value={editForm.phone}
+                    onChange={e => setEditForm({ ...editForm, phone: e.target.value })}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Email</label>
+                  <input
+                    type="email"
+                    value={editForm.email}
+                    onChange={e => setEditForm({ ...editForm, email: e.target.value })}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">City *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editForm.city}
+                    onChange={e => setEditForm({ ...editForm, city: e.target.value })}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Site Address</label>
+                <input
+                  type="text"
+                  value={editForm.address}
+                  onChange={e => setEditForm({ ...editForm, address: e.target.value })}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-3 gap-2.5">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Monthly Bill (₹)</label>
+                  <input
+                    type="number"
+                    value={editForm.monthlyBill}
+                    onChange={e => setEditForm({ ...editForm, monthlyBill: Number(e.target.value) })}
+                    className="w-full p-2 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Sanction Load (kW)</label>
+                  <input
+                    type="number"
+                    value={editForm.sanctionLoad}
+                    onChange={e => setEditForm({ ...editForm, sanctionLoad: Number(e.target.value) })}
+                    className="w-full p-2 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Capacity (kWp)</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    value={editForm.recommendedKw}
+                    onChange={e => setEditForm({ ...editForm, recommendedKw: Number(e.target.value) })}
+                    className="w-full p-2 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 font-mono font-bold text-emerald-800"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Roof Type</label>
+                  <select
+                    value={editForm.roofType}
+                    onChange={e => setEditForm({ ...editForm, roofType: e.target.value as any })}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="RCC Flat">RCC Flat Terrace</option>
+                    <option value="Tin Shed">Tin / Metal Shed</option>
+                    <option value="Tiled">Tiled Roof</option>
+                    <option value="Elevated Structure">Elevated Structure</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Priority</label>
+                  <select
+                    value={editForm.priority}
+                    onChange={e => setEditForm({ ...editForm, priority: e.target.value as any })}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 font-bold"
+                  >
+                    <option value="High">High Priority</option>
+                    <option value="Medium">Medium Priority</option>
+                    <option value="Low">Low Priority</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Notes / Remarks</label>
+                <textarea
+                  rows={2}
+                  value={editForm.notes}
+                  onChange={e => setEditForm({ ...editForm, notes: e.target.value })}
+                  placeholder="Customer preferences, site constraints, or follow-up notes"
+                  className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setEditingLead(null)}
+                  className="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-xs transition-colors cursor-pointer"
+                >
+                  Save Lead Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Lead Confirmation Modal */}
       {leadToDelete && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-150">

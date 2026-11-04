@@ -12,10 +12,14 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Ensure uploads directory exists
+// Ensure uploads directories exist
 const uploadsDir = path.join(process.cwd(), 'uploads', 'surveys');
+const mediaDir = path.join(process.cwd(), 'uploads', 'media');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
+}
+if (!fs.existsSync(mediaDir)) {
+  fs.mkdirSync(mediaDir, { recursive: true });
 }
 
 const app = express();

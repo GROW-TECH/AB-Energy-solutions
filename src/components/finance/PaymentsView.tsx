@@ -1,18 +1,35 @@
 import React, { useState } from 'react';
 import { 
   CreditCard, Search, CheckCircle2, 
-  DollarSign, Receipt, Printer, ArrowRight, ArrowUpRight, Filter, ShieldCheck, Download, ExternalLink, X
+  DollarSign, Receipt, Printer, ArrowRight, ArrowUpRight, Filter, ShieldCheck, Download, ExternalLink, X,
+  Eye, Clock, Image as ImageIcon
 } from 'lucide-react';
 import { useCrm } from '../../context/CrmContext';
 import { Payment } from '../../types';
 
 export const PaymentsView: React.FC = () => {
-  const { payments, customers } = useCrm();
+  const { payments, customers, verifyPaymentScreenshot, showToast } = useCrm();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [modeFilter, setModeFilter] = useState('All');
   const [typeFilter, setTypeFilter] = useState<'All' | 'Advances' | 'Milestones'>('All');
   const [selectedReceipt, setSelectedReceipt] = useState<Payment | null>(null);
+  const [selectedScreenshotUrl, setSelectedScreenshotUrl] = useState<string | null>(null);
+  const [verifyingId, setVerifyingId] = useState<string | null>(null);
+
+  const handleVerifyPayment = async (paymentId: string) => {
+    setVerifyingId(paymentId);
+    try {
+      await verifyPaymentScreenshot(paymentId);
+      if (showToast) {
+        showToast('Payment proof verified successfully by Accounts!', 'success');
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setVerifyingId(null);
+    }
+  };
 
   const advancePayments = payments.filter(p => p.isAdvance || p.paymentNumber.includes('ADV') || p.id.includes('ADV'));
   const totalAdvancesCollected = advancePayments.reduce((acc, p) => acc + (p.amount || 0), 0);
@@ -239,7 +256,8 @@ export const PaymentsView: React.FC = () => {
                 <th className="py-3.5 px-4">Invoice / Project Ref</th>
                 <th className="py-3.5 px-4">Mode &amp; Bank UTR</th>
                 <th className="py-3.5 px-4 text-right">Amount Received</th>
-                <th className="py-3.5 px-4 text-center">Status</th>
+                <th className="py-3.5 px-4 text-center">Payment Proof</th>
+                <th className="py-3.5 px-4 text-center">Accounts Verification</th>
                 <th className="py-3.5 px-4 text-right">Action</th>
               </tr>
             </thead>
@@ -279,17 +297,51 @@ export const PaymentsView: React.FC = () => {
                     </div>
                   </td>
 
+                  {/* Payment Proof / Screenshot */}
                   <td className="py-3.5 px-4 text-center">
-                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                      <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                      {p.status}
-                    </span>
+                    {p.paymentScreenshot ? (
+                      <button
+                        onClick={() => setSelectedScreenshotUrl(p.paymentScreenshot || null)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                        title="Click to view payment proof screenshot"
+                      >
+                        <Eye className="w-3.5 h-3.5 text-slate-600" />
+                        <span>View Proof</span>
+                      </button>
+                    ) : (
+                      <span className="text-slate-400 text-xs italic">Direct Bank</span>
+                    )}
+                  </td>
+
+                  {/* Accounts Verification */}
+                  <td className="py-3.5 px-4 text-center">
+                    {p.verifiedByAccounts || p.status === 'Verified' ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                        Verified
+                      </span>
+                    ) : (
+                      <div className="inline-flex items-center gap-1.5">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                          <Clock className="w-2.5 h-2.5 text-amber-600" />
+                          Pending
+                        </span>
+                        <button
+                          onClick={() => handleVerifyPayment(p.id)}
+                          disabled={verifyingId === p.id}
+                          className="px-2 py-0.5 text-[10px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded transition-colors cursor-pointer disabled:opacity-50"
+                          title="Verify payment screenshot as Accounts officer"
+                        >
+                          {verifyingId === p.id ? '...' : 'Verify'}
+                        </button>
+                      </div>
+                    )}
                   </td>
 
                   <td className="py-3.5 px-4 text-right">
                     <button
                       onClick={() => setSelectedReceipt(p)}
-                      className="px-2.5 py-1 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-bold transition-colors inline-flex items-center gap-1"
+                      className="px-2.5 py-1 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-bold transition-colors inline-flex items-center gap-1 cursor-pointer"
                     >
                       <Receipt className="w-3.5 h-3.5 text-slate-500" />
                       <span>Receipt</span>
@@ -340,6 +392,24 @@ export const PaymentsView: React.FC = () => {
                 <span className="text-slate-500">Bank UTR / Transaction ID:</span>
                 <span className="font-mono text-slate-700">{selectedReceipt.transactionReference}</span>
               </div>
+              {selectedReceipt.paymentScreenshot && (
+                <div className="pt-2 border-t border-slate-200">
+                  <span className="text-slate-500 block mb-1">Attached Payment Proof:</span>
+                  <div
+                    onClick={() => setSelectedScreenshotUrl(selectedReceipt.paymentScreenshot || null)}
+                    className="cursor-pointer group relative rounded-lg overflow-hidden border border-slate-300 max-h-32 bg-slate-900 flex items-center justify-center"
+                  >
+                    <img
+                      src={selectedReceipt.paymentScreenshot}
+                      alt="Proof"
+                      className="max-h-32 object-contain"
+                    />
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-xs font-bold transition-opacity">
+                      Click to Enlarge
+                    </div>
+                  </div>
+                </div>
+              )}
               <div className="flex justify-between pt-2 border-t border-slate-200">
                 <span className="font-bold text-slate-700">Amount Received:</span>
                 <span className="font-mono font-black text-emerald-700 text-sm">
@@ -363,6 +433,42 @@ export const PaymentsView: React.FC = () => {
               >
                 <Printer className="w-3.5 h-3.5" />
                 <span>Print Official Receipt</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Screenshot Lightbox Modal */}
+      {selectedScreenshotUrl && (
+        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-2xl w-full p-5 shadow-2xl border border-slate-200 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-emerald-600" />
+                <h3 className="font-bold text-slate-900 text-sm">Payment Receipt &amp; UTR Proof</h3>
+              </div>
+              <button
+                onClick={() => setSelectedScreenshotUrl(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="bg-slate-900 rounded-xl overflow-hidden max-h-[70vh] flex items-center justify-center">
+              <img
+                src={selectedScreenshotUrl}
+                alt="Payment Proof"
+                className="max-h-[68vh] w-auto object-contain"
+              />
+            </div>
+            <div className="flex items-center justify-between pt-2">
+              <span className="text-xs text-slate-500">Verified for Accounts &amp; Banking Audit</span>
+              <button
+                onClick={() => setSelectedScreenshotUrl(null)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
+              >
+                Close
               </button>
             </div>
           </div>

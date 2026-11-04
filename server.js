@@ -8163,13 +8163,16 @@ async function scheduleInstallation(req, res) {
 
 // server/routes/installation.routes.ts
 var router2 = Router15();
-var uploadsDir = path7.join(process.cwd(), "uploads", "media");
-if (!fs7.existsSync(uploadsDir)) {
-  fs7.mkdirSync(uploadsDir, { recursive: true });
-}
+var getMediaUploadsDir = () => {
+  const dir = path7.join(process.cwd(), "uploads", "media");
+  if (!fs7.existsSync(dir)) {
+    fs7.mkdirSync(dir, { recursive: true });
+  }
+  return dir;
+};
 var storage = multer.diskStorage({
   destination: (_req, _file, cb) => {
-    cb(null, uploadsDir);
+    cb(null, getMediaUploadsDir());
   },
   filename: (_req, file, cb) => {
     const ext = path7.extname(file.originalname) || (file.mimetype.includes("video") ? ".mp4" : ".jpg");
@@ -8179,21 +8182,26 @@ var storage = multer.diskStorage({
 });
 var upload = multer({
   storage,
-  limits: { fileSize: 250 * 1024 * 1024 }
-  // 250MB allows videos up to 5 minutes or more
+  limits: { fileSize: 500 * 1024 * 1024 }
+  // 500MB allows high-res walkthrough videos
 });
-router2.post("/upload-media", upload.single("file"), (req, res) => {
-  if (!req.file) {
-    res.status(400).json({ success: false, error: "No file uploaded" });
-    return;
-  }
-  const publicUrl = `/uploads/media/${req.file.filename}`;
-  res.json({
-    success: true,
-    url: publicUrl,
-    filename: req.file.filename,
-    mimetype: req.file.mimetype,
-    size: req.file.size
+router2.post("/upload-media", (req, res) => {
+  upload.single("file")(req, res, (err) => {
+    if (err) {
+      console.error("[Upload Media Error]:", err);
+      return res.status(400).json({ success: false, error: err.message || "Media file upload failed" });
+    }
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: "No video or photo was received" });
+    }
+    const publicUrl = `/uploads/media/${req.file.filename}`;
+    return res.json({
+      success: true,
+      url: publicUrl,
+      filename: req.file.filename,
+      mimetype: req.file.mimetype,
+      size: req.file.size
+    });
   });
 });
 router2.post("/schedule", authenticateToken, scheduleInstallation);
@@ -9402,9 +9410,13 @@ if (process.argv[1]?.includes("project-lifecycle-updates")) {
 dotenv3.config();
 var __filename = fileURLToPath(import.meta.url);
 var __dirname = path9.dirname(__filename);
-var uploadsDir2 = path9.join(process.cwd(), "uploads", "surveys");
-if (!fs9.existsSync(uploadsDir2)) {
-  fs9.mkdirSync(uploadsDir2, { recursive: true });
+var uploadsDir = path9.join(process.cwd(), "uploads", "surveys");
+var mediaDir = path9.join(process.cwd(), "uploads", "media");
+if (!fs9.existsSync(uploadsDir)) {
+  fs9.mkdirSync(uploadsDir, { recursive: true });
+}
+if (!fs9.existsSync(mediaDir)) {
+  fs9.mkdirSync(mediaDir, { recursive: true });
 }
 var app = express();
 var PORT = process.env.PORT || 3e3;

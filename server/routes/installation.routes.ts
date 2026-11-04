@@ -13,15 +13,18 @@ import { authenticateToken } from '../middleware/auth.js';
 
 const router = Router();
 
-// Configure disk storage for real media uploads (videos & photos up to 250MB)
-const uploadsDir = path.join(process.cwd(), 'uploads', 'media');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
+// Configure disk storage for real media uploads (videos & photos up to 500MB)
+const getMediaUploadsDir = () => {
+  const dir = path.join(process.cwd(), 'uploads', 'media');
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  return dir;
+};
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => {
-    cb(null, uploadsDir);
+    cb(null, getMediaUploadsDir());
   },
   filename: (_req, file, cb) => {
     const ext = path.extname(file.originalname) || (file.mimetype.includes('video') ? '.mp4' : '.jpg');
@@ -32,22 +35,27 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 250 * 1024 * 1024 } // 250MB allows videos up to 5 minutes or more
+  limits: { fileSize: 500 * 1024 * 1024 } // 500MB allows high-res walkthrough videos
 });
 
-// Multipart media upload endpoint for Installation videos & photos
-router.post('/upload-media', upload.single('file'), (req, res) => {
-  if (!req.file) {
-    res.status(400).json({ success: false, error: 'No file uploaded' });
-    return;
-  }
-  const publicUrl = `/uploads/media/${req.file.filename}`;
-  res.json({
-    success: true,
-    url: publicUrl,
-    filename: req.file.filename,
-    mimetype: req.file.mimetype,
-    size: req.file.size
+// Multipart media upload endpoint for Installation videos & photos with error protection
+router.post('/upload-media', (req, res) => {
+  upload.single('file')(req, res, (err: any) => {
+    if (err) {
+      console.error('[Upload Media Error]:', err);
+      return res.status(400).json({ success: false, error: err.message || 'Media file upload failed' });
+    }
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'No video or photo was received' });
+    }
+    const publicUrl = `/uploads/media/${req.file.filename}`;
+    return res.json({
+      success: true,
+      url: publicUrl,
+      filename: req.file.filename,
+      mimetype: req.file.mimetype,
+      size: req.file.size
+    });
   });
 });
 

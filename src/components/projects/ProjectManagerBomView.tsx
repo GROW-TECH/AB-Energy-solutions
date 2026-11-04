@@ -457,10 +457,10 @@ export const ProjectManagerBomView: React.FC<ProjectManagerBomViewProps> = ({
             <div className="flex-1 overflow-y-auto space-y-4 pr-1">
               <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3 text-xs text-slate-600 flex items-center justify-between">
                 <span className="font-semibold text-slate-700">
-                  Engineering Scope: Verify that electrical capacity, cable gauge, structure thickness &amp; inverter specs match DISCOM grid norms.
+                  Engineering Scope: Verify equipment specs, unit rates &amp; total BOM equipment cost before formal technical sign-off.
                 </span>
                 <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
-                  Technical Specifications View
+                  PM Technical &amp; Financial Verification View
                 </span>
               </div>
 
@@ -479,25 +479,48 @@ export const ProjectManagerBomView: React.FC<ProjectManagerBomViewProps> = ({
                         <th className="p-3">SPECIFICATION</th>
                         <th className="p-3 text-center">UNITS</th>
                         <th className="p-3 text-center">QUANTITY</th>
+                        <th className="p-3 text-right">UNIT RATE (₹)</th>
+                        <th className="p-3 text-right">TOTAL AMOUNT (₹)</th>
                         <th className="p-3">REMARKS</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-[11px]">
-                      {bomItems.map((item, idx) => (
-                        <tr key={item.id || idx} className="hover:bg-slate-50 transition-colors">
-                          <td className="p-3 text-center font-mono font-bold text-slate-400">{idx + 1}</td>
-                          <td className="p-3 font-semibold text-slate-900">{item.category || item.itemName}</td>
-                          <td className="p-3 text-slate-700">{item.technicalSpecification || 'Standard industrial compliance'}</td>
-                          <td className="p-3 text-center font-bold font-mono text-slate-700">{item.unit || 'Nos'}</td>
-                          <td className="p-3 text-center">
-                            <span className="font-bold font-mono text-xs text-slate-900 bg-slate-100 px-2.5 py-1 rounded-lg">
-                              {item.quantity}
-                            </span>
-                          </td>
-                          <td className="p-3 text-slate-600 text-[11px]">{item.remarks || '—'}</td>
-                        </tr>
-                      ))}
+                      {bomItems.map((item, idx) => {
+                        const unitRate = Number(item.estimatedUnitCost) || 0;
+                        const lineTotal = Number(item.estimatedTotalCost) || (Number(item.quantity || 1) * unitRate);
+                        return (
+                          <tr key={item.id || idx} className="hover:bg-slate-50 transition-colors">
+                            <td className="p-3 text-center font-mono font-bold text-slate-400">{idx + 1}</td>
+                            <td className="p-3 font-semibold text-slate-900">{item.category || item.itemName}</td>
+                            <td className="p-3 text-slate-700">{item.technicalSpecification || 'Standard industrial compliance'}</td>
+                            <td className="p-3 text-center font-bold font-mono text-slate-700">{item.unit || 'Nos'}</td>
+                            <td className="p-3 text-center">
+                              <span className="font-bold font-mono text-xs text-slate-900 bg-slate-100 px-2.5 py-1 rounded-lg">
+                                {item.quantity}
+                              </span>
+                            </td>
+                            <td className="p-3 text-right font-mono text-xs text-slate-700">
+                              ₹{unitRate.toLocaleString('en-IN')}
+                            </td>
+                            <td className="p-3 text-right font-mono text-xs font-bold text-slate-900">
+                              ₹{lineTotal.toLocaleString('en-IN')}
+                            </td>
+                            <td className="p-3 text-slate-600 text-[11px]">{item.remarks || '—'}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
+                    <tfoot className="bg-slate-50 border-t border-slate-200 font-bold text-xs">
+                      <tr>
+                        <td colSpan={6} className="p-3 text-right uppercase tracking-wider text-slate-600">
+                          Total Approved BOM Equipment Cost:
+                        </td>
+                        <td className="p-3 text-right text-emerald-700 font-mono text-sm font-black">
+                          ₹{bomItems.reduce((sum, it) => sum + (Number(it.estimatedTotalCost) || (Number(it.quantity || 1) * (Number(it.estimatedUnitCost) || 0))), 0).toLocaleString('en-IN')}
+                        </td>
+                        <td />
+                      </tr>
+                    </tfoot>
                   </table>
                 </div>
               )}

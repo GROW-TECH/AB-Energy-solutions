@@ -17,7 +17,9 @@ interface SurveyBomViewProps {
 export const SurveyBomView: React.FC<SurveyBomViewProps> = ({
   onNavigateToSurvey,
 }) => {
-  const { surveys, projects } = useCrm();
+  const { surveys, projects, currentUser } = useCrm();
+  const isSurveyEngineer = currentUser?.role === 'Survey Engineer';
+  const canViewPricing = !isSurveyEngineer;
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSurveyId, setSelectedSurveyId] = useState<string | null>(null);
@@ -918,8 +920,8 @@ export const SurveyBomView: React.FC<SurveyBomViewProps> = ({
                       <th className="p-3.5">SPECIFICATION</th>
                       <th className="p-3.5 text-center">UNITS</th>
                       <th className="p-3.5 text-center">QUANTITY</th>
-                      <th className="p-3.5 text-right">EST. UNIT RATE</th>
-                      <th className="p-3.5 text-right">TOTAL AMOUNT</th>
+                      {canViewPricing && <th className="p-3.5 text-right">EST. UNIT RATE</th>}
+                      {canViewPricing && <th className="p-3.5 text-right">TOTAL AMOUNT</th>}
                       <th className="p-3.5 text-center">ACTION</th>
                     </tr>
                   </thead>
@@ -1077,49 +1079,53 @@ export const SurveyBomView: React.FC<SurveyBomViewProps> = ({
                         </td>
 
                         {/* EST. UNIT RATE */}
-                        <td className="p-3 text-right font-mono min-w-[120px]">
-                          {isLocked ? (
-                            <span className="font-mono text-slate-700 text-xs">₹{(Number(item.estimatedUnitCost) || 0).toLocaleString('en-IN')}</span>
-                          ) : (
-                            <input
-                              type="number"
-                              value={item.estimatedUnitCost !== undefined ? item.estimatedUnitCost : ''}
-                              onChange={e => {
-                                const next = [...activeBomItems];
-                                const c = Number(e.target.value) || 0;
-                                next[idx].estimatedUnitCost = c;
-                                next[idx].estimatedTotalCost = Math.round((Number(next[idx].quantity) || 1) * c);
-                                setActiveBomItems(next);
-                              }}
-                              className="w-24 p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-right font-mono focus:outline-hidden focus:border-emerald-500"
-                              placeholder="₹ Rate"
-                            />
-                          )}
-                        </td>
+                        {canViewPricing && (
+                          <td className="p-3 text-right font-mono min-w-[120px]">
+                            {isLocked ? (
+                              <span className="font-mono text-slate-700 text-xs">₹{(Number(item.estimatedUnitCost) || 0).toLocaleString('en-IN')}</span>
+                            ) : (
+                              <input
+                                type="number"
+                                value={item.estimatedUnitCost !== undefined ? item.estimatedUnitCost : ''}
+                                onChange={e => {
+                                  const next = [...activeBomItems];
+                                  const c = Number(e.target.value) || 0;
+                                  next[idx].estimatedUnitCost = c;
+                                  next[idx].estimatedTotalCost = Math.round((Number(next[idx].quantity) || 1) * c);
+                                  setActiveBomItems(next);
+                                }}
+                                className="w-24 p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-right font-mono focus:outline-hidden focus:border-emerald-500"
+                                placeholder="₹ Rate"
+                              />
+                            )}
+                          </td>
+                        )}
 
                         {/* TOTAL AMOUNT (Editable - Rate recalculates live) */}
-                        <td className="p-3 text-right font-mono min-w-[130px]">
-                          {isLocked ? (
-                            <span className="font-bold text-slate-900 text-xs">
-                              ₹{Number(item.estimatedTotalCost || 0).toLocaleString('en-IN')}
-                            </span>
-                          ) : (
-                            <input
-                              type="number"
-                              value={item.estimatedTotalCost !== undefined ? item.estimatedTotalCost : ''}
-                              onChange={e => {
-                                const next = [...activeBomItems];
-                                const tot = Number(e.target.value) || 0;
-                                next[idx].estimatedTotalCost = tot;
-                                const q = Number(next[idx].quantity) || 1;
-                                next[idx].estimatedUnitCost = q > 0 ? Number((tot / q).toFixed(2)) : tot;
-                                setActiveBomItems(next);
-                              }}
-                              className="w-28 p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-right font-mono text-slate-900 focus:outline-hidden focus:border-emerald-500"
-                              placeholder="₹ Total"
-                            />
-                          )}
-                        </td>
+                        {canViewPricing && (
+                          <td className="p-3 text-right font-mono min-w-[130px]">
+                            {isLocked ? (
+                              <span className="font-bold text-slate-900 text-xs">
+                                ₹{Number(item.estimatedTotalCost || 0).toLocaleString('en-IN')}
+                              </span>
+                            ) : (
+                              <input
+                                type="number"
+                                value={item.estimatedTotalCost !== undefined ? item.estimatedTotalCost : ''}
+                                onChange={e => {
+                                  const next = [...activeBomItems];
+                                  const tot = Number(e.target.value) || 0;
+                                  next[idx].estimatedTotalCost = tot;
+                                  const q = Number(next[idx].quantity) || 1;
+                                  next[idx].estimatedUnitCost = q > 0 ? Number((tot / q).toFixed(2)) : tot;
+                                  setActiveBomItems(next);
+                                }}
+                                className="w-28 p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-right font-mono text-slate-900 focus:outline-hidden focus:border-emerald-500"
+                                placeholder="₹ Total"
+                              />
+                            )}
+                          </td>
+                        )}
 
                         {/* ACTION */}
                         <td className="p-3 text-center">
@@ -1144,7 +1150,7 @@ export const SurveyBomView: React.FC<SurveyBomViewProps> = ({
                   <tfoot className="bg-slate-50 border-t border-slate-200 font-bold text-xs">
                     {!isLocked && (
                       <tr className="bg-white border-t border-slate-200">
-                        <td colSpan={7} className="p-3.5">
+                        <td colSpan={canViewPricing ? 7 : 5} className="p-3.5">
                           <div className="flex items-center gap-2.5">
                             <button
                               type="button"
@@ -1168,15 +1174,24 @@ export const SurveyBomView: React.FC<SurveyBomViewProps> = ({
                         </td>
                       </tr>
                     )}
-                    <tr>
-                      <td colSpan={5} className="p-4 text-right uppercase tracking-wider text-slate-600 text-xs">
-                        Total Estimated BOM Equipment Cost:
-                      </td>
-                      <td className="p-4 text-right text-emerald-700 font-mono text-base">
-                        ₹{totalBomValue.toLocaleString('en-IN')}
-                      </td>
-                      <td />
-                    </tr>
+                    {canViewPricing ? (
+                      <tr>
+                        <td colSpan={5} className="p-4 text-right uppercase tracking-wider text-slate-600 text-xs">
+                          Total Estimated BOM Equipment Cost:
+                        </td>
+                        <td className="p-4 text-right text-emerald-700 font-mono text-base">
+                          ₹{totalBomValue.toLocaleString('en-IN')}
+                        </td>
+                        <td />
+                      </tr>
+                    ) : (
+                      <tr>
+                        <td colSpan={5} className="p-3.5 text-slate-500 font-semibold text-xs">
+                          Technical Material Quantities Configured ({activeBomItems.length} Line Items). Pricing &amp; commercial rates are managed by the Project Manager &amp; Accounts Team.
+                        </td>
+                        <td />
+                      </tr>
+                    )}
                   </tfoot>
                 </table>
               </div>

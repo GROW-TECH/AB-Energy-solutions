@@ -128,6 +128,12 @@ export interface Lead {
   lastModifiedRole?: string;
   lastModifiedAt?: string;
   editHistory?: EditHistoryEntry[];
+  advancePaymentScreenshot?: string;
+  advancePaymentAmount?: number;
+  advancePaymentRef?: string;
+  advancePaymentVerified?: boolean;
+  advancePaymentVerifiedBy?: string;
+  advancePaymentVerifiedAt?: string;
 }
 
 
@@ -337,6 +343,12 @@ export interface SiteSurvey {
   lastModifiedRole?: string;
   lastModifiedAt?: string;
   editHistory?: EditHistoryEntry[];
+  advancePaymentScreenshot?: string;
+  advancePaymentAmount?: number;
+  advancePaymentRef?: string;
+  advancePaymentVerified?: boolean;
+  advancePaymentVerifiedBy?: string;
+  advancePaymentVerifiedAt?: string;
 }
 
 export interface QuotationItem {
@@ -430,6 +442,12 @@ export interface Quotation {
   lastModifiedRole?: string;
   lastModifiedAt?: string;
   editHistory?: EditHistoryEntry[];
+  advancePaymentScreenshot?: string;
+  advancePaymentAmount?: number;
+  advancePaymentRef?: string;
+  advancePaymentVerified?: boolean;
+  advancePaymentVerifiedBy?: string;
+  advancePaymentVerifiedAt?: string;
   advancePaymentReceived?: boolean;
   advancePaymentAmount?: number;
   advancePaymentDate?: string;
@@ -508,6 +526,12 @@ export interface Project {
   lastModifiedRole?: string;
   lastModifiedAt?: string;
   editHistory?: EditHistoryEntry[];
+  advancePaymentScreenshot?: string;
+  advancePaymentAmount?: number;
+  advancePaymentRef?: string;
+  advancePaymentVerified?: boolean;
+  advancePaymentVerifiedBy?: string;
+  advancePaymentVerifiedAt?: string;
 
   // Advance Payment Gate & Accounts Integration
   advancePaymentReceived?: boolean;
@@ -516,6 +540,14 @@ export interface Project {
   advancePaymentRef?: string;
   advancePaymentDate?: string;
   advancePaymentNotes?: string;
+  advancePaymentScreenshot?: string;
+  advancePaymentVerified?: boolean;
+  advancePaymentVerifiedBy?: string;
+  advancePaymentVerifiedAt?: string;
+  sentToAuditor?: boolean;
+  sentToAuditorAt?: string;
+  auditorPhone?: string;
+  auditorNotes?: string;
 
   // DISCOM Net Metering Paperwork & Agreement
   discomNetMeteringFee?: number;
@@ -632,6 +664,12 @@ export interface Payment {
   reconciled?: boolean;
   reconciledAt?: string;
   reconciledBy?: string;
+  paymentScreenshot?: string;
+  leadId?: string;
+  verifiedByAccounts?: boolean;
+  verifiedBy?: string;
+  verifiedAt?: string;
+  verificationNotes?: string;
 }
 
 export interface Warranty {
