@@ -178,6 +178,8 @@ export const getBootstrapData = async (req: Request, res: Response) => {
           estimatedBudget: Number(l.estimated_budget) || 0,
           consumerNumberDiscom: l.consumer_number_discom || l.eb_service_number || '',
           ebServiceNumber: l.eb_service_number || l.consumer_number_discom || '',
+          surveyId: l.survey_id || undefined,
+          quotationId: l.quotation_id || undefined,
           notes: l.notes || '',
           createdAt: l.created_at,
           updatedAt: l.updated_at,

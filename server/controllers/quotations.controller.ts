@@ -433,7 +433,11 @@ export const createQuotation = async (req: Request, res: Response) => {
 
     // Update lead linkage
     if (body.leadId) {
-      await pool.query('UPDATE leads SET quotation_id = ? WHERE id = ?', [finalId, body.leadId]);
+      try {
+        await pool.query('UPDATE leads SET quotation_id = ? WHERE id = ?', [finalId, body.leadId]);
+      } catch (qErr: any) {
+        console.warn('[Quotations Controller] Leads quotation_id update fallback:', qErr.message);
+      }
     }
     if (surveyRef) {
       await pool.query('UPDATE site_surveys SET quotation_id = ? WHERE id = ?', [finalId, surveyRef]);

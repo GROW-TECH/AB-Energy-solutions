@@ -15,6 +15,10 @@ async function addColumnSafely(table: string, column: string, columnDef: string)
 export async function runProjectLifecycleMigration() {
   console.log('Running project lifecycle updates migration...');
 
+  // 0. Leads: Survey and Quotation Linkage
+  await addColumnSafely('leads', 'survey_id', 'VARCHAR(50) NULL');
+  await addColumnSafely('leads', 'quotation_id', 'VARCHAR(50) NULL');
+
   // 1. Site Surveys: Measured Cable Lengths and Client Signature
   await addColumnSafely('site_surveys', 'measured_dc_cable_meters', 'DECIMAL(10, 2) NULL');
   await addColumnSafely('site_surveys', 'measured_ac_cable_meters', 'DECIMAL(10, 2) NULL');

@@ -1207,6 +1207,46 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
     setTimeout(() => setSaveSuccessMsg(''), 4000);
   };
 
+  // Client-side image compressor: scales down high-res photos to prevent HTTP 500 / memory errors
+  const compressImage = (fileOrDataUrl: File | string, maxDimension = 1600, quality = 0.82): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+        if (width > maxDimension || height > maxDimension) {
+          if (width > height) {
+            height = Math.round((height * maxDimension) / width);
+            width = maxDimension;
+          } else {
+            width = Math.round((width * maxDimension) / height);
+            height = maxDimension;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', quality));
+        } else {
+          resolve(typeof fileOrDataUrl === 'string' ? fileOrDataUrl : '');
+        }
+      };
+      img.onerror = () => {
+        resolve(typeof fileOrDataUrl === 'string' ? fileOrDataUrl : '');
+      };
+      if (typeof fileOrDataUrl === 'string') {
+        img.src = fileOrDataUrl;
+      } else {
+        const reader = new FileReader();
+        reader.onload = () => { img.src = reader.result as string; };
+        reader.readAsDataURL(fileOrDataUrl);
+      }
+    });
+  };
+
   // Handle File / Camera selection for honest Geo-Tagging
   const handleTriggerUpload = (category: SurveyPhotoCategory, useCamera: boolean = false) => {
     if (!isEditingMode) {
@@ -1250,13 +1290,20 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
       }
     }
 
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const base64Data = reader.result as string;
+    try {
+      const rawBase64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      const compressedBase64 = await compressImage(rawBase64);
+
       const uploaded = await uploadSurveyPhoto(activeSurvey.id, {
         category: activeUploadCategory,
         fileName: file.name,
-        base64Data,
+        base64Data: compressedBase64,
         caption: `Site audit photo for ${activeSurvey.customerName}`,
         latitude,
         longitude,
@@ -1273,13 +1320,11 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
       }
       if (fileInputRef.current) fileInputRef.current.value = '';
       if (cameraInputRef.current) cameraInputRef.current.value = '';
-    };
-    reader.onerror = () => {
+    } catch (readErr) {
       setUploadingCategory(null);
       setUploadError('Failed to read image file.');
       showToast('Failed to read image file.', 'error');
-    };
-    reader.readAsDataURL(file);
+    }
   };
 
   // Delete photo
@@ -1361,10 +1406,12 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
         }
       }
 
+      const compressedBase64 = await compressImage(base64Data);
+
       const uploaded = await uploadSurveyPhoto(activeSurvey.id, {
         category,
         fileName: `camera_${category}_${Date.now()}.jpg`,
-        base64Data,
+        base64Data: compressedBase64,
         caption: `Live camera audit photo for ${activeSurvey.customerName}`,
         latitude,
         longitude,

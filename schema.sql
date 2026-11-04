@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS leads (
   notes TEXT,
   customer_type VARCHAR(50) DEFAULT 'Residential',
   system_type VARCHAR(50) DEFAULT 'On-Grid',
+  survey_id VARCHAR(50) NULL,
+  quotation_id VARCHAR(50) NULL,
   created_at VARCHAR(50),
   updated_at VARCHAR(50),
   last_contacted_at VARCHAR(50)

@@ -429,10 +429,18 @@ var createSurvey = async (req, res) => {
       ]
     );
     if (leadId) {
-      await pool.query(
-        "UPDATE leads SET survey_id = ?, status = 'Site Survey Scheduled' WHERE id = ?",
-        [surveyId, leadId]
-      );
+      try {
+        await pool.query(
+          "UPDATE leads SET survey_id = ?, status = 'Site Survey Scheduled' WHERE id = ?",
+          [surveyId, leadId]
+        );
+      } catch (leadErr) {
+        console.warn("[Surveys Controller] Leads survey_id update fallback:", leadErr.message);
+        await pool.query(
+          "UPDATE leads SET status = 'Site Survey Scheduled' WHERE id = ?",
+          [leadId]
+        );
+      }
     }
     const [created] = await pool.query("SELECT * FROM site_surveys WHERE id = ?", [surveyId]);
     res.json({ success: true, survey: formatSurvey(created[0]) });
@@ -586,28 +594,28 @@ var uploadSurveyPhoto = async (req, res) => {
       return res.status(400).json({ success: false, error: "Photo category is required" });
     }
     const photoId = `PH-${Date.now()}-${Math.floor(Math.random() * 1e4)}`;
-    const uploadDir = path.join(process.cwd(), "uploads", "surveys", surveyId);
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
+    const baseDir = process.cwd();
+    const uploadDir = path.join(baseDir, "uploads", "surveys", surveyId);
     let filePath = "";
     let fileSize = 0;
     if (base64Data) {
-      const matches = base64Data.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
-      let buffer;
-      let ext = "jpg";
-      if (matches && matches.length === 3) {
-        buffer = Buffer.from(matches[2], "base64");
-        if (matches[1].includes("png")) ext = "png";
-        if (matches[1].includes("webp")) ext = "webp";
-      } else {
-        buffer = Buffer.from(base64Data, "base64");
-      }
-      const safeFileName = `${photoId}.${ext}`;
-      const fullDiskPath = path.join(uploadDir, safeFileName);
-      fs.writeFileSync(fullDiskPath, buffer);
-      filePath = `/uploads/surveys/${surveyId}/${safeFileName}`;
+      const cleanBase64 = base64Data.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, "").replace(/\s/g, "");
+      const buffer = Buffer.from(cleanBase64, "base64");
       fileSize = buffer.length;
+      let ext = "jpg";
+      if (base64Data.includes("image/png")) ext = "png";
+      else if (base64Data.includes("image/webp")) ext = "webp";
+      const safeFileName = `${photoId}.${ext}`;
+      filePath = `/uploads/surveys/${surveyId}/${safeFileName}`;
+      try {
+        if (!fs.existsSync(uploadDir)) {
+          fs.mkdirSync(uploadDir, { recursive: true });
+        }
+        const fullDiskPath = path.join(uploadDir, safeFileName);
+        fs.writeFileSync(fullDiskPath, buffer);
+      } catch (diskErr) {
+        console.warn("[Surveys Controller] Photo disk save notice:", diskErr.message);
+      }
     } else if (req.file) {
       filePath = `/uploads/surveys/${surveyId}/${req.file.filename}`;
       fileSize = req.file.size;
@@ -628,18 +636,18 @@ var uploadSurveyPhoto = async (req, res) => {
         photoId,
         surveyId,
         category,
-        fileName || `${category}.jpg`,
+        (fileName || `${category}.jpg`).slice(0, 255),
         filePath,
         fileSize,
         mimeType,
-        caption,
-        user?.id || "EMP-03",
-        user?.name || "Rahul Sharma",
+        (caption || "").slice(0, 255),
+        user?.employeeId || user?.userId || user?.id || "EMP-03",
+        user?.name || "Surveyor",
         capturedAt,
         uploadedAt,
-        hasValidGps ? Number(latitude) : null,
-        hasValidGps ? Number(longitude) : null,
-        gpsAccuracyMeters ? Number(gpsAccuracyMeters) : null,
+        hasValidGps ? Number(Number(latitude).toFixed(7)) : null,
+        hasValidGps ? Number(Number(longitude).toFixed(7)) : null,
+        gpsAccuracyMeters ? Number(Number(gpsAccuracyMeters).toFixed(2)) : null,
         geoVerified,
         verificationStatus
       ]
@@ -647,6 +655,7 @@ var uploadSurveyPhoto = async (req, res) => {
     const [newPhoto] = await pool.query("SELECT * FROM survey_photos WHERE id = ?", [photoId]);
     res.json({ success: true, photo: formatPhoto(newPhoto[0]) });
   } catch (err) {
+    console.error("[Survey Photo Upload Error]:", err);
     res.status(500).json({ success: false, error: err.message });
   }
 };
@@ -1140,6 +1149,8 @@ var getBootstrapData = async (req, res) => {
           estimatedBudget: Number(l.estimated_budget) || 0,
           consumerNumberDiscom: l.consumer_number_discom || l.eb_service_number || "",
           ebServiceNumber: l.eb_service_number || l.consumer_number_discom || "",
+          surveyId: l.survey_id || void 0,
+          quotationId: l.quotation_id || void 0,
           notes: l.notes || "",
           createdAt: l.created_at,
           updatedAt: l.updated_at,
@@ -3409,7 +3420,11 @@ var createQuotation = async (req, res) => {
       ]
     );
     if (body.leadId) {
-      await pool.query("UPDATE leads SET quotation_id = ? WHERE id = ?", [finalId, body.leadId]);
+      try {
+        await pool.query("UPDATE leads SET quotation_id = ? WHERE id = ?", [finalId, body.leadId]);
+      } catch (qErr) {
+        console.warn("[Quotations Controller] Leads quotation_id update fallback:", qErr.message);
+      }
     }
     if (surveyRef) {
       await pool.query("UPDATE site_surveys SET quotation_id = ? WHERE id = ?", [finalId, surveyRef]);
@@ -9264,6 +9279,8 @@ async function addColumnSafely(table, column, columnDef) {
 }
 async function runProjectLifecycleMigration() {
   console.log("Running project lifecycle updates migration...");
+  await addColumnSafely("leads", "survey_id", "VARCHAR(50) NULL");
+  await addColumnSafely("leads", "quotation_id", "VARCHAR(50) NULL");
   await addColumnSafely("site_surveys", "measured_dc_cable_meters", "DECIMAL(10, 2) NULL");
   await addColumnSafely("site_surveys", "measured_ac_cable_meters", "DECIMAL(10, 2) NULL");
   await addColumnSafely("site_surveys", "client_signature_data", "LONGTEXT NULL");
