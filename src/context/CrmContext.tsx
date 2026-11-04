@@ -657,12 +657,66 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       }
 
+      // Ensure every customer/project that has a 90% advance ALSO has their 10% Commissioning Invoice
+      for (const inv of [...updatedInvoices]) {
+        const desc = (inv.items?.map(it => it.description).join(' ') || '') + ' ' + (inv.invoiceNumber || '');
+        const is90 = desc.includes('90%') || desc.toLowerCase().includes('advance') || desc.toLowerCase().includes('mobilization');
+        if (is90) {
+          const has10 = updatedInvoices.some(other => {
+            const otherDesc = (other.items?.map(it => it.description).join(' ') || '') + ' ' + (other.invoiceNumber || '');
+            const isOther10 = otherDesc.includes('10%') || otherDesc.toLowerCase().includes('commission') || otherDesc.toLowerCase().includes('net meter') || otherDesc.toLowerCase().includes('handover');
+            return isOther10 && (other.projectId === inv.projectId || other.customerId === inv.customerId);
+          });
+
+          if (!has10) {
+            changed = true;
+            const cust = customers.find(c => c.id === inv.customerId || c.phone === inv.customerPhone);
+            const proj = projects.find(p => p.id === inv.projectId);
+            const totalVal = cust?.totalOrderValue || Math.round(inv.totalAmount / 0.9);
+            const amt10 = (cust?.balanceAmount !== undefined && cust.balanceAmount > 0) ? cust.balanceAmount : Math.max(1, totalVal - inv.totalAmount);
+            const subtotal10 = Math.round(amt10 / 1.138);
+            const gstHalf10 = Math.round((amt10 - subtotal10) / 2);
+            const numDigits = inv.invoiceNumber.replace(/\D/g, '').slice(-3) || '001';
+
+            const final10Inv: Invoice = {
+              id: `INV-10-${inv.projectId || inv.id}`,
+              invoiceNumber: `INV-2026-F${numDigits}`,
+              projectId: inv.projectId,
+              customerId: inv.customerId,
+              customerName: inv.customerName,
+              customerPhone: inv.customerPhone,
+              customerGstin: inv.customerGstin || '',
+              issueDate: inv.issueDate || new Date().toISOString().split('T')[0],
+              dueDate: new Date(Date.now() + 86400000 * 14).toISOString().split('T')[0],
+              subtotal: subtotal10,
+              cgst: gstHalf10,
+              sgst: gstHalf10,
+              igst: 0,
+              totalAmount: amt10,
+              paidAmount: cust?.balanceAmount === 0 ? amt10 : 0,
+              balanceDue: cust?.balanceAmount === 0 ? 0 : amt10,
+              status: cust?.balanceAmount === 0 ? 'Paid' : 'Sent',
+              items: [
+                {
+                  description: `10% Final Milestone: System Commissioning, Net Metering & Plant Handover for ${proj?.capacityKw || cust?.totalSystemKw || 5} kW Solar EPC Plant`,
+                  hsnCode: '995465',
+                  quantity: 1,
+                  rate: subtotal10,
+                  amount: subtotal10
+                }
+              ]
+            };
+            updatedInvoices.push(final10Inv);
+          }
+        }
+      }
+
       if (changed) {
         setPayments(updatedPayments);
         setInvoices(updatedInvoices);
       }
     }
-  }, [quotations]);
+  }, [quotations, customers, projects]);
 
   // Internal log helper
   const addAutomationLog = (ruleName: string, triggerEvent: string, entityId: string, entityName: string, actionSummary: string, status: 'Success' | 'Failed' | 'Warning' = 'Success') => {
@@ -1890,7 +1944,31 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         { description: `90% Milestone Advance for ${quote.systemCapacityKw} kW Solar Plant`, hsnCode: '995465', quantity: 1, rate: Math.round(advanceAmount / 1.138), amount: Math.round(advanceAmount / 1.138) }
       ],
     };
-    setInvoices(prev => [newInvoice, ...prev]);
+    const finalAmount = Math.max(1, (quote.totalAmount || 0) - advanceAmount);
+    const subtotal10 = Math.round(finalAmount / 1.138);
+    const gstHalf10 = Math.round((finalAmount - subtotal10) / 2);
+    const finalInvoice: Invoice = {
+      id: `INV-10-${newProject.id}`,
+      invoiceNumber: `INV-2026-F${String(maxInvNum + 2).padStart(3, '0')}`,
+      projectId: newProject.id,
+      customerId: customer.id,
+      customerName: customer.name,
+      customerPhone: customer.phone,
+      issueDate: new Date().toISOString().split('T')[0],
+      dueDate: new Date(Date.now() + 86400000 * 14).toISOString().split('T')[0],
+      subtotal: subtotal10,
+      cgst: gstHalf10,
+      sgst: gstHalf10,
+      igst: 0,
+      totalAmount: finalAmount,
+      paidAmount: 0,
+      balanceDue: finalAmount,
+      status: 'Sent',
+      items: [
+        { description: `10% Final Milestone: System Commissioning, Net Metering & Plant Handover for ${quote.systemCapacityKw || 5} kW Solar Plant`, hsnCode: '995465', quantity: 1, rate: subtotal10, amount: subtotal10 }
+      ],
+    };
+    setInvoices(prev => [newInvoice, finalInvoice, ...prev]);
 
     // Update Quotation & Lead state
     setQuotations(prev => prev.map(q => q.id === quotationId ? { ...q, status: 'Converted_To_Project', convertedToProjectId: newProject.id } : q));

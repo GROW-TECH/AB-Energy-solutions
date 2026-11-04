@@ -46,6 +46,52 @@ export const InvoicesView: React.FC = () => {
     return text.includes('10%') || text.toLowerCase().includes('commission') || text.toLowerCase().includes('net meter') || text.toLowerCase().includes('handover') || text.toLowerCase().includes('final');
   };
 
+  // Automatically ensure all customers who have a 90% advance invoice have their 10% Commissioning Invoice available
+  React.useEffect(() => {
+    const advInvoices = invoices.filter(is90Advance);
+    for (const adv of advInvoices) {
+      const has10 = invoices.some(other => is10Commissioning(other) && (other.projectId === adv.projectId || other.customerId === adv.customerId));
+      if (!has10) {
+        const cust = customers.find(c => c.id === adv.customerId || c.phone === adv.customerPhone);
+        const proj = projects.find(p => p.id === adv.projectId);
+        const totalVal = cust?.totalOrderValue || Math.round(adv.totalAmount / 0.9);
+        const amt10 = (cust?.balanceAmount !== undefined && cust.balanceAmount > 0) ? cust.balanceAmount : Math.max(1, totalVal - adv.totalAmount);
+        const subtotal10 = Math.round(amt10 / 1.138);
+        const gstHalf10 = Math.round((amt10 - subtotal10) / 2);
+        const numDigits = adv.invoiceNumber.replace(/\D/g, '').slice(-3) || '001';
+
+        createInvoice({
+          id: `INV-10-${adv.projectId || adv.id}`,
+          invoiceNumber: `INV-2026-F${numDigits}`,
+          projectId: adv.projectId,
+          customerId: adv.customerId,
+          customerName: adv.customerName,
+          customerPhone: adv.customerPhone,
+          customerGstin: adv.customerGstin || '',
+          issueDate: adv.issueDate || new Date().toISOString().split('T')[0],
+          dueDate: new Date(Date.now() + 86400000 * 14).toISOString().split('T')[0],
+          subtotal: subtotal10,
+          cgst: gstHalf10,
+          sgst: gstHalf10,
+          igst: 0,
+          totalAmount: amt10,
+          paidAmount: cust?.balanceAmount === 0 ? amt10 : 0,
+          balanceDue: cust?.balanceAmount === 0 ? 0 : amt10,
+          status: cust?.balanceAmount === 0 ? 'Paid' : 'Sent',
+          items: [
+            {
+              description: `10% Final Milestone: System Commissioning, Net Metering & Plant Handover for ${proj?.capacityKw || cust?.totalSystemKw || 5} kW Solar EPC Plant`,
+              hsnCode: '995465',
+              quantity: 1,
+              rate: subtotal10,
+              amount: subtotal10
+            }
+          ]
+        });
+      }
+    }
+  }, [invoices.length, customers.length, projects.length]);
+
   const countAll = invoices.length;
   const count90 = invoices.filter(is90Advance).length;
   const count10 = invoices.filter(is10Commissioning).length;
@@ -442,7 +488,7 @@ export const InvoicesView: React.FC = () => {
               <button
                 type="button"
                 onClick={() => handleOpenIssue10Modal()}
-                className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow-md transition-all cursor-pointer"
+                className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs shadow-md transition-all cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
                 <span>Issue 10% Commissioning Invoice</span>
@@ -543,11 +589,11 @@ export const InvoicesView: React.FC = () => {
                     onClick={() => setMilestoneFilter('10_commissioning')}
                     className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                       milestoneFilter === '10_commissioning'
-                        ? 'bg-indigo-600 text-white shadow-xs'
+                        ? 'bg-emerald-600 text-white shadow-xs'
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
-                    <span className={`w-2 h-2 rounded-full ${milestoneFilter === '10_commissioning' ? 'bg-white' : 'bg-indigo-500'}`} />
+                    <span className={`w-2 h-2 rounded-full ${milestoneFilter === '10_commissioning' ? 'bg-white' : 'bg-emerald-400'}`} />
                     <span>10% Commissioning &amp; Handover ({count10})</span>
                   </button>
                 </div>
@@ -616,14 +662,20 @@ export const InvoicesView: React.FC = () => {
                             {inv.invoiceNumber}
                           </span>
                           <h4 className="font-bold text-slate-900 text-sm truncate mt-0.5">{inv.customerName}</h4>
-                          <span className="text-[11px] text-slate-400 block truncate">
-                            Project: {inv.projectId} &bull; {inv.customerPhone}
-                          </span>
+                          <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+                            <span className="text-[11px] text-slate-500 font-mono">
+                              Project: {inv.projectId}
+                            </span>
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                              <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600" />
+                              <span>Project Completed</span>
+                            </span>
+                          </div>
                         </div>
 
                         <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider shrink-0 ${
                           inv.status === 'Paid' ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' :
-                          inv.status === 'Partially Paid' ? 'bg-blue-100 text-blue-800 border border-blue-200' :
+                          inv.status === 'Partially Paid' ? 'bg-amber-100 text-amber-900 border border-amber-300' :
                           'bg-amber-100 text-amber-800 border border-amber-200'
                         }`}>
                           {inv.status}
@@ -633,8 +685,8 @@ export const InvoicesView: React.FC = () => {
                       <div className="text-xs text-slate-700 bg-slate-50 p-2.5 rounded-lg space-y-1">
                         <div className="flex items-center gap-1.5">
                           {is10Commissioning(inv) ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                              <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
                               10% Commissioning &amp; Handover
                             </span>
                           ) : (
@@ -739,15 +791,21 @@ export const InvoicesView: React.FC = () => {
                             <div className="font-bold text-slate-900">{inv.customerName}</div>
                             <div className="text-[11px] text-slate-400">{inv.customerPhone}</div>
                           </td>
-                          <td className="py-3.5 px-4 font-mono text-slate-600">
-                            {inv.projectId}
+                          <td className="py-3.5 px-4">
+                            <div className="font-mono text-xs font-bold text-slate-800">{inv.projectId}</div>
+                            <div className="mt-1">
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                <span>Project Completed</span>
+                              </span>
+                            </div>
                           </td>
                           <td className="py-3.5 px-4 text-slate-800 font-medium max-w-xs">
                             <div className="flex items-center gap-1.5 mb-1">
                               {is10Commissioning(inv) ? (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
-                                  10% Commissioning
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
+                                  10% Commissioning &amp; Handover
                                 </span>
                               ) : (
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
@@ -773,7 +831,7 @@ export const InvoicesView: React.FC = () => {
                           <td className="py-3.5 px-4 text-center">
                             <span className={`inline-block px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider ${
                               inv.status === 'Paid' ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' :
-                              inv.status === 'Partially Paid' ? 'bg-blue-50 text-blue-800 border border-blue-200' :
+                              inv.status === 'Partially Paid' ? 'bg-amber-50 text-amber-900 border border-amber-300' :
                               'bg-amber-50 text-amber-800 border border-amber-200'
                             }`}>
                               {inv.status}
@@ -900,8 +958,8 @@ export const InvoicesView: React.FC = () => {
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-start justify-between border-b border-slate-100 pb-3">
               <div>
-                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 mb-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 mb-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
                   Final 10% Milestone
                 </div>
                 <h3 className="font-bold text-slate-900 text-sm">Issue 10% Commissioning Invoice</h3>
@@ -924,7 +982,7 @@ export const InvoicesView: React.FC = () => {
                 <select
                   value={selectedProjectIdFor10}
                   onChange={e => handleSelectProjectFor10(e.target.value)}
-                  className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 text-xs font-semibold text-slate-800"
+                  className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 text-xs font-semibold text-slate-800"
                 >
                   {projects.map(p => {
                     const cust = customers.find(c => c.id === p.customerId);
@@ -960,7 +1018,7 @@ export const InvoicesView: React.FC = () => {
                     </div>
                     <div className="flex justify-between items-center text-[11px] pt-1.5 border-t border-slate-200 font-bold text-slate-900">
                       <span>10% Handover Balance Due:</span>
-                      <span className="font-mono text-indigo-700 text-sm">
+                      <span className="font-mono text-emerald-800 font-extrabold text-sm">
                         ₹{(cust?.balanceAmount !== undefined ? cust.balanceAmount : Math.round(totalOrderVal * 0.1)).toLocaleString('en-IN')}
                       </span>
                     </div>
@@ -982,7 +1040,7 @@ export const InvoicesView: React.FC = () => {
                     required
                     value={custom10Amount}
                     onChange={e => setCustom10Amount(Number(e.target.value))}
-                    className="w-full p-2.5 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 font-mono font-bold text-slate-900 text-sm"
+                    className="w-full p-2.5 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 font-mono font-bold text-slate-900 text-sm"
                   />
                 </div>
 
@@ -993,7 +1051,7 @@ export const InvoicesView: React.FC = () => {
                     required
                     value={custom10DueDate}
                     onChange={e => setCustom10DueDate(e.target.value)}
-                    className="w-full p-2.5 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 font-semibold text-slate-800"
+                    className="w-full p-2.5 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 font-semibold text-slate-800"
                   />
                 </div>
               </div>
@@ -1005,13 +1063,13 @@ export const InvoicesView: React.FC = () => {
                   required
                   value={custom10Desc}
                   onChange={e => setCustom10Desc(e.target.value)}
-                  className="w-full p-2.5 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 text-xs font-medium"
+                  className="w-full p-2.5 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 text-xs font-medium"
                 />
               </div>
 
               {/* Statutory GST Math Preview */}
-              <div className="p-3 bg-indigo-50/60 border border-indigo-200 rounded-xl space-y-1.5 text-[11px]">
-                <div className="flex justify-between text-indigo-950 font-bold">
+              <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl space-y-1.5 text-[11px]">
+                <div className="flex justify-between text-emerald-950 font-bold">
                   <span>SAC Code: 995465</span>
                   <span>Composite Solar GST: 13.8%</span>
                 </div>
@@ -1025,9 +1083,9 @@ export const InvoicesView: React.FC = () => {
                     ₹{(custom10Amount - Math.round(custom10Amount / 1.138)).toLocaleString('en-IN')}
                   </span>
                 </div>
-                <div className="flex justify-between text-slate-900 font-extrabold pt-1 border-t border-indigo-200">
+                <div className="flex justify-between text-slate-900 font-extrabold pt-1 border-t border-emerald-200">
                   <span>Gross Invoice Total:</span>
-                  <span className="font-mono text-indigo-900">₹{custom10Amount.toLocaleString('en-IN')}</span>
+                  <span className="font-mono text-emerald-900">₹{custom10Amount.toLocaleString('en-IN')}</span>
                 </div>
               </div>
 
@@ -1041,7 +1099,7 @@ export const InvoicesView: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                  className="px-5 py-2 font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
                 >
                   <Plus className="w-4 h-4" />
                   <span>Generate &amp; Issue 10% Invoice</span>
