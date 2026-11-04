@@ -8,7 +8,8 @@ export type Role =
   | 'Installation Team'
   | 'Accounts'
   | 'Service Team'
-  | 'Customer';
+  | 'Customer'
+  | 'Auditor';
 
 export type UserRole = Role;
 
@@ -643,6 +644,10 @@ export interface Invoice {
   paidAmount: number;
   balanceDue: number;
   status: 'Draft' | 'Sent' | 'Partially Paid' | 'Paid' | 'Overdue';
+  sentToAuditor?: boolean;
+  sentToAuditorAt?: string;
+  auditorPhone?: string;
+  auditorNotes?: string;
 }
 
 export interface Payment {
@@ -829,6 +834,12 @@ export interface ExpenseItem {
   paymentDate: string;
   status: 'Paid' | 'Pending Approval' | 'Reimbursed';
   receiptReference?: string;
+  invoiceDocument?: string;
+  invoiceFileName?: string;
+  sentToAuditor?: boolean;
+  sentToAuditorAt?: string;
+  auditorPhone?: string;
+  auditorNotes?: string;
   recordedBy: string;
   notes?: string;
 }

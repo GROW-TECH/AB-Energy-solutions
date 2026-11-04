@@ -4467,7 +4467,7 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
                           {isReviewer && s.status === 'Submitted for Review' ? (
                             <button
                               onClick={() => handleOpenAuditView(s.id)}
-                              className="flex items-center gap-1 px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-xs cursor-pointer"
+                              className="flex items-center gap-1 px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-xs cursor-pointer"
                             >
                               <FileCheck className="w-3.5 h-3.5" />
                               <span>Review &amp; Sign-Off</span>
@@ -4577,7 +4577,7 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
                               {(s.lastModifiedRole === 'Super Admin' || s.lastModifiedRole === 'CEO') && (
                                 <span 
                                   title={`Edited by ${s.lastModifiedBy || s.lastModifiedRole}${s.lastModifiedAt ? ' at ' + new Date(s.lastModifiedAt).toLocaleDateString() : ''}`}
-                                  className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-purple-100 text-purple-800 border border-purple-300"
+                                  className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300"
                                 >
                                   Edited by {s.lastModifiedRole === 'CEO' ? 'CEO' : 'Super Admin'}
                                 </span>
@@ -4634,7 +4634,7 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
                               s.status === 'Completed' ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' :
                               s.status === 'Submitted for Review' ? 'bg-blue-50 text-blue-800 border border-blue-200' :
                               s.status === 'Changes Required' ? 'bg-red-50 text-red-800 border border-red-200' :
-                              s.status === 'In Progress' ? 'bg-indigo-50 text-indigo-800 border border-indigo-200' :
+                              s.status === 'In Progress' ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' :
                               'bg-amber-50 text-amber-800 border border-amber-200'
                             }`}>
                               {dueInfo ? dueInfo.badgeText : s.status}
@@ -4645,7 +4645,7 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
                               {isReviewer && s.status !== 'Approved' ? (
                                 <button
                                   onClick={() => handleOpenAuditView(s.id)}
-                                  className="flex items-center gap-1.5 px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-xs transition-colors cursor-pointer"
+                                  className="flex items-center gap-1.5 px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-xs transition-colors cursor-pointer"
                                   title="Review field audit findings and sign-off"
                                 >
                                   <FileCheck className="w-3.5 h-3.5" />

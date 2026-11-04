@@ -112,6 +112,8 @@ interface CrmContextType {
   recordPayment: (paymentData: Partial<Payment>) => Payment;
   verifyPaymentScreenshot: (paymentId: string, notes?: string) => Promise<boolean>;
   sendQuotationToAuditor: (quotationId: string, auditorPhone?: string, notes?: string) => Promise<boolean>;
+  sendInvoiceToAuditor: (invoiceId: string, auditorPhone?: string, notes?: string) => Promise<boolean>;
+  sendExpenseToAuditor: (expenseId: string, auditorPhone?: string, notes?: string) => Promise<boolean>;
   createInvoice: (invoiceData: Partial<Invoice>) => Invoice;
   addExpense: (expenseData: Partial<ExpenseItem>) => ExpenseItem;
   addSupplier: (supplierData: Partial<Supplier>) => Supplier;
@@ -291,7 +293,7 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       else if (user.role === 'Project Manager') defaultTab = 'projects';
       else if (user.role === 'Purchase Team') defaultTab = 'purchase-orders';
       else if (user.role === 'Installation Team') defaultTab = 'stock';
-      else if (user.role === 'Accounts') defaultTab = 'invoices';
+      else if (user.role === 'Accounts' || user.role === 'Auditor') defaultTab = 'invoices';
       else if (user.role === 'Service Team') defaultTab = 'service-tickets';
 
       return { success: true, role: user.role, defaultTab };
@@ -2392,6 +2394,88 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return true;
   };
 
+  // Send Invoice to Auditor via WhatsApp & Track Status
+  const sendInvoiceToAuditor = async (invoiceId: string, auditorPhone?: string, notes?: string): Promise<boolean> => {
+    const nowIso = new Date().toISOString();
+    const sender = currentUser?.name || activeRole || 'Accounts Desk';
+
+    setInvoices(prev => prev.map(inv => {
+      if (inv.id === invoiceId) {
+        return {
+          ...inv,
+          sentToAuditor: true,
+          sentToAuditorAt: nowIso,
+          auditorPhone: auditorPhone || inv.auditorPhone,
+          auditorNotes: notes || inv.auditorNotes
+        };
+      }
+      return inv;
+    }));
+
+    const targetInv = invoices.find(inv => inv.id === invoiceId);
+    if (targetInv) {
+      addTimelineItem(
+        'Customer',
+        targetInv.customerId || targetInv.projectId || invoiceId,
+        'Tax Invoice Sent to Auditor',
+        `Invoice ${targetInv.invoiceNumber} (₹${targetInv.totalAmount.toLocaleString('en-IN')}) shared with Auditor via WhatsApp.`,
+        sender,
+        'invoice'
+      );
+    }
+
+    addNotification(
+      'Invoice Sent to Auditor',
+      `Invoice ${targetInv?.invoiceNumber || invoiceId} shared with Auditor via WhatsApp.`,
+      'Invoice',
+      invoiceId,
+      'Invoice'
+    );
+
+    return true;
+  };
+
+  // Send Expense Voucher to Auditor via WhatsApp & Track Status
+  const sendExpenseToAuditor = async (expenseId: string, auditorPhone?: string, notes?: string): Promise<boolean> => {
+    const nowIso = new Date().toISOString();
+    const sender = currentUser?.name || activeRole || 'Accounts Desk';
+
+    setExpenses(prev => prev.map(exp => {
+      if (exp.id === expenseId) {
+        return {
+          ...exp,
+          sentToAuditor: true,
+          sentToAuditorAt: nowIso,
+          auditorPhone: auditorPhone || exp.auditorPhone,
+          auditorNotes: notes || exp.auditorNotes
+        };
+      }
+      return exp;
+    }));
+
+    const targetExp = expenses.find(e => e.id === expenseId);
+    if (targetExp) {
+      addTimelineItem(
+        'Customer',
+        targetExp.projectId || expenseId,
+        'Expense Voucher Sent to Auditor',
+        `Expense ${targetExp.expenseNumber} - ${targetExp.title} (₹${targetExp.totalAmount.toLocaleString('en-IN')}) shared with Auditor.`,
+        sender,
+        'payment'
+      );
+    }
+
+    addNotification(
+      'Expense Sent to Auditor',
+      `Expense voucher ${targetExp?.expenseNumber || expenseId} shared with Auditor via WhatsApp.`,
+      'Payment',
+      expenseId,
+      'Payment'
+    );
+
+    return true;
+  };
+
   const createInvoice = (invoiceData: Partial<Invoice>): Invoice => {
     let maxInvNum = 20;
     for (const inv of invoices) {
@@ -2646,6 +2730,8 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       paymentDate: expenseData.paymentDate || new Date().toISOString().split('T')[0],
       status: expenseData.status || 'Paid',
       receiptReference: expenseData.receiptReference || `RCPT-${Date.now().toString().slice(-4)}`,
+      invoiceDocument: expenseData.invoiceDocument || undefined,
+      invoiceFileName: expenseData.invoiceFileName || undefined,
       recordedBy: expenseData.recordedBy || activeRole,
       notes: expenseData.notes || '',
     };
@@ -2960,6 +3046,8 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       recordPayment,
       verifyPaymentScreenshot,
       sendQuotationToAuditor,
+      sendInvoiceToAuditor,
+      sendExpenseToAuditor,
       createInvoice,
       addExpense,
       addSupplier,

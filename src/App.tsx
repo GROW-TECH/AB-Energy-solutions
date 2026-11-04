@@ -98,7 +98,7 @@ const AppContent: React.FC = () => {
     if (activeRole === 'Survey Engineer') return 'site-surveys';
     if (activeRole === 'Project Manager') return 'projects';
     if (activeRole === 'Installation Team') return 'installation';
-    if (activeRole === 'Accounts') return 'invoices';
+    if (activeRole === 'Accounts' || activeRole === 'Auditor') return 'invoices';
     if (activeRole === 'Service Team') return 'service-tickets';
     return 'dashboard';
   });
@@ -115,7 +115,7 @@ const AppContent: React.FC = () => {
       else if (activeRole === 'Project Manager') setActiveNav('projects');
       else if (activeRole === 'Purchase Team') setActiveNav('purchase-orders');
       else if (activeRole === 'Installation Team') setActiveNav('installation');
-      else if (activeRole === 'Accounts') setActiveNav('invoices');
+      else if (activeRole === 'Accounts' || activeRole === 'Auditor') setActiveNav('invoices');
       else if (activeRole === 'Service Team') setActiveNav('service-tickets');
     }
   }, [activeRole]);
@@ -504,14 +504,15 @@ const AppContent: React.FC = () => {
       );
     }
 
-    // 8. Accounts Persona Panel
+    // 8. Accounts & Statutory Auditor Persona Panel
     if (
       activeRole === 'Accounts' ||
+      activeRole === 'Auditor' ||
       activeNav === 'invoices' ||
       activeNav === 'payments' ||
       activeNav === 'expenses'
     ) {
-      let subTab: 'dashboard' | 'invoices' | 'payments' | 'expenses' | 'pos' = 'dashboard';
+      let subTab: 'dashboard' | 'invoices' | 'payments' | 'expenses' | 'pos' = activeRole === 'Auditor' ? 'invoices' : 'dashboard';
       if (activeNav === 'invoices') subTab = 'invoices';
       else if (activeNav === 'payments') subTab = 'payments';
       else if (activeNav === 'expenses') subTab = 'expenses';

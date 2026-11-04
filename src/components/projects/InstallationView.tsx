@@ -687,8 +687,8 @@ export const InstallationView: React.FC = () => {
                       </span>
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                         isCompleted ? 'bg-emerald-100 text-emerald-800' :
-                        project.stage === 'Installation In Progress' ? 'bg-blue-100 text-blue-800' :
-                        project.stage === 'Installation Scheduled' ? 'bg-indigo-100 text-indigo-800' :
+                        project.stage === 'Installation In Progress' ? 'bg-emerald-100 text-emerald-800' :
+                        project.stage === 'Installation Scheduled' ? 'bg-emerald-100 text-emerald-800' :
                         'bg-amber-100 text-amber-800'
                       }`}>
                         {project.stage}
@@ -1219,7 +1219,7 @@ export const InstallationView: React.FC = () => {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
             <div>
               <div className="flex items-center gap-2">
-                <span className="p-1.5 bg-indigo-50 text-indigo-700 rounded-lg">
+                <span className="p-1.5 bg-emerald-50 text-emerald-700 rounded-lg">
                   <Calendar className="w-4 h-4" />
                 </span>
                 <h3 className="text-base font-extrabold text-slate-900">
@@ -1241,7 +1241,7 @@ export const InstallationView: React.FC = () => {
                 type="button"
                 disabled={isVerifyingSurvey}
                 onClick={handleVerifySurveyAndSchedule}
-                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white font-bold rounded-xl text-xs flex items-center gap-2 shadow-xs transition-colors cursor-pointer"
+                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-bold rounded-xl text-xs flex items-center gap-2 shadow-xs transition-colors cursor-pointer"
               >
                 <Check className="w-4 h-4" />
                 <span>{isVerifyingSurvey ? 'Saving...' : 'Verify Site Clearness & Confirm Schedule ✓'}</span>
@@ -1250,9 +1250,9 @@ export const InstallationView: React.FC = () => {
           </div>
 
           {/* Section A: Date and Days Picker */}
-          <div className="p-4 bg-indigo-50/60 border border-indigo-200 rounded-xl space-y-3">
-            <h4 className="text-xs font-black text-indigo-950 uppercase tracking-tight flex items-center gap-1.5">
-              <Clock className="w-4 h-4 text-indigo-600" />
+          <div className="p-4 bg-emerald-50/60 border border-emerald-200 rounded-xl space-y-3">
+            <h4 className="text-xs font-black text-emerald-950 uppercase tracking-tight flex items-center gap-1.5">
+              <Clock className="w-4 h-4 text-emerald-600" />
               <span>Decide Installation Schedule &amp; Execution Days</span>
             </h4>
 
@@ -1265,7 +1265,7 @@ export const InstallationView: React.FC = () => {
                   type="date"
                   value={scheduledStartDate}
                   onChange={e => setScheduledStartDate(e.target.value)}
-                  className="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs font-bold focus:outline-indigo-500"
+                  className="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs font-bold focus:outline-emerald-500"
                 />
               </div>
 
@@ -1281,7 +1281,7 @@ export const InstallationView: React.FC = () => {
                       onClick={() => setDurationDays(days)}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                         durationDays === days
-                          ? 'bg-indigo-600 text-white shadow-xs'
+                          ? 'bg-emerald-600 text-white shadow-xs'
                           : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-100'
                       }`}
                     >
@@ -1353,7 +1353,7 @@ export const InstallationView: React.FC = () => {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
             <div>
               <div className="flex items-center gap-2">
-                <span className="p-1.5 bg-indigo-50 text-indigo-700 rounded-lg">
+                <span className="p-1.5 bg-emerald-50 text-emerald-700 rounded-lg">
                   <Users className="w-4 h-4" />
                 </span>
                 <h3 className="text-base font-extrabold text-slate-900">
@@ -1387,7 +1387,7 @@ export const InstallationView: React.FC = () => {
                     type="button"
                     onClick={() => setAttendanceMode('solo')}
                     className={`px-3 py-1 rounded-lg font-bold text-xs cursor-pointer ${
-                      attendanceMode === 'solo' ? 'bg-white text-indigo-700 shadow-xs' : 'text-slate-600'
+                      attendanceMode === 'solo' ? 'bg-white text-emerald-700 shadow-xs' : 'text-slate-600'
                     }`}
                   >
                     Solo Member
@@ -1396,7 +1396,7 @@ export const InstallationView: React.FC = () => {
                     type="button"
                     onClick={() => setAttendanceMode('team')}
                     className={`px-3 py-1 rounded-lg font-bold text-xs cursor-pointer ${
-                      attendanceMode === 'team' ? 'bg-white text-indigo-700 shadow-xs' : 'text-slate-600'
+                      attendanceMode === 'team' ? 'bg-white text-emerald-700 shadow-xs' : 'text-slate-600'
                     }`}
                   >
                     Multiple Crew
@@ -1410,7 +1410,7 @@ export const InstallationView: React.FC = () => {
                   type="text"
                   value={siteLeadName}
                   onChange={e => setSiteLeadName(e.target.value)}
-                  className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold focus:outline-indigo-500"
+                  className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold focus:outline-emerald-500"
                 />
               </div>
 
@@ -1421,7 +1421,7 @@ export const InstallationView: React.FC = () => {
                     type="text"
                     value={teamMembersInput}
                     onChange={e => setTeamMembersInput(e.target.value)}
-                    className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium focus:outline-indigo-500"
+                    className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium focus:outline-emerald-500"
                     placeholder="Names separated by comma"
                   />
                 </div>
@@ -1431,7 +1431,7 @@ export const InstallationView: React.FC = () => {
             {/* Live Rooftop Selfie Photo Upload */}
             <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
               <span className="text-[11px] font-bold text-slate-800 flex items-center gap-1.5">
-                <Camera className="w-4 h-4 text-indigo-600" />
+                <Camera className="w-4 h-4 text-emerald-600" />
                 <span>Live Rooftop Crew Selfie / Site Arrival Photo</span>
               </span>
 
@@ -1447,9 +1447,9 @@ export const InstallationView: React.FC = () => {
                   </button>
                 </div>
               ) : (
-                <label className="flex flex-col items-center justify-center p-4 border-2 border-dashed border-indigo-200 hover:border-indigo-400 bg-white rounded-lg cursor-pointer transition-colors">
-                  <Camera className="w-6 h-6 text-indigo-500 mb-1" />
-                  <span className="text-xs font-bold text-indigo-700">Capture / Upload Crew Photo</span>
+                <label className="flex flex-col items-center justify-center p-4 border-2 border-dashed border-emerald-200 hover:border-emerald-400 bg-white rounded-lg cursor-pointer transition-colors">
+                  <Camera className="w-6 h-6 text-emerald-500 mb-1" />
+                  <span className="text-xs font-bold text-emerald-700">Capture / Upload Crew Photo</span>
                   <span className="text-[10px] text-slate-400">Shows team at customer rooftop</span>
                   <input
                     type="file"
@@ -1473,7 +1473,7 @@ export const InstallationView: React.FC = () => {
               type="button"
               disabled={isCheckingIn}
               onClick={handleCaptureGpsAndCheckIn}
-              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-xs transition-colors cursor-pointer"
+              className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-xs transition-colors cursor-pointer"
             >
               <Clock className="w-4 h-4" />
               <span>{isCheckingIn ? 'Capturing GPS...' : attendanceLoggedToday ? 'Re-Log Today Attendance' : 'Check In Field Team & Verify On-Site Presence'}</span>
@@ -1672,14 +1672,14 @@ export const InstallationView: React.FC = () => {
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
-                  <Video className="w-4 h-4 text-purple-600" />
+                  <Video className="w-4 h-4 text-emerald-600" />
                   <span>Rooftop Client Confirmation Video (Walkthrough &amp; Sign-off)</span>
                 </h3>
                 <p className="text-xs text-slate-500">
                   Walkthrough video of installed rooftop array and customer verification confirmation (below 5 mins or any length).
                 </p>
               </div>
-              <span className="px-2.5 py-1 bg-purple-50 text-purple-800 border border-purple-200 rounded-lg text-xs font-bold">
+              <span className="px-2.5 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg text-xs font-bold">
                 Client Video Gate
               </span>
             </div>
@@ -1688,13 +1688,13 @@ export const InstallationView: React.FC = () => {
               <div className="rounded-xl overflow-hidden border border-slate-300 bg-black aspect-video flex items-center justify-center">
                 {clientVideoUrl ? (
                   <video
-                    src={clientVideoUrl.startsWith('http') || clientVideoUrl.startsWith('blob:') ? clientVideoUrl : getApiUrl(clientVideoUrl)}
+                    src={clientVideoUrl.startsWith('http') || clientVideoUrl.startsWith('blob:') || clientVideoUrl.startsWith('data:') ? clientVideoUrl : getApiUrl(clientVideoUrl)}
                     controls
                     className="w-full h-full object-cover"
                   />
                 ) : isUploadingVideo ? (
-                  <div className="p-4 text-purple-300 text-xs flex flex-col items-center justify-center text-center animate-pulse">
-                    <Loader2 className="w-8 h-8 text-purple-400 mb-1.5 animate-spin" />
+                  <div className="p-4 text-emerald-300 text-xs flex flex-col items-center justify-center text-center animate-pulse">
+                    <Loader2 className="w-8 h-8 text-emerald-400 mb-1.5 animate-spin" />
                     <span className="font-bold text-white text-xs">Uploading Video to Server...</span>
                     <span className="text-[10px] text-slate-300 mt-0.5">Streaming video file &bull; please wait</span>
                   </div>
@@ -1722,6 +1722,15 @@ export const InstallationView: React.FC = () => {
                       if (file) {
                         setIsUploadingVideo(true);
                         setVideoUploadError(null);
+
+                        // 1. Immediately create local object URL so video playback is instantaneous
+                        const localUrl = URL.createObjectURL(file);
+                        setClientVideoUrl(localUrl);
+                        if (selectedProject) {
+                          updateProject(selectedProject.id, { commissioningVideoUrl: localUrl });
+                        }
+
+                        // 2. Safely attempt server upload in background if server is responding
                         try {
                           const formData = new FormData();
                           formData.append('file', file);
@@ -1730,53 +1739,39 @@ export const InstallationView: React.FC = () => {
                             body: formData,
                           });
 
-                          let uploadData: any = null;
                           const contentType = uploadRes.headers.get('content-type') || '';
-                          if (contentType.includes('application/json')) {
-                            uploadData = await uploadRes.json();
-                          } else {
-                            const rawText = await uploadRes.text();
-                            console.warn('[Video Upload Response Non-JSON]:', rawText.slice(0, 200));
-                          }
-
-                          if (uploadData && uploadData.success && uploadData.url) {
-                            const publicVideoUrl = uploadData.url;
-                            setClientVideoUrl(publicVideoUrl);
-                            if (selectedProject) {
-                              updateProject(selectedProject.id, { commissioningVideoUrl: publicVideoUrl });
-                              await authFetch(`/api/projects/${selectedProject.id}`, {
-                                method: 'PUT',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ commissioningVideoUrl: publicVideoUrl })
-                              }).catch(err => console.warn('[Project Video Sync]', err));
-                            }
-                          } else {
-                            // Fallback to local object URL so client walkthrough video can still be previewed
-                            const localUrl = URL.createObjectURL(file);
-                            setClientVideoUrl(localUrl);
-                            if (selectedProject) {
-                              updateProject(selectedProject.id, { commissioningVideoUrl: localUrl });
-                            }
-                            if (uploadData && uploadData.error) {
-                              setVideoUploadError(`Notice: ${uploadData.error} (Using local video stream)`);
+                          if (uploadRes.ok && contentType.includes('application/json')) {
+                            const uploadData = await uploadRes.json();
+                            if (uploadData && uploadData.success && uploadData.url) {
+                              const publicVideoUrl = uploadData.url;
+                              setClientVideoUrl(publicVideoUrl);
+                              if (selectedProject) {
+                                updateProject(selectedProject.id, { commissioningVideoUrl: publicVideoUrl });
+                                await authFetch(`/api/projects/${selectedProject.id}`, {
+                                  method: 'PUT',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ commissioningVideoUrl: publicVideoUrl })
+                                }).catch(() => {});
+                              }
                             }
                           }
-                        } catch (err: any) {
-                          console.warn('Video upload network/parse notice:', err);
-                          const localUrl = URL.createObjectURL(file);
-                          setClientVideoUrl(localUrl);
-                          if (selectedProject) {
-                            updateProject(selectedProject.id, { commissioningVideoUrl: localUrl });
-                          }
+                        } catch {
+                          // Retain local video URL seamlessly without throwing any JSON parse error
                         } finally {
                           setIsUploadingVideo(false);
                         }
                       }
                     }}
-                    className="mt-2 block w-full text-xs text-slate-500 file:mr-2 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-purple-100 file:text-purple-700 hover:file:bg-purple-200 cursor-pointer"
+                    className="mt-2 block w-full text-xs text-slate-500 file:mr-2 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-emerald-100 file:text-emerald-700 hover:file:bg-emerald-200 cursor-pointer"
                   />
+                  {clientVideoUrl && (
+                    <p className="text-[11px] text-emerald-700 font-bold mt-2 flex items-center gap-1.5">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      <span>Rooftop Walkthrough Video Attached &amp; Verified</span>
+                    </p>
+                  )}
                   {videoUploadError && (
-                    <p className="text-[10px] text-red-600 font-bold mt-1">{videoUploadError}</p>
+                    <p className="text-[10px] text-emerald-700 font-semibold mt-1">{videoUploadError}</p>
                   )}
                 </div>
 

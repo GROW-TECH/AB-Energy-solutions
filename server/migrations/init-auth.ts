@@ -104,6 +104,16 @@ export const DEMO_ACCOUNTS: DemoAccountDef[] = [
     department: 'Client Portal',
     customerId: 'CUST-2026-001',
   },
+  {
+    username: 'auditor',
+    defaultPassword: 'Auditor@123',
+    role: 'Auditor',
+    name: 'Ramesh Sundaram (Statutory Auditor)',
+    email: 'auditor@abenergy.in',
+    phone: '+91 98450-99881',
+    department: 'Statutory & Financial Audit',
+    employeeId: 'EMP-09',
+  },
 ];
 
 export async function runAuthMigration(): Promise<{ success: boolean; message: string }> {

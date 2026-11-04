@@ -61,6 +61,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenNewLead, onOpenSearch, onO
     'Purchase Team',
     'Installation Team',
     'Accounts',
+    'Auditor',
     'Service Team',
     'Customer',
   ];

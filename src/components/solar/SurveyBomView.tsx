@@ -778,7 +778,7 @@ export const SurveyBomView: React.FC<SurveyBomViewProps> = ({
                     </button>
                     <button
                       onClick={() => setShowNewCategoryModal(!showNewCategoryModal)}
-                      className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
+                      className="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
                       title="Add or create a new category for the dropdown"
                     >
                       <FolderPlus className="w-4 h-4" />
@@ -834,9 +834,9 @@ export const SurveyBomView: React.FC<SurveyBomViewProps> = ({
 
             {/* Quick Add Custom Category Bar */}
             {showNewCategoryModal && (
-              <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-2xl flex flex-col sm:flex-row items-center gap-3 animate-in fade-in duration-200">
+              <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex flex-col sm:flex-row items-center gap-3 animate-in fade-in duration-200">
                 <div className="flex-1 w-full">
-                  <label className="block text-[11px] font-bold text-indigo-900 mb-1">
+                  <label className="block text-[11px] font-bold text-emerald-900 mb-1">
                     Add Custom Equipment Category to Dropdown:
                   </label>
                   <input
@@ -844,7 +844,7 @@ export const SurveyBomView: React.FC<SurveyBomViewProps> = ({
                     value={newCategoryName}
                     onChange={e => setNewCategoryName(e.target.value)}
                     placeholder="e.g. Battery Storage / BESS, Net Metering Enclosure, Stanchions..."
-                    className="w-full p-2 bg-white border border-indigo-300 rounded-xl text-xs font-semibold focus:outline-hidden focus:border-indigo-600"
+                    className="w-full p-2 bg-white border border-emerald-300 rounded-xl text-xs font-semibold focus:outline-hidden focus:border-emerald-600"
                     autoFocus
                     onKeyDown={e => {
                       if (e.key === 'Enter') handleAddNewCategory();
@@ -855,7 +855,7 @@ export const SurveyBomView: React.FC<SurveyBomViewProps> = ({
                   <button
                     onClick={handleAddNewCategory}
                     disabled={!newCategoryName.trim()}
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold rounded-xl text-xs cursor-pointer shadow-xs"
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-xl text-xs cursor-pointer shadow-xs"
                   >
                     Add Category
                   </button>

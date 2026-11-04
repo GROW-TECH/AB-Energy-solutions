@@ -335,15 +335,15 @@ export const GovtSubsidyMasterView: React.FC = () => {
         <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-sm hover:shadow-md transition-shadow">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Waiting Net Meter</span>
-            <span className="p-2 bg-purple-50 text-purple-600 rounded-lg">
+            <span className="p-2 bg-emerald-50 text-emerald-600 rounded-lg">
               <Zap className="w-5 h-5" />
             </span>
           </div>
           <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-purple-700">
+            <span className="text-2xl font-bold text-emerald-700 font-mono">
               {summary?.pending_net_meter_count ?? subsidies.filter(s => s.current_stage === 5 || s.current_stage === 6).length}
             </span>
-            <span className="text-xs text-purple-600 font-medium">Ready for sync</span>
+            <span className="text-xs text-emerald-600 font-medium">Ready for sync</span>
           </div>
           <p className="text-xs text-slate-500 mt-1">DISCOM inspection & meter testing</p>
         </div>
@@ -631,7 +631,7 @@ export const GovtSubsidyMasterView: React.FC = () => {
                         </div>
                       )}
                       {record.net_meter_number && (
-                        <div className="text-[10px] text-purple-700 font-medium truncate">
+                        <div className="text-[10px] text-emerald-700 font-medium truncate">
                           Meter: <span className="font-mono">{record.net_meter_number}</span>
                         </div>
                       )}

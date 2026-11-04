@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { apiRouter } from './server/routes.js';
 import { runProjectLifecycleMigration } from './server/migrations/project-lifecycle-updates.js';
+import { runAuthMigration } from './server/migrations/init-auth.js';
 
 dotenv.config();
 
@@ -92,6 +93,9 @@ async function startServer() {
     // Run database schema updates in background on startup
     runProjectLifecycleMigration().catch(err => {
       console.warn('[Startup Migration Notice]:', err.message);
+    });
+    runAuthMigration().catch(err => {
+      console.warn('[Startup Auth Migration Notice]:', err.message);
     });
   });
 }

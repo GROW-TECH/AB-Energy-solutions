@@ -75,7 +75,7 @@ export const MaterialsPlanningView: React.FC = () => {
       case 'Dispatched':
         return 'bg-blue-50 text-blue-700 border-blue-200';
       case 'Allocated':
-        return 'bg-indigo-50 text-indigo-700 border-indigo-200';
+        return 'bg-emerald-50 text-emerald-700 border-emerald-200';
       case 'Indented':
         return 'bg-amber-50 text-amber-700 border-amber-200';
       case 'Planning':
@@ -274,7 +274,7 @@ export const MaterialsPlanningView: React.FC = () => {
                   {item.status === 'Indented' && (
                     <button
                       onClick={() => updateMaterialAllocationStatus(item.id, 'Allocated')}
-                      className="w-full py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg border border-indigo-200 cursor-pointer text-center"
+                      className="w-full py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg border border-emerald-200 cursor-pointer text-center"
                     >
                       Allocate Stock
                     </button>
@@ -375,7 +375,7 @@ export const MaterialsPlanningView: React.FC = () => {
                       {item.status === 'Indented' && (
                         <button
                           onClick={() => updateMaterialAllocationStatus(item.id, 'Allocated')}
-                          className="px-2.5 py-1 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded border border-indigo-200"
+                          className="px-2.5 py-1 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded border border-emerald-200"
                         >
                           Allocate Stock
                         </button>

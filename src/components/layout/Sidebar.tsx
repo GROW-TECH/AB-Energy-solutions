@@ -593,6 +593,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           )}
 
+          {/* 9. STATUTORY AUDITOR MENU (Strictly Invoices & Expenses) */}
+          {activeRole === 'Auditor' && (
+            <div className="space-y-1">
+              <div className="px-3 py-1.5 text-[10px] font-bold text-emerald-400 uppercase tracking-wider">
+                Auditor Audit Portal
+              </div>
+              {renderNavButton('invoices', 'Milestone & Tax Invoices', Receipt)}
+              {renderNavButton('expenses', 'Expense Vouchers & Bills', DollarSign)}
+            </div>
+          )}
+
           {/* 9. SERVICE TEAM MENU (4 Items) */}
           {activeRole === 'Service Team' && (
             <div className="space-y-1">
