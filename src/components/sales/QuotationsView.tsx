@@ -603,26 +603,14 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-800">
                     <div><span className="font-bold text-black">Client Name:</span> {selectedQuoteForPreview.leadName}</div>
                     <div><span className="font-bold text-black">Contact Phone:</span> {selectedQuoteForPreview.customerPhone || 'N/A'}</div>
-                    <div><span className="font-bold text-black">Service Number:</span> 045310081264 / {selectedQuoteForPreview.systemCapacityKw}KWp</div>
-                    <div><span className="font-bold text-black">Site Address:</span> {selectedQuoteForPreview.customerAddress || 'West Rajapalayam, P.N palayam, TN'}</div>
+                    {Boolean((selectedQuoteForPreview as any).serviceNumber || (selectedQuoteForPreview as any).consumerNumber) ? (
+                      <div><span className="font-bold text-black">Service Number:</span> {(selectedQuoteForPreview as any).serviceNumber || (selectedQuoteForPreview as any).consumerNumber}</div>
+                    ) : (
+                      <div><span className="font-bold text-black">System Type:</span> Rooftop Solar PV System</div>
+                    )}
+                    <div><span className="font-bold text-black">Site Address:</span> {selectedQuoteForPreview.customerAddress || 'N/A'}</div>
                     <div><span className="font-bold text-black">Quoted Capacity:</span> {selectedQuoteForPreview.systemCapacityKw} kW On-Grid</div>
                     <div><span className="font-bold text-black">Proposal Type:</span> Grid-Tied Rooftop EPC</div>
-                  </div>
-                </div>
-
-                {/* Key Metrics Strip */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3 pt-1">
-                  <div className="p-3 bg-white border border-slate-200 rounded-xl text-center">
-                    <span className="text-[10px] text-slate-500 uppercase block font-semibold">Plant Capacity</span>
-                    <span className="text-sm font-black text-emerald-700 font-mono">{selectedQuoteForPreview.systemCapacityKw} kW On-Grid</span>
-                  </div>
-                  <div className="p-3 bg-white border border-slate-200 rounded-xl text-center">
-                    <span className="text-[10px] text-slate-500 uppercase block font-semibold">Estimated Annual Yield</span>
-                    <span className="text-sm font-black text-emerald-700 font-mono">~{Math.round(selectedQuoteForPreview.systemCapacityKw * 1500).toLocaleString('en-IN')} Units</span>
-                  </div>
-                  <div className="p-3 bg-white border border-slate-200 rounded-xl text-center">
-                    <span className="text-[10px] text-slate-500 uppercase block font-semibold">Module Performance</span>
-                    <span className="text-sm font-black text-emerald-700">25-30 Years Tier-1</span>
                   </div>
                 </div>
 
@@ -897,7 +885,7 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                     Features and Warranty
                   </h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-slate-800">
-                    <div>- Tier-1 High-Efficiency Solar Modules</div>
+                    <div>- High-Efficiency Solar Modules</div>
                     <div>- Workmanship Warranty: 1 Year</div>
                     <div>- Inverter Warranty: Up to 8 Years</div>
                     <div>- Estimated Energy Generation: ~{Math.round(selectedQuoteForPreview.systemCapacityKw * 5)} kWh/day</div>

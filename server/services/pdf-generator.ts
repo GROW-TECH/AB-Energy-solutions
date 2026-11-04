@@ -187,8 +187,14 @@ export async function generateProposalPdf(data: ProposalPdfData): Promise<{ file
       doc.text(`Client Name: `, 55, custBoxY + 32, { continued: true })
          .font('Helvetica-Bold').text(data.leadName);
 
-      doc.font('Helvetica').text(`Service Number: `, 55, custBoxY + 50, { continued: true })
-         .font('Helvetica-Bold').text(`045310081264 / ${data.systemCapacityKw}KWp`);
+      const srvNo = (data as any).serviceNumber || (data as any).consumerNumber;
+      if (srvNo) {
+        doc.font('Helvetica').text(`Service Number: `, 55, custBoxY + 50, { continued: true })
+           .font('Helvetica-Bold').text(srvNo);
+      } else {
+        doc.font('Helvetica').text(`System Type: `, 55, custBoxY + 50, { continued: true })
+           .font('Helvetica-Bold').text('Rooftop Solar PV System');
+      }
 
       doc.font('Helvetica').text(`Quoted Capacity: `, 55, custBoxY + 68, { continued: true })
          .font('Helvetica-Bold').text(`${data.systemCapacityKw} kW On-Grid Solar`);
@@ -200,22 +206,7 @@ export async function generateProposalPdf(data: ProposalPdfData): Promise<{ file
          .font('Helvetica-Bold').text(data.customerPhone || 'N/A');
 
       doc.font('Helvetica').text(`Site Address: `, 300, custBoxY + 50);
-      doc.font('Helvetica-Bold').text(data.customerAddress || 'West Rajapalayam, P.N palayam, TN', 300, custBoxY + 62, { width: 240 });
-
-      // Key Metrics Strip at bottom of Cover Page
-      const metricY = 580;
-      const metricW = 165;
-      const metrics = [
-        { label: 'Plant Capacity', val: `${data.systemCapacityKw} kW On-Grid` },
-        { label: 'Estimated Annual Yield', val: `~${Math.round(data.annualGenerationKwh || data.systemCapacityKw * 1500).toLocaleString('en-IN')} Units` },
-        { label: 'Module Performance', val: '25-30 Years Tier-1' },
-      ];
-      metrics.forEach((m, idx) => {
-        const mX = 40 + idx * 175;
-        doc.rect(mX, metricY, metricW, 46).fillAndStroke('#FFFFFF', borderSlate);
-        doc.font('Helvetica').fontSize(7.5).fillColor(textMuted).text(m.label, mX + 8, metricY + 8);
-        doc.font('Helvetica-Bold').fontSize(10).fillColor(greenAccent).text(m.val, mX + 8, metricY + 24);
-      });
+      doc.font('Helvetica-Bold').text(data.customerAddress || 'N/A', 300, custBoxY + 62, { width: 240 });
 
       // ==========================================
       // PAGE 2: CORPORATE PROFILE & LETTER
@@ -487,7 +478,7 @@ export async function generateProposalPdf(data: ProposalPdfData): Promise<{ file
 
       const dailyKwh = Math.round(data.systemCapacityKw * 5);
       const featCol1 = [
-        'Tier-1 High-Efficiency Solar Modules',
+        'High-Efficiency Solar Modules',
         'Inverter Warranty: Up to 8 Years',
         'Solar Module Product Warranty: 12 Years',
         'Solar Module Performance Warranty: Up to 30 Years',
