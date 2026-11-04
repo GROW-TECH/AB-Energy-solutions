@@ -2642,7 +2642,7 @@ async function generateProposalPdf(data) {
           doc.restore();
         }
         doc.font("Helvetica-Bold").fontSize(9).fillColor(headingNavy).text("AB ENERGY SOLUTIONS", 40, 26);
-        doc.font("Helvetica").fontSize(7.5).fillColor(textMuted).text("Turnkey Solar EPC & Engineering", 40, 37);
+        doc.font("Helvetica").fontSize(7.5).fillColor(textMuted).text("Engineering Excellence", 40, 37);
         doc.font("Helvetica-Bold").fontSize(8).fillColor(greenAccent).text(`Quotation: ${data.quotationNumber}`, 200, 26, { width: 195, align: "center" });
         if (pageTitle) {
           doc.font("Helvetica-Oblique").fontSize(7).fillColor(textMuted).text(pageTitle, 200, 37, { width: 195, align: "center" });
@@ -2653,7 +2653,7 @@ async function generateProposalPdf(data) {
       };
       const drawFooter = (pageNum, totalPages) => {
         doc.moveTo(40, 785).lineTo(555, 785).lineWidth(0.5).strokeColor("#E2E8F0").stroke();
-        doc.font("Helvetica").fontSize(8).fillColor(textMuted).text(`AB Energy Solutions  \u2022  Turnkey Solar EPC & Engineering  \u2022  Page ${pageNum} of ${totalPages}`, 40, 792, { align: "center", width: 515 });
+        doc.font("Helvetica").fontSize(8).fillColor(textMuted).text(`AB Energy Solutions  \u2022  Page ${pageNum} of ${totalPages}`, 40, 792, { align: "center", width: 515 });
       };
       if (hasLogo) {
         doc.image(logoPath, 40, 28, { width: 125, height: 70, fit: [125, 70] });
@@ -2661,18 +2661,15 @@ async function generateProposalPdf(data) {
         doc.font("Helvetica-Bold").fontSize(16).fillColor(headingNavy).text("AB ENERGY SOLUTIONS", 40, 35);
       }
       doc.font("Helvetica-Bold").fontSize(10).fillColor(headingNavy).text("GST: 33FSQPA3244H1ZU", 40, 35, { align: "right", width: 515 });
-      doc.font("Helvetica").fontSize(8.5).fillColor(textMuted).text("Solar EPC \u2022 Electrical Infrastructure \u2022 O&M", 40, 49, { align: "right", width: 515 });
-      doc.font("Helvetica-Bold").fontSize(8).fillColor(greenAccent).text("TNEB C-Licence Certified Enterprise", 40, 62, { align: "right", width: 515 });
+      doc.font("Helvetica-Bold").fontSize(8).fillColor(greenAccent).text("TNEB C-Licence Certified Enterprise", 40, 52, { align: "right", width: 515 });
       doc.moveTo(40, 105).lineTo(555, 105).lineWidth(0.75).strokeColor("#E2E8F0").stroke();
-      doc.font("Helvetica-Bold").fontSize(15).fillColor(headingNavy).text(`Quotation for ${data.systemCapacityKw} kW Grid-Connected Rooftop Solar Power System`, 40, 118, { align: "center", width: 515 });
-      doc.font("Helvetica").fontSize(9).fillColor(greenAccent).text("Turnkey Engineering, Procurement, Installation & Commissioning Proposal", 40, 137, { align: "center", width: 515 });
+      doc.font("Helvetica-Bold").fontSize(16).fillColor(headingNavy).text(`Quotation for ${data.systemCapacityKw} kW Grid-Connected Rooftop Solar Power System`, 40, 122, { align: "center", width: 515 });
       const formattedDate = new Date(data.createdAt || Date.now()).toLocaleDateString("en-GB", {
         day: "2-digit",
         month: "2-digit",
         year: "numeric"
       });
       doc.font("Helvetica-Bold").fontSize(9).fillColor(headingNavy).text(`Quotation No.: ${data.quotationNumber}`, 45, 154);
-      doc.font("Helvetica").fontSize(8.5).fillColor(textMuted).text(`Package Tier: ${data.packageTier || "Premium Tier-1"}`, 210, 154, { width: 175, align: "center" });
       doc.font("Helvetica-Bold").fontSize(9).fillColor(headingNavy).text(`Date: ${formattedDate}`, 40, 154, { align: "right", width: 515 });
       if (hasCoverPhoto) {
         doc.image(coverPhotoPath, 40, 172, { width: 515, height: 265, fit: [515, 265], align: "center" });
@@ -2946,18 +2943,18 @@ The quotation includes the complete supply, installation, testing, and commissio
       doc.text("Govt. Subsidy Support", 290, p5Y + 6, { width: 120, align: "center" });
       doc.text("Net Customer Cost", 415, p5Y + 6, { width: 135, align: "center" });
       p5Y += 22;
-      const finalPriceStr = `\u20B9${Math.round(data.finalContractAmount).toLocaleString("en-IN")}/-`;
+      const finalPriceStr = `Rs. ${Math.round(data.finalContractAmount).toLocaleString("en-IN")}/-`;
       doc.rect(40, p5Y, priceW, 36).fillAndStroke("#FFFFFF", "#CBD5E1");
       doc.font("Helvetica-Bold").fontSize(8.5).fillColor(bodyDark);
       doc.text(`${data.systemCapacityKw} kW On-Grid Solar`, 42, p5Y + 13, { width: 120, align: "center" });
       doc.font("Helvetica-Bold").fontSize(10.5).fillColor(headingNavy);
       doc.text(finalPriceStr, 165, p5Y + 12, { width: 120, align: "center" });
       doc.font("Helvetica-Bold").fontSize(10.5).fillColor(greenAccent);
-      doc.text(`\u20B9${Math.round(subsidyAmt).toLocaleString("en-IN")}`, 290, p5Y + 8, { width: 120, align: "center" });
+      doc.text(`Rs. ${Math.round(subsidyAmt).toLocaleString("en-IN")}`, 290, p5Y + 8, { width: 120, align: "center" });
       doc.font("Helvetica").fontSize(6.5).fillColor(textMuted);
       doc.text("(Direct DBT Support)", 290, p5Y + 22, { width: 120, align: "center" });
       doc.font("Helvetica-Bold").fontSize(10.5).fillColor(headingNavy);
-      doc.text(`\u20B9${Math.round(netCustomerCost).toLocaleString("en-IN")}/-`, 415, p5Y + 8, { width: 135, align: "center" });
+      doc.text(`Rs. ${Math.round(netCustomerCost).toLocaleString("en-IN")}/-`, 415, p5Y + 8, { width: 135, align: "center" });
       doc.font("Helvetica").fontSize(6.5).fillColor(textMuted);
       doc.text("(Net Payable Investment)", 415, p5Y + 22, { width: 135, align: "center" });
       p5Y += 46;
@@ -3724,7 +3721,7 @@ var editQuotation = async (req, res) => {
       return res.status(404).json({ success: false, error: "Quotation not found" });
     }
     const existing = rows[0];
-    const systemCapacityKw = body.systemCapacityKw || existing.system_capacity_kw;
+    const systemCapacityKw = body.systemCapacityKw !== void 0 ? Number(body.systemCapacityKw) : Number(existing.system_capacity_kw);
     const packageTier = body.packageTier || existing.package_tier || "Premium Bifacial";
     const discountAmount = body.discountAmount !== void 0 ? Number(body.discountAmount) : Number(existing.discount_amount);
     const customItems = body.customItems;
@@ -3743,45 +3740,93 @@ var editQuotation = async (req, res) => {
       taxMode: body.taxMode || existing.tax_mode,
       taxType: body.taxType
     });
-    let versions = typeof existing.versions === "string" ? JSON.parse(existing.versions) : existing.versions || [];
+    let existingVersions = typeof existing.versions === "string" ? JSON.parse(existing.versions) : existing.versions || [];
+    let lastVer = existingVersions?.[existingVersions.length - 1] || existingVersions?.[0] || {};
+    let existingItems = lastVer.items || [];
+    let updatedItems = [];
+    if (customItems && Array.isArray(customItems) && customItems.length > 0) {
+      updatedItems = customItems.map((ci, idx) => {
+        const catLower = (ci.category || ci.description || "").toLowerCase();
+        const isFive = ci.gstRate === 5 || catLower.includes("solar") || catLower.includes("panel") || catLower.includes("inverter") || catLower.includes("module");
+        const gstRate = ci.gstRate !== void 0 ? Number(ci.gstRate) : isFive ? 5 : 18;
+        const qty = Number(ci.quantity) || 1;
+        const rate = Number(ci.unitPrice !== void 0 ? ci.unitPrice : ci.estimated_unit_cost) || 0;
+        const taxable = ci.taxableAmount !== void 0 ? Number(ci.taxableAmount) : Math.round(qty * rate);
+        const taxAmount = ci.taxAmount !== void 0 ? Number(ci.taxAmount) : Math.round(taxable * (gstRate / 100));
+        const totalPrice = ci.totalPrice !== void 0 ? Number(ci.totalPrice) : taxable + taxAmount;
+        return {
+          id: ci.id || `ITEM-${idx + 1}`,
+          category: ci.category || ci.description || "Solar Component",
+          description: ci.description || ci.category || "Solar Component",
+          specification: ci.specification || ci.description || "",
+          unit: ci.unit || "Nos",
+          quantity: qty,
+          unitPrice: rate,
+          hsnSacCode: ci.hsnSacCode || (isFive ? "8541" : "7308"),
+          gstRate,
+          taxableAmount: taxable,
+          taxAmount,
+          cgstAmount: Math.round(taxAmount / 2),
+          sgstAmount: Math.round(taxAmount / 2),
+          igstAmount: 0,
+          totalPrice,
+          warrantyPeriod: ci.warrantyPeriod || (isFive ? "10-Yr Replacement / 25-Yr Performance" : "5-Yr Comprehensive Warranty")
+        };
+      });
+    } else if (existingItems && existingItems.length > 0) {
+      updatedItems = existingItems;
+    } else {
+      updatedItems = calc.items;
+    }
+    const finalSubtotal = body.subtotal !== void 0 ? Number(body.subtotal) : updatedItems.length > 0 ? updatedItems.reduce((s, it) => s + (it.taxableAmount || 0), 0) : calc.subtotal;
+    const finalTaxableAmount = body.taxableAmount !== void 0 ? Number(body.taxableAmount) : finalSubtotal;
+    const finalGstAmount = body.gstAmount !== void 0 ? Number(body.gstAmount) : updatedItems.length > 0 ? updatedItems.reduce((s, it) => s + (it.taxAmount || 0), 0) : calc.gstAmount;
+    const finalCgstAmount = body.cgstAmount !== void 0 ? Number(body.cgstAmount) : Math.round(finalGstAmount / 2);
+    const finalSgstAmount = body.sgstAmount !== void 0 ? Number(body.sgstAmount) : Math.round(finalGstAmount / 2);
+    const finalTotalAmount = body.totalAmount !== void 0 ? Number(body.totalAmount) : finalTaxableAmount + finalGstAmount || calc.finalContractAmount;
+    const finalSubsidyAmount = body.subsidyAmount !== void 0 ? Number(body.subsidyAmount) : existing.subsidy_amount !== null && existing.subsidy_amount !== void 0 ? Number(existing.subsidy_amount) : calc.subsidyAmount || (systemCapacityKw >= 3 ? 78e3 : systemCapacityKw * 3e4);
+    const finalAmountInWords = convertNumberToWords(finalTotalAmount);
+    let versions = existingVersions;
     if (!versions || versions.length === 0) {
       versions = [{
         version: 1,
         quotationNumber: existing.quotation_number,
         createdAt: existing.created_at || (/* @__PURE__ */ new Date()).toISOString(),
-        items: calc.items,
-        subtotal: calc.subtotal,
-        subsidyDeduction: calc.subsidyAmount,
-        discount: calc.discountAmount,
-        taxableAmount: calc.taxableAmount,
+        items: updatedItems,
+        subtotal: finalSubtotal,
+        subsidyDeduction: finalSubsidyAmount,
+        discount: discountAmount,
+        taxableAmount: finalTaxableAmount,
         gstRate: calc.gstRate,
-        gstAmount: calc.gstAmount,
-        cgstAmount: calc.cgstAmount,
-        sgstAmount: calc.sgstAmount,
-        igstAmount: calc.igstAmount,
+        gstAmount: finalGstAmount,
+        cgstAmount: finalCgstAmount,
+        sgstAmount: finalSgstAmount,
+        igstAmount: 0,
         taxType: calc.taxType,
-        netTotal: calc.finalContractAmount,
-        amountInWords: calc.amountInWords,
+        netTotal: finalTotalAmount,
+        totalAmount: finalTotalAmount,
+        amountInWords: finalAmountInWords,
         terms: calc.terms,
-        notes: body.notes || "Updated quotation draft with custom BOM."
+        notes: body.notes || "Quotation details updated."
       }];
     } else {
       const lastIdx = versions.length - 1;
       versions[lastIdx] = {
         ...versions[lastIdx],
-        items: calc.items,
-        subtotal: calc.subtotal,
-        subsidyDeduction: calc.subsidyAmount,
-        discount: calc.discountAmount,
-        taxableAmount: calc.taxableAmount,
+        items: updatedItems,
+        subtotal: finalSubtotal,
+        subsidyDeduction: finalSubsidyAmount,
+        discount: discountAmount,
+        taxableAmount: finalTaxableAmount,
         gstRate: calc.gstRate,
-        gstAmount: calc.gstAmount,
-        cgstAmount: calc.cgstAmount,
-        sgstAmount: calc.sgstAmount,
-        igstAmount: calc.igstAmount,
+        gstAmount: finalGstAmount,
+        cgstAmount: finalCgstAmount,
+        sgstAmount: finalSgstAmount,
+        igstAmount: 0,
         taxType: calc.taxType,
-        netTotal: calc.finalContractAmount,
-        amountInWords: calc.amountInWords,
+        netTotal: finalTotalAmount,
+        totalAmount: finalTotalAmount,
+        amountInWords: finalAmountInWords,
         terms: calc.terms,
         notes: body.notes || versions[lastIdx].notes
       };
@@ -3796,31 +3841,31 @@ var editQuotation = async (req, res) => {
         leadName: existing.lead_name,
         customerPhone: existing.customer_phone,
         customerAddress: existing.customer_address,
-        systemCapacityKw: calc.systemCapacityKw,
-        actualCapacityKwp: calc.actualCapacityKwp,
+        systemCapacityKw,
+        actualCapacityKwp: systemCapacityKw,
         packageTier: calc.packageTier,
         proposalType: calc.proposalType,
         salespersonName: existing.salesperson_name || user?.name || "Vikram Mehta (Sales)",
         taxMode: calc.taxMode,
         taxType: calc.taxType,
-        items: calc.items,
-        subtotal: calc.subtotal,
-        discountAmount: calc.discountAmount,
-        taxableAmount: calc.taxableAmount,
+        items: updatedItems,
+        subtotal: finalSubtotal,
+        discountAmount,
+        taxableAmount: finalTaxableAmount,
         gstRate: calc.gstRate,
-        cgstAmount: calc.cgstAmount,
-        sgstAmount: calc.sgstAmount,
-        igstAmount: calc.igstAmount,
-        gstAmount: calc.gstAmount,
-        finalContractAmount: calc.finalContractAmount,
-        amountInWords: calc.amountInWords,
-        subsidyEligible: calc.subsidyEligible,
-        subsidyAmount: calc.subsidyAmount,
-        indicativeNetCustomerCost: calc.indicativeNetCustomerCost,
-        annualGenerationKwh: calc.annualGenerationKwh,
-        annualSavingsInr: calc.annualSavingsInr,
-        lifetimeSavings25Yr: calc.lifetimeSavings25Yr,
-        simplePaybackYears: calc.simplePaybackYears,
+        cgstAmount: finalCgstAmount,
+        sgstAmount: finalSgstAmount,
+        igstAmount: 0,
+        gstAmount: finalGstAmount,
+        finalContractAmount: finalTotalAmount,
+        amountInWords: finalAmountInWords,
+        subsidyEligible: finalSubsidyAmount > 0,
+        subsidyAmount: finalSubsidyAmount,
+        indicativeNetCustomerCost: Math.max(0, finalTotalAmount - finalSubsidyAmount),
+        annualGenerationKwh: Math.round(systemCapacityKw * 1500),
+        annualSavingsInr: Math.round(systemCapacityKw * 1500 * 8.2),
+        lifetimeSavings25Yr: Math.round(systemCapacityKw * 1500 * 8.2 * 25),
+        simplePaybackYears: Number((finalTotalAmount / (systemCapacityKw * 1500 * 8.2)).toFixed(1)),
         terms: calc.terms
       };
       const resPdf = await generateProposalPdf(pdfData);
@@ -3837,24 +3882,25 @@ var editQuotation = async (req, res) => {
         subtotal = ?, taxable_amount = ?, gst_rate = ?, gst_amount = ?,
         total_amount = ?, net_total = ?, total_cgst = ?, total_sgst = ?,
         total_igst = ?, amount_in_words = ?, approval_status = ?, discount_approved_by = ?,
-        versions = ?, pdf_url = ?
+        subsidy_amount = ?, versions = ?, pdf_url = ?
        WHERE id = ?`,
       [
-        calc.systemCapacityKw,
-        calc.packageTier,
-        calc.discountAmount,
-        calc.subtotal,
-        calc.taxableAmount,
+        systemCapacityKw,
+        packageTier,
+        discountAmount,
+        finalSubtotal,
+        finalTaxableAmount,
         calc.gstRate,
-        calc.gstAmount,
-        calc.finalContractAmount,
-        calc.finalContractAmount,
-        calc.cgstAmount,
-        calc.sgstAmount,
-        calc.igstAmount,
-        calc.amountInWords,
+        finalGstAmount,
+        finalTotalAmount,
+        finalTotalAmount,
+        finalCgstAmount,
+        finalSgstAmount,
+        0,
+        finalAmountInWords,
         finalApproval,
         approvedBy,
+        finalSubsidyAmount,
         JSON.stringify(versions),
         pdfUrl,
         id
@@ -4225,8 +4271,8 @@ var downloadProposalPdf = async (req, res) => {
       finalContractAmount: Number(q.total_amount) || calc.finalContractAmount,
       amountInWords: q.amount_in_words || calc.amountInWords,
       subsidyEligible: calc.subsidyEligible,
-      subsidyAmount: Number(q.subsidy_amount) || calc.subsidyAmount,
-      indicativeNetCustomerCost: calc.indicativeNetCustomerCost,
+      subsidyAmount: q.subsidy_amount !== null && q.subsidy_amount !== void 0 ? Number(q.subsidy_amount) : calc.subsidyAmount,
+      indicativeNetCustomerCost: Math.max(0, (Number(q.total_amount) || calc.finalContractAmount) - (q.subsidy_amount !== null && q.subsidy_amount !== void 0 ? Number(q.subsidy_amount) : calc.subsidyAmount)),
       annualGenerationKwh: calc.annualGenerationKwh,
       annualSavingsInr: calc.annualSavingsInr,
       lifetimeSavings25Yr: calc.lifetimeSavings25Yr,

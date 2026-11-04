@@ -114,7 +114,7 @@ export async function generateProposalPdf(data: ProposalPdfData): Promise<{ file
 
         // Header bar at Y = 28
         doc.font('Helvetica-Bold').fontSize(9).fillColor(headingNavy).text('AB ENERGY SOLUTIONS', 40, 26);
-        doc.font('Helvetica').fontSize(7.5).fillColor(textMuted).text('Turnkey Solar EPC & Engineering', 40, 37);
+        doc.font('Helvetica').fontSize(7.5).fillColor(textMuted).text('Engineering Excellence', 40, 37);
 
         doc.font('Helvetica-Bold').fontSize(8).fillColor(greenAccent)
            .text(`Quotation: ${data.quotationNumber}`, 200, 26, { width: 195, align: 'center' });
@@ -134,7 +134,7 @@ export async function generateProposalPdf(data: ProposalPdfData): Promise<{ file
       const drawFooter = (pageNum: number, totalPages: number) => {
         doc.moveTo(40, 785).lineTo(555, 785).lineWidth(0.5).strokeColor('#E2E8F0').stroke();
         doc.font('Helvetica').fontSize(8).fillColor(textMuted)
-           .text(`AB Energy Solutions  •  Turnkey Solar EPC & Engineering  •  Page ${pageNum} of ${totalPages}`, 40, 792, { align: 'center', width: 515 });
+           .text(`AB Energy Solutions  •  Page ${pageNum} of ${totalPages}`, 40, 792, { align: 'center', width: 515 });
       };
 
       // ==========================================
@@ -148,18 +148,14 @@ export async function generateProposalPdf(data: ProposalPdfData): Promise<{ file
 
       doc.font('Helvetica-Bold').fontSize(10).fillColor(headingNavy)
          .text('GST: 33FSQPA3244H1ZU', 40, 35, { align: 'right', width: 515 });
-      doc.font('Helvetica').fontSize(8.5).fillColor(textMuted)
-         .text('Solar EPC • Electrical Infrastructure • O&M', 40, 49, { align: 'right', width: 515 });
       doc.font('Helvetica-Bold').fontSize(8).fillColor(greenAccent)
-         .text('TNEB C-Licence Certified Enterprise', 40, 62, { align: 'right', width: 515 });
+         .text('TNEB C-Licence Certified Enterprise', 40, 52, { align: 'right', width: 515 });
 
       doc.moveTo(40, 105).lineTo(555, 105).lineWidth(0.75).strokeColor('#E2E8F0').stroke();
 
-      // Title & Subtitle
-      doc.font('Helvetica-Bold').fontSize(15).fillColor(headingNavy)
-         .text(`Quotation for ${data.systemCapacityKw} kW Grid-Connected Rooftop Solar Power System`, 40, 118, { align: 'center', width: 515 });
-      doc.font('Helvetica').fontSize(9).fillColor(greenAccent)
-         .text('Turnkey Engineering, Procurement, Installation & Commissioning Proposal', 40, 137, { align: 'center', width: 515 });
+      // Title & Quotation Meta
+      doc.font('Helvetica-Bold').fontSize(16).fillColor(headingNavy)
+         .text(`Quotation for ${data.systemCapacityKw} kW Grid-Connected Rooftop Solar Power System`, 40, 122, { align: 'center', width: 515 });
 
       // Quote No & Date Row
       const formattedDate = new Date(data.createdAt || Date.now()).toLocaleDateString('en-GB', {
@@ -167,8 +163,6 @@ export async function generateProposalPdf(data: ProposalPdfData): Promise<{ file
       });
       doc.font('Helvetica-Bold').fontSize(9).fillColor(headingNavy)
          .text(`Quotation No.: ${data.quotationNumber}`, 45, 154);
-      doc.font('Helvetica').fontSize(8.5).fillColor(textMuted)
-         .text(`Package Tier: ${data.packageTier || 'Premium Tier-1'}`, 210, 154, { width: 175, align: 'center' });
       doc.font('Helvetica-Bold').fontSize(9).fillColor(headingNavy)
          .text(`Date: ${formattedDate}`, 40, 154, { align: 'right', width: 515 });
 
@@ -536,7 +530,7 @@ export async function generateProposalPdf(data: ProposalPdfData): Promise<{ file
       doc.text('Net Customer Cost', 415, p5Y + 6, { width: 135, align: 'center' });
       p5Y += 22;
 
-      const finalPriceStr = `₹${Math.round(data.finalContractAmount).toLocaleString('en-IN')}/-`;
+      const finalPriceStr = `Rs. ${Math.round(data.finalContractAmount).toLocaleString('en-IN')}/-`;
       doc.rect(40, p5Y, priceW, 36).fillAndStroke('#FFFFFF', '#CBD5E1');
 
       doc.font('Helvetica-Bold').fontSize(8.5).fillColor(bodyDark);
@@ -546,12 +540,12 @@ export async function generateProposalPdf(data: ProposalPdfData): Promise<{ file
       doc.text(finalPriceStr, 165, p5Y + 12, { width: 120, align: 'center' });
 
       doc.font('Helvetica-Bold').fontSize(10.5).fillColor(greenAccent);
-      doc.text(`₹${Math.round(subsidyAmt).toLocaleString('en-IN')}`, 290, p5Y + 8, { width: 120, align: 'center' });
+      doc.text(`Rs. ${Math.round(subsidyAmt).toLocaleString('en-IN')}`, 290, p5Y + 8, { width: 120, align: 'center' });
       doc.font('Helvetica').fontSize(6.5).fillColor(textMuted);
       doc.text('(Direct DBT Support)', 290, p5Y + 22, { width: 120, align: 'center' });
 
       doc.font('Helvetica-Bold').fontSize(10.5).fillColor(headingNavy);
-      doc.text(`₹${Math.round(netCustomerCost).toLocaleString('en-IN')}/-`, 415, p5Y + 8, { width: 135, align: 'center' });
+      doc.text(`Rs. ${Math.round(netCustomerCost).toLocaleString('en-IN')}/-`, 415, p5Y + 8, { width: 135, align: 'center' });
       doc.font('Helvetica').fontSize(6.5).fillColor(textMuted);
       doc.text('(Net Payable Investment)', 415, p5Y + 22, { width: 135, align: 'center' });
 

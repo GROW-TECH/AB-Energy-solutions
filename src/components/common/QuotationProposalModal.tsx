@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   X, Download, Eye, Layers, FileText, Send, Sparkles, 
-  Printer, ArrowRight, CheckCircle2
+  Printer, ArrowRight, CheckCircle2, Edit2, Calculator
 } from 'lucide-react';
 import { Quotation } from '../../types';
 import { getApiUrl } from '../../utils/apiUrl';
+import { useCrm } from '../../context/CrmContext';
+import { EditBomModal, EditCapacitySubsidyModal, EditCalculationModal } from './QuotationEditModals';
 
 export const getQuotationPdfUrl = (id: string, download = false) => {
   const token = localStorage.getItem('ab_solar_token') || '';
@@ -75,11 +77,43 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
   onConvertProject,
   currentUserRole,
 }) => {
+  const { setQuotations } = useCrm();
   const [docTab, setDocTab] = useState<'proposal' | 'tax_audit'>('proposal');
+  const [activeQuotation, setActiveQuotation] = useState<Quotation | null>(quotation);
+  const [activeEditModal, setActiveEditModal] = useState<'bom' | 'pricing' | 'calculation' | null>(null);
 
-  if (!isOpen || !quotation) return null;
+  useEffect(() => {
+    setActiveQuotation(quotation);
+  }, [quotation]);
 
-  const activeVer = quotation.versions?.[quotation.versions.length - 1] || quotation.versions?.[0] || {};
+  if (!isOpen || !activeQuotation) return null;
+  const quote = activeQuotation;
+
+  const handleSaveQuotationEdit = async (payload: any): Promise<boolean> => {
+    const token = localStorage.getItem('ab_solar_token') || localStorage.getItem('ab_energy_auth_token') || '';
+    try {
+      const res = await fetch(getApiUrl(`/api/quotations/${quote.id}/edit`), {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data.success && data.quotation) {
+        setActiveQuotation(data.quotation);
+        setQuotations(prev => prev.map(q => q.id === data.quotation.id ? { ...q, ...data.quotation } : q));
+        return true;
+      }
+    } catch (err) {
+      console.error('Failed to update quotation:', err);
+    }
+    return false;
+  };
+
+  const activeVer = quote.versions?.[quote.versions.length - 1] || quote.versions?.[0] || {};
   const items: any[] = activeVer.items || [];
 
   // Categorize for GST Audit Breakdown
@@ -107,9 +141,9 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
     0
   );
 
-  const dailyKwh = Math.round(quotation.systemCapacityKw * 5);
-  const hasSubsidy = Boolean(quotation.subsidyEligible && (quotation.subsidyAmount || 0) > 0);
-  const netCustomerCost = quotation.indicativeNetCustomerCost || (quotation.totalAmount - (quotation.subsidyAmount || 0));
+  const dailyKwh = Math.round(quote.systemCapacityKw * 5);
+  const hasSubsidy = Boolean(quote.subsidyEligible && (quote.subsidyAmount || 0) > 0);
+  const netCustomerCost = quote.indicativeNetCustomerCost || (quote.totalAmount - (quote.subsidyAmount || 0));
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
@@ -194,17 +228,17 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-base font-black text-black font-mono">
-                  {quotation.quotationNumber}
+                  {quote.quotationNumber}
                 </h2>
                 <span className="text-xs px-2.5 py-0.5 rounded-full font-bold bg-slate-100 text-slate-800 border border-slate-300">
-                  {quotation.status}
+                  {quote.status}
                 </span>
                 <span className="text-xs font-bold text-black">
-                  {quotation.systemCapacityKw} kW On-Grid
+                  {quote.systemCapacityKw} kW On-Grid
                 </span>
               </div>
               <p className="text-xs text-slate-600 mt-0.5 truncate">
-                Client: <strong className="text-black font-bold">{quotation.leadName}</strong> ({quotation.customerPhone}) &bull; {quotation.customerAddress || 'Tamil Nadu, India'}
+                Client: <strong className="text-black font-bold">{quote.leadName}</strong> ({quote.customerPhone}) &bull; {quote.customerAddress || 'Tamil Nadu, India'}
               </p>
             </div>
           </div>
@@ -220,7 +254,7 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
             </button>
 
             <a
-              href={getQuotationPdfUrl(quotation.id, false)}
+              href={getQuotationPdfUrl(quote.id, false)}
               target="_blank"
               rel="noopener noreferrer"
               className="px-3 py-1.5 sm:px-3 sm:py-2 bg-slate-900 hover:bg-black text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-xs"
@@ -232,7 +266,7 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
 
             <button
               type="button"
-              onClick={() => downloadQuotationPdf(quotation.id, quotation.quotationNumber)}
+              onClick={() => downloadQuotationPdf(quote.id, quote.quotationNumber)}
               className="px-3 py-1.5 sm:px-3 sm:py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
               title="Download PDF to Device"
             >
@@ -279,7 +313,7 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
           <div className="text-left sm:text-right flex items-center sm:block justify-between">
             <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Contract Value</span>
             <span className="text-sm sm:text-base font-black text-black font-mono">
-              ₹{quotation.totalAmount.toLocaleString('en-IN')}
+              ₹{quote.totalAmount.toLocaleString('en-IN')}
             </span>
           </div>
         </div>
@@ -305,23 +339,18 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
                     <span className="font-mono font-black text-black text-xs block">
                       GST: 33FSQPA3244H1ZU
                     </span>
-                    <span className="text-[10px] text-slate-500 font-semibold block">Turnkey Solar EPC &bull; Electrical Infrastructure &bull; O&amp;M</span>
                   </div>
                 </div>
 
-                <div className="text-center pt-1">
+                <div className="text-center pt-2">
                   <h1 className="text-xl sm:text-2xl font-black text-black tracking-tight">
-                    Quotation for {quotation.systemCapacityKw} kW Grid-Connected Rooftop Solar Power System
+                    Quotation for {quote.systemCapacityKw} kW Grid-Connected Rooftop Solar Power System
                   </h1>
-                  <p className="text-xs text-emerald-700 font-semibold mt-1">
-                    Turnkey Engineering, Procurement, Installation &amp; Commissioning Proposal
-                  </p>
                 </div>
 
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between text-xs font-bold text-slate-700 gap-1 pb-1">
-                  <span>Quotation No.: <span className="font-mono text-black font-black">{quotation.quotationNumber}</span></span>
-                  <span className="text-slate-500 font-normal">Package Tier: <strong>{activeVer.packageTier || 'Premium Tier-1'}</strong></span>
-                  <span>Date: <span className="text-black font-black">{new Date(quotation.createdAt).toLocaleDateString('en-GB')}</span></span>
+                  <span>Quotation No.: <span className="font-mono text-black font-black">{quote.quotationNumber}</span></span>
+                  <span>Date: <span className="text-black font-black">{new Date(quote.createdAt).toLocaleDateString('en-GB')}</span></span>
                 </div>
 
                 <div className="rounded-xl overflow-hidden border border-slate-200 shadow-xs">
@@ -335,11 +364,11 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
                 <div className="p-3.5 sm:p-4 bg-slate-50 border border-slate-200 rounded-xl">
                   <h3 className="font-black text-black text-xs uppercase tracking-wider mb-2">Customer Details</h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-800">
-                    <div><span className="font-bold text-black">Client Name:</span> {quotation.leadName}</div>
-                    <div><span className="font-bold text-black">Contact Phone:</span> {quotation.customerPhone || 'N/A'}</div>
-                    <div><span className="font-bold text-black">Service Number:</span> 045310081264 / {quotation.systemCapacityKw}KWp</div>
-                    <div><span className="font-bold text-black">Site Address:</span> {quotation.customerAddress || 'West Rajapalayam, P.N palayam, TN'}</div>
-                    <div><span className="font-bold text-black">Quoted Capacity:</span> {quotation.systemCapacityKw} kW On-Grid</div>
+                    <div><span className="font-bold text-black">Client Name:</span> {quote.leadName}</div>
+                    <div><span className="font-bold text-black">Contact Phone:</span> {quote.customerPhone || 'N/A'}</div>
+                    <div><span className="font-bold text-black">Service Number:</span> 045310081264 / {quote.systemCapacityKw}KWp</div>
+                    <div><span className="font-bold text-black">Site Address:</span> {quote.customerAddress || 'West Rajapalayam, P.N palayam, TN'}</div>
+                    <div><span className="font-bold text-black">Quoted Capacity:</span> {quote.systemCapacityKw} kW On-Grid</div>
                     <div><span className="font-bold text-black">Proposal Type:</span> Grid-Tied Rooftop EPC</div>
                   </div>
                 </div>
@@ -510,7 +539,7 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
                     </div>
                   </div>
                   <div className="text-left sm:text-right font-mono text-[10px] text-slate-500">
-                    Quote: <strong className="text-emerald-700">{quotation.quotationNumber}</strong> &bull; GST: 33FSQPA3244H1ZU
+                    Quote: <strong className="text-emerald-700">{quote.quotationNumber}</strong> &bull; GST: 33FSQPA3244H1ZU
                   </div>
                 </div>
 
@@ -531,10 +560,19 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
                 </div>
 
                 <div className="pt-3 border-t border-slate-100">
-                  <div className="mb-2">
+                  <div className="flex items-center justify-between mb-2">
                     <h3 className="text-sm font-black text-black tracking-tight uppercase">
                       Bill Of Materials
                     </h3>
+                    <button
+                      type="button"
+                      onClick={() => setActiveEditModal('bom')}
+                      className="no-print px-3 py-1 bg-slate-900 hover:bg-black text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      title="Edit Bill of Materials"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                      <span>Edit BOM</span>
+                    </button>
                   </div>
 
                   <div className="overflow-x-auto -mx-2 sm:mx-0 border border-slate-300 rounded-xl shadow-2xs">
@@ -593,7 +631,7 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
                     </div>
                   </div>
                   <div className="text-left sm:text-right font-mono text-[10px] text-slate-500">
-                    Quote: <strong className="text-emerald-700">{quotation.quotationNumber}</strong> &bull; GST: 33FSQPA3244H1ZU
+                    Quote: <strong className="text-emerald-700">{quote.quotationNumber}</strong> &bull; GST: 33FSQPA3244H1ZU
                   </div>
                 </div>
 
@@ -629,9 +667,20 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
 
                 {/* System Capacity & Pricing Box with Explicit Subsidy Details */}
                 <div className="pt-3 border-t border-slate-100">
-                  <h3 className="text-sm font-black text-black mb-2 tracking-tight uppercase">
-                    System Capacity &amp; Subsidy Details
-                  </h3>
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-sm font-black text-black tracking-tight uppercase">
+                      System Capacity &amp; Subsidy Details
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => setActiveEditModal('pricing')}
+                      className="no-print px-3 py-1 bg-slate-900 hover:bg-black text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      title="Edit System Capacity and Subsidy"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                      <span>Edit Capacity &amp; Subsidy</span>
+                    </button>
+                  </div>
                   <div className="overflow-x-auto border border-slate-300 rounded-xl">
                     <table className="w-full text-center text-xs">
                       <thead className="bg-slate-900 text-white font-black border-b border-slate-300">
@@ -644,17 +693,17 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
                       </thead>
                       <tbody>
                         {(() => {
-                          const estSubsidy = quotation.subsidyAmount || (quotation.systemCapacityKw >= 3 ? 78000 : quotation.systemCapacityKw * 30000);
-                          const netEffective = Math.max(0, quotation.totalAmount - estSubsidy);
+                          const estSubsidy = quote.subsidyAmount !== undefined && quote.subsidyAmount !== null ? quote.subsidyAmount : (quote.systemCapacityKw >= 3 ? 78000 : quote.systemCapacityKw * 30000);
+                          const netEffective = Math.max(0, quote.totalAmount - estSubsidy);
 
                           return (
                             <tr className="divide-x divide-slate-200">
                               <td className="py-3 px-3 font-bold text-black">
-                                <span className="text-sm font-black text-slate-900 block">{quotation.systemCapacityKw} kW</span>
+                                <span className="text-sm font-black text-slate-900 block">{quote.systemCapacityKw} kW</span>
                                 <span className="text-[10px] text-slate-500 font-normal">On-Grid Rooftop</span>
                               </td>
                               <td className="py-3 px-3 font-mono font-black text-black text-sm">
-                                ₹{quotation.totalAmount.toLocaleString('en-IN')}/-
+                                ₹{quote.totalAmount.toLocaleString('en-IN')}/-
                               </td>
                               <td className="py-3 px-3 font-bold text-emerald-700">
                                 <span className="text-sm font-black font-mono block">₹{Math.round(estSubsidy).toLocaleString('en-IN')}/-</span>
@@ -777,9 +826,20 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
                       Compliant with GST Council Circular No. 163/19/2021: 5% for Solar PV &amp; Inverter (70%), 18% for Structure &amp; BOS (30%)
                     </p>
                   </div>
-                  <span className="px-3 py-1 bg-slate-100 text-black border border-slate-300 rounded-full text-xs font-black font-mono">
-                    Composite Rate: 13.80%
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setActiveEditModal('calculation')}
+                      className="no-print px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      title="Edit Calculation"
+                    >
+                      <Calculator className="w-3.5 h-3.5" />
+                      <span>Edit Calculation</span>
+                    </button>
+                    <span className="px-3 py-1 bg-slate-100 text-black border border-slate-300 rounded-full text-xs font-black font-mono">
+                      Composite Rate: 13.80%
+                    </span>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -842,9 +902,19 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
 
                 {/* Statutory Line Items Audit Table */}
                 <div className="pt-2">
-                  <h4 className="text-xs font-black text-black uppercase tracking-wider mb-2">
-                    Itemized Tax Breakdown ({items.length} Items)
-                  </h4>
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-xs font-black text-black uppercase tracking-wider">
+                      Itemized Tax Breakdown ({items.length} Items)
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => setActiveEditModal('calculation')}
+                      className="no-print text-xs font-bold text-emerald-700 hover:text-emerald-900 flex items-center gap-1 cursor-pointer"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                      <span>Edit Rates &amp; Calculation</span>
+                    </button>
+                  </div>
                   <div className="overflow-x-auto -mx-2 sm:mx-0 border border-slate-300 rounded-xl">
                     <table className="w-full min-w-[540px] text-left text-xs text-slate-700">
                       <thead className="bg-slate-100 text-black font-black uppercase text-[10px] border-b border-slate-300">
@@ -901,7 +971,7 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
                   <div className="text-right">
                     <span className="text-[10px] text-slate-400 uppercase tracking-widest block">Final Contract Value</span>
                     <span className="text-2xl font-black text-emerald-400">
-                      ₹{quotation.totalAmount.toLocaleString('en-IN')}
+                      ₹{quote.totalAmount.toLocaleString('en-IN')}
                     </span>
                   </div>
                 </div>
@@ -917,10 +987,10 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            {onHandoverToSales && quotation.status === 'Draft' && (
+            {onHandoverToSales && quote.status === 'Draft' && (
               <button
                 onClick={() => {
-                  onHandoverToSales(quotation);
+                  onHandoverToSales(quote);
                   onClose();
                 }}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
@@ -930,10 +1000,10 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
               </button>
             )}
 
-            {onConvertProject && quotation.status === 'Customer_Accepted' && (
+            {onConvertProject && quote.status === 'Customer_Accepted' && (
               <button
                 onClick={() => {
-                  onConvertProject(quotation);
+                  onConvertProject(quote);
                   onClose();
                 }}
                 className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
@@ -953,6 +1023,53 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
         </div>
 
       </div>
+
+      {/* Interactive Quotation Edit Sub-Modals */}
+      {activeEditModal === 'bom' && (
+        <EditBomModal
+          isOpen={true}
+          onClose={() => setActiveEditModal(null)}
+          quotationNumber={quote.quotationNumber}
+          initialItems={items}
+          onSave={async (updatedItems) => {
+            return await handleSaveQuotationEdit({ customItems: updatedItems });
+          }}
+        />
+      )}
+
+      {activeEditModal === 'pricing' && (
+        <EditCapacitySubsidyModal
+          isOpen={true}
+          onClose={() => setActiveEditModal(null)}
+          quotationNumber={quote.quotationNumber}
+          initialCapacityKw={quote.systemCapacityKw}
+          initialDomesticPrice={quote.totalAmount}
+          initialSubsidyAmount={quote.subsidyAmount}
+          onSave={async (data) => {
+            return await handleSaveQuotationEdit(data);
+          }}
+        />
+      )}
+
+      {activeEditModal === 'calculation' && (
+        <EditCalculationModal
+          isOpen={true}
+          onClose={() => setActiveEditModal(null)}
+          quotationNumber={quote.quotationNumber}
+          initialItems={items}
+          onSave={async (data) => {
+            return await handleSaveQuotationEdit({
+              customItems: data.items,
+              totalAmount: data.totalAmount,
+              taxableAmount: data.taxableAmount,
+              gstAmount: data.gstAmount,
+              cgstAmount: data.cgstAmount,
+              sgstAmount: data.sgstAmount,
+              subtotal: data.subtotal,
+            });
+          }}
+        />
+      )}
     </div>
   );
 };

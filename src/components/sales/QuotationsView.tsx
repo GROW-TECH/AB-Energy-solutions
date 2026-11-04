@@ -13,6 +13,7 @@ import { calculateQuotation, convertNumberToWords, QUOTATION_CONFIG } from '../.
 import { getApiUrl } from '../../utils/apiUrl';
 import { EditQuotationModal } from './EditQuotationModal';
 import { getQuotationPdfUrl, downloadQuotationPdf } from '../common/QuotationProposalModal';
+import { EditBomModal, EditCapacitySubsidyModal, EditCalculationModal } from '../common/QuotationEditModals';
 
 interface QuotationsViewProps {
   initialLeadId?: string;
@@ -46,6 +47,7 @@ export const QuotationsView: React.FC<QuotationsViewProps> = ({
 
   const [showNewQuoteModal, setShowNewQuoteModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [activeSubEditModal, setActiveSubEditModal] = useState<'bom' | 'pricing' | 'calculation' | null>(null);
   const [showAcceptanceModal, setShowAcceptanceModal] = useState(false);
   const [acceptanceNotes, setAcceptanceNotes] = useState('');
   const [clientPoNumber, setClientPoNumber] = useState('');
@@ -103,6 +105,31 @@ export const QuotationsView: React.FC<QuotationsViewProps> = ({
 
   const getLinkedProject = (q: Quotation) => {
     return projects.find(p => p.id === q.convertedToProjectId || p.quotationId === q.id || p.leadId === q.leadId);
+  };
+
+  const handleSaveSubEdit = async (payload: any): Promise<boolean> => {
+    if (!selectedQuoteForPreview) return false;
+    const token = localStorage.getItem('ab_solar_token') || localStorage.getItem('ab_energy_auth_token') || '';
+    try {
+      const res = await fetch(getApiUrl(`/api/quotations/${selectedQuoteForPreview.id}/edit`), {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data.success && data.quotation) {
+        setSelectedQuoteForPreview(data.quotation);
+        setQuotations(prev => prev.map(q => q.id === data.quotation.id ? { ...q, ...data.quotation } : q));
+        return true;
+      }
+    } catch (err) {
+      console.error('Failed to update quotation:', err);
+    }
+    return false;
   };
 
   // Workflow Category Counts
@@ -549,22 +576,17 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                     <span className="font-mono font-black text-black text-xs block">
                       GST: 33FSQPA3244H1ZU
                     </span>
-                    <span className="text-[10px] text-slate-500 font-semibold block">Turnkey Solar EPC &bull; Electrical Infrastructure &bull; O&amp;M</span>
                   </div>
                 </div>
 
-                <div className="text-center pt-1">
+                <div className="text-center pt-2">
                   <h1 className="text-lg sm:text-xl md:text-2xl font-black text-black tracking-tight">
                     Quotation for {selectedQuoteForPreview.systemCapacityKw} kW Grid-Connected Rooftop Solar Power System
                   </h1>
-                  <p className="text-xs text-emerald-700 font-semibold mt-1">
-                    Turnkey Engineering, Procurement, Installation &amp; Commissioning Proposal
-                  </p>
                 </div>
 
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between text-xs font-bold text-slate-700 gap-1 pb-1">
                   <span>Quotation No.: <span className="font-mono text-black font-black">{selectedQuoteForPreview.quotationNumber}</span></span>
-                  <span className="text-slate-500 font-normal">Package Tier: <strong>{activeVer?.packageTier || 'Premium Tier-1'}</strong></span>
                   <span>Date: <span className="text-black font-black">{new Date(selectedQuoteForPreview.createdAt).toLocaleDateString('en-GB')}</span></span>
                 </div>
 
@@ -775,10 +797,18 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                 </div>
 
                 <div className="pt-3 border-t border-slate-100">
-                  <div className="mb-2">
+                  <div className="flex items-center justify-between mb-2">
                     <h3 className="text-sm font-black text-black tracking-tight uppercase">
                       Bill Of Materials
                     </h3>
+                    <button
+                      onClick={() => setActiveSubEditModal('bom')}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold bg-white text-emerald-700 hover:bg-emerald-50 border border-emerald-300 rounded-lg shadow-2xs transition-all cursor-pointer"
+                      title="Edit Bill of Materials items, specifications, units, or quantities"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                      Edit BOM
+                    </button>
                   </div>
 
                   <div className="overflow-x-auto -mx-2 sm:mx-0 border border-slate-300 rounded-xl shadow-2xs">
@@ -880,9 +910,19 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
 
                 {/* System Capacity & Pricing Box with Explicit Subsidy Details */}
                 <div className="pt-3 border-t border-slate-100">
-                  <h3 className="text-sm font-black text-black mb-2 tracking-tight uppercase">
-                    System Capacity &amp; Subsidy Details
-                  </h3>
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-sm font-black text-black tracking-tight uppercase">
+                      System Capacity &amp; Subsidy Details
+                    </h3>
+                    <button
+                      onClick={() => setActiveSubEditModal('pricing')}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold bg-white text-emerald-700 hover:bg-emerald-50 border border-emerald-300 rounded-lg shadow-2xs transition-all cursor-pointer"
+                      title="Edit Capacity, Domestic Price, and Subsidy"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                      Edit Capacity &amp; Subsidy
+                    </button>
+                  </div>
                   <div className="overflow-x-auto border border-slate-300 rounded-xl">
                     <table className="w-full text-center text-xs">
                       <thead className="bg-slate-900 text-white font-black border-b border-slate-300">
@@ -1023,8 +1063,18 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                     Internal calculation table: <strong>5% GST</strong> applied on Solar Modules and Inverters, and <strong>18% GST</strong> applied on Balance of System, Structures, and Cabling.
                   </p>
                 </div>
-                <div className="px-3 py-1 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg text-xs font-bold font-mono self-start sm:self-auto shrink-0">
-                  Quotation: {selectedQuoteForPreview.quotationNumber}
+                <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
+                  <button
+                    onClick={() => setActiveSubEditModal('calculation')}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-700 rounded-lg shadow-2xs transition-all cursor-pointer"
+                    title="Edit statutory GST rates, material quantities, and unit rates"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                    Edit Calculation
+                  </button>
+                  <div className="px-3 py-1 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg text-xs font-bold font-mono">
+                    Quotation: {selectedQuoteForPreview.quotationNumber}
+                  </div>
                 </div>
               </div>
 
@@ -2304,6 +2354,49 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
             </div>
           </div>
         </div>
+      )}
+      {activeSubEditModal === 'bom' && selectedQuoteForPreview && (
+        <EditBomModal
+          isOpen={true}
+          onClose={() => setActiveSubEditModal(null)}
+          quotationNumber={selectedQuoteForPreview.quotationNumber}
+          initialItems={(selectedQuoteForPreview.versions[selectedVersionIdx] || selectedQuoteForPreview.versions[0])?.items || []}
+          onSave={async (updatedItems) => {
+            return await handleSaveSubEdit({ customItems: updatedItems });
+          }}
+        />
+      )}
+      {activeSubEditModal === 'pricing' && selectedQuoteForPreview && (
+        <EditCapacitySubsidyModal
+          isOpen={true}
+          onClose={() => setActiveSubEditModal(null)}
+          quotationNumber={selectedQuoteForPreview.quotationNumber}
+          initialCapacityKw={selectedQuoteForPreview.systemCapacityKw}
+          initialDomesticPrice={selectedQuoteForPreview.totalAmount}
+          initialSubsidyAmount={selectedQuoteForPreview.subsidyAmount}
+          onSave={async (data) => {
+            return await handleSaveSubEdit(data);
+          }}
+        />
+      )}
+      {activeSubEditModal === 'calculation' && selectedQuoteForPreview && (
+        <EditCalculationModal
+          isOpen={true}
+          onClose={() => setActiveSubEditModal(null)}
+          quotationNumber={selectedQuoteForPreview.quotationNumber}
+          initialItems={(selectedQuoteForPreview.versions[selectedVersionIdx] || selectedQuoteForPreview.versions[0])?.items || []}
+          onSave={async (data) => {
+            return await handleSaveSubEdit({
+              customItems: data.items,
+              totalAmount: data.totalAmount,
+              taxableAmount: data.taxableAmount,
+              gstAmount: data.gstAmount,
+              cgstAmount: data.cgstAmount,
+              sgstAmount: data.sgstAmount,
+              subtotal: data.subtotal,
+            });
+          }}
+        />
       )}
     </div>
   );

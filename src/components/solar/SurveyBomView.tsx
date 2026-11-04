@@ -1068,7 +1068,7 @@ export const SurveyBomView: React.FC<SurveyBomViewProps> = ({
                                 const next = [...activeBomItems];
                                 const q = Number(e.target.value) || 1;
                                 next[idx].quantity = q;
-                                next[idx].estimatedTotalCost = q * (Number(next[idx].estimatedUnitCost) || 0);
+                                next[idx].estimatedTotalCost = Math.round(q * (Number(next[idx].estimatedUnitCost) || 0));
                                 setActiveBomItems(next);
                               }}
                               className="w-20 p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-center text-slate-900 focus:outline-hidden focus:border-emerald-500"
@@ -1083,12 +1083,12 @@ export const SurveyBomView: React.FC<SurveyBomViewProps> = ({
                           ) : (
                             <input
                               type="number"
-                              value={item.estimatedUnitCost}
+                              value={item.estimatedUnitCost !== undefined ? item.estimatedUnitCost : ''}
                               onChange={e => {
                                 const next = [...activeBomItems];
                                 const c = Number(e.target.value) || 0;
                                 next[idx].estimatedUnitCost = c;
-                                next[idx].estimatedTotalCost = (Number(next[idx].quantity) || 1) * c;
+                                next[idx].estimatedTotalCost = Math.round((Number(next[idx].quantity) || 1) * c);
                                 setActiveBomItems(next);
                               }}
                               className="w-24 p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-right font-mono focus:outline-hidden focus:border-emerald-500"
@@ -1097,9 +1097,28 @@ export const SurveyBomView: React.FC<SurveyBomViewProps> = ({
                           )}
                         </td>
 
-                        {/* TOTAL AMOUNT */}
-                        <td className="p-3 text-right font-bold text-slate-900 font-mono text-xs min-w-[120px]">
-                          ₹{Number(item.estimatedTotalCost || 0).toLocaleString('en-IN')}
+                        {/* TOTAL AMOUNT (Editable - Rate recalculates live) */}
+                        <td className="p-3 text-right font-mono min-w-[130px]">
+                          {isLocked ? (
+                            <span className="font-bold text-slate-900 text-xs">
+                              ₹{Number(item.estimatedTotalCost || 0).toLocaleString('en-IN')}
+                            </span>
+                          ) : (
+                            <input
+                              type="number"
+                              value={item.estimatedTotalCost !== undefined ? item.estimatedTotalCost : ''}
+                              onChange={e => {
+                                const next = [...activeBomItems];
+                                const tot = Number(e.target.value) || 0;
+                                next[idx].estimatedTotalCost = tot;
+                                const q = Number(next[idx].quantity) || 1;
+                                next[idx].estimatedUnitCost = q > 0 ? Number((tot / q).toFixed(2)) : tot;
+                                setActiveBomItems(next);
+                              }}
+                              className="w-28 p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-right font-mono text-slate-900 focus:outline-hidden focus:border-emerald-500"
+                              placeholder="₹ Total"
+                            />
+                          )}
                         </td>
 
                         {/* ACTION */}

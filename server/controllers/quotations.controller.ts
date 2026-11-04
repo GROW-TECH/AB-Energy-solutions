@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { pool } from '../db.ts';
-import { calculateQuotation } from '../services/quotation-engine.ts';
+import { calculateQuotation, convertNumberToWords } from '../services/quotation-engine.ts';
 import type { QuotationCalculationInput } from '../services/quotation-engine.ts';
 import { generateProposalPdf } from '../services/pdf-generator.ts';
 import type { ProposalPdfData } from '../services/pdf-generator.ts';
@@ -738,7 +738,7 @@ export const editQuotation = async (req: Request, res: Response) => {
     const existing = rows[0];
 
     // Sizing & Commercials
-    const systemCapacityKw = body.systemCapacityKw || existing.system_capacity_kw;
+    const systemCapacityKw = body.systemCapacityKw !== undefined ? Number(body.systemCapacityKw) : Number(existing.system_capacity_kw);
     const packageTier = body.packageTier || existing.package_tier || 'Premium Bifacial';
     const discountAmount = body.discountAmount !== undefined ? Number(body.discountAmount) : Number(existing.discount_amount);
     const customItems = body.customItems;
@@ -760,46 +760,99 @@ export const editQuotation = async (req: Request, res: Response) => {
       taxType: body.taxType,
     });
 
+    let existingVersions = typeof existing.versions === 'string' ? JSON.parse(existing.versions) : (existing.versions || []);
+    let lastVer = existingVersions?.[existingVersions.length - 1] || existingVersions?.[0] || {};
+    let existingItems = lastVer.items || [];
+
+    // Map updated items: if customItems provided, use it; otherwise preserve existingItems or calc.items
+    let updatedItems: any[] = [];
+    if (customItems && Array.isArray(customItems) && customItems.length > 0) {
+      updatedItems = customItems.map((ci: any, idx: number) => {
+        const catLower = (ci.category || ci.description || '').toLowerCase();
+        const isFive = ci.gstRate === 5 || catLower.includes('solar') || catLower.includes('panel') || catLower.includes('inverter') || catLower.includes('module');
+        const gstRate = ci.gstRate !== undefined ? Number(ci.gstRate) : (isFive ? 5 : 18);
+        const qty = Number(ci.quantity) || 1;
+        const rate = Number(ci.unitPrice !== undefined ? ci.unitPrice : ci.estimated_unit_cost) || 0;
+        const taxable = ci.taxableAmount !== undefined ? Number(ci.taxableAmount) : Math.round(qty * rate);
+        const taxAmount = ci.taxAmount !== undefined ? Number(ci.taxAmount) : Math.round(taxable * (gstRate / 100));
+        const totalPrice = ci.totalPrice !== undefined ? Number(ci.totalPrice) : taxable + taxAmount;
+        return {
+          id: ci.id || `ITEM-${idx + 1}`,
+          category: ci.category || ci.description || 'Solar Component',
+          description: ci.description || ci.category || 'Solar Component',
+          specification: ci.specification || ci.description || '',
+          unit: ci.unit || 'Nos',
+          quantity: qty,
+          unitPrice: rate,
+          hsnSacCode: ci.hsnSacCode || (isFive ? '8541' : '7308'),
+          gstRate,
+          taxableAmount: taxable,
+          taxAmount,
+          cgstAmount: Math.round(taxAmount / 2),
+          sgstAmount: Math.round(taxAmount / 2),
+          igstAmount: 0,
+          totalPrice,
+          warrantyPeriod: ci.warrantyPeriod || (isFive ? '10-Yr Replacement / 25-Yr Performance' : '5-Yr Comprehensive Warranty'),
+        };
+      });
+    } else if (existingItems && existingItems.length > 0) {
+      updatedItems = existingItems;
+    } else {
+      updatedItems = calc.items;
+    }
+
+    // Determine final amounts: if explicit values provided from calculation or pricing edit, use them; otherwise calc
+    const finalSubtotal = body.subtotal !== undefined ? Number(body.subtotal) : (updatedItems.length > 0 ? updatedItems.reduce((s: number, it: any) => s + (it.taxableAmount || 0), 0) : calc.subtotal);
+    const finalTaxableAmount = body.taxableAmount !== undefined ? Number(body.taxableAmount) : finalSubtotal;
+    const finalGstAmount = body.gstAmount !== undefined ? Number(body.gstAmount) : (updatedItems.length > 0 ? updatedItems.reduce((s: number, it: any) => s + (it.taxAmount || 0), 0) : calc.gstAmount);
+    const finalCgstAmount = body.cgstAmount !== undefined ? Number(body.cgstAmount) : Math.round(finalGstAmount / 2);
+    const finalSgstAmount = body.sgstAmount !== undefined ? Number(body.sgstAmount) : Math.round(finalGstAmount / 2);
+    const finalTotalAmount = body.totalAmount !== undefined ? Number(body.totalAmount) : (finalTaxableAmount + finalGstAmount || calc.finalContractAmount);
+    const finalSubsidyAmount = body.subsidyAmount !== undefined ? Number(body.subsidyAmount) : (existing.subsidy_amount !== null && existing.subsidy_amount !== undefined ? Number(existing.subsidy_amount) : (calc.subsidyAmount || (systemCapacityKw >= 3 ? 78000 : systemCapacityKw * 30000)));
+    const finalAmountInWords = convertNumberToWords(finalTotalAmount);
+
     // Update current version in versions array
-    let versions = typeof existing.versions === 'string' ? JSON.parse(existing.versions) : (existing.versions || []);
+    let versions = existingVersions;
     if (!versions || versions.length === 0) {
       versions = [{
         version: 1,
         quotationNumber: existing.quotation_number,
         createdAt: existing.created_at || new Date().toISOString(),
-        items: calc.items,
-        subtotal: calc.subtotal,
-        subsidyDeduction: calc.subsidyAmount,
-        discount: calc.discountAmount,
-        taxableAmount: calc.taxableAmount,
+        items: updatedItems,
+        subtotal: finalSubtotal,
+        subsidyDeduction: finalSubsidyAmount,
+        discount: discountAmount,
+        taxableAmount: finalTaxableAmount,
         gstRate: calc.gstRate,
-        gstAmount: calc.gstAmount,
-        cgstAmount: calc.cgstAmount,
-        sgstAmount: calc.sgstAmount,
-        igstAmount: calc.igstAmount,
+        gstAmount: finalGstAmount,
+        cgstAmount: finalCgstAmount,
+        sgstAmount: finalSgstAmount,
+        igstAmount: 0,
         taxType: calc.taxType,
-        netTotal: calc.finalContractAmount,
-        amountInWords: calc.amountInWords,
+        netTotal: finalTotalAmount,
+        totalAmount: finalTotalAmount,
+        amountInWords: finalAmountInWords,
         terms: calc.terms,
-        notes: body.notes || 'Updated quotation draft with custom BOM.',
+        notes: body.notes || 'Quotation details updated.',
       }];
     } else {
       const lastIdx = versions.length - 1;
       versions[lastIdx] = {
         ...versions[lastIdx],
-        items: calc.items,
-        subtotal: calc.subtotal,
-        subsidyDeduction: calc.subsidyAmount,
-        discount: calc.discountAmount,
-        taxableAmount: calc.taxableAmount,
+        items: updatedItems,
+        subtotal: finalSubtotal,
+        subsidyDeduction: finalSubsidyAmount,
+        discount: discountAmount,
+        taxableAmount: finalTaxableAmount,
         gstRate: calc.gstRate,
-        gstAmount: calc.gstAmount,
-        cgstAmount: calc.cgstAmount,
-        sgstAmount: calc.sgstAmount,
-        igstAmount: calc.igstAmount,
+        gstAmount: finalGstAmount,
+        cgstAmount: finalCgstAmount,
+        sgstAmount: finalSgstAmount,
+        igstAmount: 0,
         taxType: calc.taxType,
-        netTotal: calc.finalContractAmount,
-        amountInWords: calc.amountInWords,
+        netTotal: finalTotalAmount,
+        totalAmount: finalTotalAmount,
+        amountInWords: finalAmountInWords,
         terms: calc.terms,
         notes: body.notes || versions[lastIdx].notes,
       };
@@ -816,31 +869,31 @@ export const editQuotation = async (req: Request, res: Response) => {
         leadName: existing.lead_name,
         customerPhone: existing.customer_phone,
         customerAddress: existing.customer_address,
-        systemCapacityKw: calc.systemCapacityKw,
-        actualCapacityKwp: calc.actualCapacityKwp,
+        systemCapacityKw: systemCapacityKw,
+        actualCapacityKwp: systemCapacityKw,
         packageTier: calc.packageTier,
         proposalType: calc.proposalType,
         salespersonName: existing.salesperson_name || user?.name || 'Vikram Mehta (Sales)',
         taxMode: calc.taxMode,
         taxType: calc.taxType,
-        items: calc.items,
-        subtotal: calc.subtotal,
-        discountAmount: calc.discountAmount,
-        taxableAmount: calc.taxableAmount,
+        items: updatedItems,
+        subtotal: finalSubtotal,
+        discountAmount: discountAmount,
+        taxableAmount: finalTaxableAmount,
         gstRate: calc.gstRate,
-        cgstAmount: calc.cgstAmount,
-        sgstAmount: calc.sgstAmount,
-        igstAmount: calc.igstAmount,
-        gstAmount: calc.gstAmount,
-        finalContractAmount: calc.finalContractAmount,
-        amountInWords: calc.amountInWords,
-        subsidyEligible: calc.subsidyEligible,
-        subsidyAmount: calc.subsidyAmount,
-        indicativeNetCustomerCost: calc.indicativeNetCustomerCost,
-        annualGenerationKwh: calc.annualGenerationKwh,
-        annualSavingsInr: calc.annualSavingsInr,
-        lifetimeSavings25Yr: calc.lifetimeSavings25Yr,
-        simplePaybackYears: calc.simplePaybackYears,
+        cgstAmount: finalCgstAmount,
+        sgstAmount: finalSgstAmount,
+        igstAmount: 0,
+        gstAmount: finalGstAmount,
+        finalContractAmount: finalTotalAmount,
+        amountInWords: finalAmountInWords,
+        subsidyEligible: finalSubsidyAmount > 0,
+        subsidyAmount: finalSubsidyAmount,
+        indicativeNetCustomerCost: Math.max(0, finalTotalAmount - finalSubsidyAmount),
+        annualGenerationKwh: Math.round(systemCapacityKw * 1500),
+        annualSavingsInr: Math.round(systemCapacityKw * 1500 * 8.2),
+        lifetimeSavings25Yr: Math.round(systemCapacityKw * 1500 * 8.2 * 25),
+        simplePaybackYears: Number((finalTotalAmount / (systemCapacityKw * 1500 * 8.2)).toFixed(1)),
         terms: calc.terms,
       };
       const resPdf = await generateProposalPdf(pdfData);
@@ -859,14 +912,14 @@ export const editQuotation = async (req: Request, res: Response) => {
         subtotal = ?, taxable_amount = ?, gst_rate = ?, gst_amount = ?,
         total_amount = ?, net_total = ?, total_cgst = ?, total_sgst = ?,
         total_igst = ?, amount_in_words = ?, approval_status = ?, discount_approved_by = ?,
-        versions = ?, pdf_url = ?
+        subsidy_amount = ?, versions = ?, pdf_url = ?
        WHERE id = ?`,
       [
-        calc.systemCapacityKw, calc.packageTier, calc.discountAmount,
-        calc.subtotal, calc.taxableAmount, calc.gstRate, calc.gstAmount,
-        calc.finalContractAmount, calc.finalContractAmount, calc.cgstAmount,
-        calc.sgstAmount, calc.igstAmount, calc.amountInWords, finalApproval, approvedBy,
-        JSON.stringify(versions), pdfUrl, id
+        systemCapacityKw, packageTier, discountAmount,
+        finalSubtotal, finalTaxableAmount, calc.gstRate, finalGstAmount,
+        finalTotalAmount, finalTotalAmount, finalCgstAmount,
+        finalSgstAmount, 0, finalAmountInWords, finalApproval, approvedBy,
+        finalSubsidyAmount, JSON.stringify(versions), pdfUrl, id
       ]
     );
 
@@ -1251,8 +1304,8 @@ export const downloadProposalPdf = async (req: Request, res: Response) => {
       finalContractAmount: Number(q.total_amount) || calc.finalContractAmount,
       amountInWords: q.amount_in_words || calc.amountInWords,
       subsidyEligible: calc.subsidyEligible,
-      subsidyAmount: Number(q.subsidy_amount) || calc.subsidyAmount,
-      indicativeNetCustomerCost: calc.indicativeNetCustomerCost,
+      subsidyAmount: (q.subsidy_amount !== null && q.subsidy_amount !== undefined) ? Number(q.subsidy_amount) : calc.subsidyAmount,
+      indicativeNetCustomerCost: Math.max(0, (Number(q.total_amount) || calc.finalContractAmount) - ((q.subsidy_amount !== null && q.subsidy_amount !== undefined) ? Number(q.subsidy_amount) : calc.subsidyAmount)),
       annualGenerationKwh: calc.annualGenerationKwh,
       annualSavingsInr: calc.annualSavingsInr,
       lifetimeSavings25Yr: calc.lifetimeSavings25Yr,
