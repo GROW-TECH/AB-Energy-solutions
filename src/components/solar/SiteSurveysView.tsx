@@ -548,6 +548,7 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
     surveys, 
     leads, 
     quotations,
+    employees,
     currentUser,
     activeRole,
     previewRole,

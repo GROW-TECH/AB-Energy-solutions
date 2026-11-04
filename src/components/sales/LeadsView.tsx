@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Users, Plus, Search, Filter, Phone, Mail, MapPin, 
   CheckCircle2, ChevronRight, ChevronLeft, X, Calendar, 
-  ArrowRight, Clock, ShieldAlert, FileText, Send, Sun, Compass, Trash2, UserCheck,
+  ArrowRight, Clock, ShieldAlert, ShieldCheck, FileText, Send, Sun, Compass, Trash2, UserCheck,
   Sparkles, AlertCircle
 } from 'lucide-react';
 import { useCrm } from '../../context/CrmContext';
