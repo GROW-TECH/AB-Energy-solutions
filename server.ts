@@ -44,9 +44,10 @@ async function startServer() {
     hasDist = true;
   }
 
-  // In production (or when running standalone bundle without src), serve compiled static assets
+  // In production (or whenever compiled build exists and not in explicit dev mode), serve compiled static assets
   const hasSrc = fs.existsSync(path.resolve(process.cwd(), 'src', 'App.tsx'));
-  const isProd = process.env.NODE_ENV === 'production' || (!hasSrc && hasDist);
+  const isExplicitDev = process.env.NODE_ENV === 'development' || process.env.VITE_DEV === 'true';
+  const isProd = (hasDist && !isExplicitDev) || process.env.NODE_ENV === 'production' || !hasSrc;
 
   if (!isProd) {
     const vite = await createViteServer({

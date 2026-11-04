@@ -89,23 +89,31 @@ fs.writeFileSync(path.join(secureDir, '.gitkeep'), '');
 console.log('Deploy package staged in scratch/deploy_pkg');
 
 
-// Create zip using PowerShell Compress-Archive
+// Create zip using fast native tar.exe
 const zipDest = path.join(rootDir, 'xiadot-AB_Energy_Solutions-DEPLOY.zip');
 const parentZipDest = path.join(rootDir, '..', 'xiadot-AB_Energy_Solutions-DEPLOY.zip');
 const altZipDest = path.join(rootDir, 'ab-energy-solutions-solar-crm-latest.zip');
 const lightweightZipDest = path.join(rootDir, 'cpanel_update_lightweight.zip');
 
 try {
-  execSync(`powershell -NoProfile -Command "$ProgressPreference = 'SilentlyContinue'; Compress-Archive -Path '${scratchDeploy}\\*' -DestinationPath '${zipDest}' -Force"`);
+  if (fs.existsSync(zipDest)) fs.unlinkSync(zipDest);
+  if (fs.existsSync(altZipDest)) fs.unlinkSync(altZipDest);
+  if (fs.existsSync(lightweightZipDest)) fs.unlinkSync(lightweightZipDest);
+
+  // 1. Full Deploy Package (including uploads)
+  execSync(`tar.exe -a -c -f "${zipDest}" -C "${scratchDeploy}" .`, { stdio: 'inherit' });
   fs.copyFileSync(zipDest, altZipDest);
-  fs.copyFileSync(zipDest, lightweightZipDest);
   console.log('Successfully created:', zipDest);
   console.log('Successfully created:', altZipDest);
+
+  // 2. Lightweight Deploy Package (excluding heavy survey photos in uploads/)
+  execSync(`tar.exe -a -c -f "${lightweightZipDest}" --exclude=uploads -C "${scratchDeploy}" .`, { stdio: 'inherit' });
   console.log('Successfully created:', lightweightZipDest);
 
   try {
     fs.copyFileSync(zipDest, parentZipDest);
     fs.copyFileSync(zipDest, path.join(rootDir, '..', 'ab-energy-solutions-solar-crm-latest.zip'));
+    fs.copyFileSync(lightweightZipDest, path.join(rootDir, '..', 'cpanel_update_lightweight.zip'));
   } catch (err) {
     // Parent copy optional
   }

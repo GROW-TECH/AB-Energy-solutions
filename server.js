@@ -9427,7 +9427,8 @@ async function startServer() {
     hasDist = true;
   }
   const hasSrc = fs9.existsSync(path9.resolve(process.cwd(), "src", "App.tsx"));
-  const isProd = process.env.NODE_ENV === "production" || !hasSrc && hasDist;
+  const isExplicitDev = process.env.NODE_ENV === "development" || process.env.VITE_DEV === "true";
+  const isProd = hasDist && !isExplicitDev || process.env.NODE_ENV === "production" || !hasSrc;
   if (!isProd) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
