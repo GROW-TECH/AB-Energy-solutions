@@ -2,17 +2,18 @@ import React, { useState } from 'react';
 import { 
   Receipt, Plus, Search, Filter, Printer, Download, 
   CheckCircle2, Clock, AlertTriangle, ArrowRight, ArrowLeft,
-  CreditCard, Check, IndianRupee, ShieldCheck
+  CreditCard, Check, IndianRupee, ShieldCheck, Sparkles, Building, Zap, Calendar, User, CheckCircle
 } from 'lucide-react';
 import { useCrm } from '../../context/CrmContext';
 import { getApiUrl } from '../../utils/apiUrl';
 import { Invoice } from '../../types';
 
 export const InvoicesView: React.FC = () => {
-  const { invoices, recordPayment } = useCrm();
+  const { invoices, recordPayment, createInvoice, projects, customers } = useCrm();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
+  const [milestoneFilter, setMilestoneFilter] = useState<'All' | '90_advance' | '10_commissioning'>('All');
   const [activeViewMode, setActiveViewMode] = useState<'grid' | 'document'>('grid');
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(invoices[0] || null);
 
@@ -22,13 +23,44 @@ export const InvoicesView: React.FC = () => {
   const [payMode, setPayMode] = useState<any>('NEFT/RTGS');
   const [payRef, setPayRef] = useState(`NEFT-${Date.now().toString().slice(-6)}`);
 
+  // Issue 10% Commissioning Invoice modal state
+  const [showIssue10Modal, setShowIssue10Modal] = useState(false);
+  const [selectedProjectIdFor10, setSelectedProjectIdFor10] = useState<string>('');
+  const [custom10Amount, setCustom10Amount] = useState<number>(0);
+  const [custom10DueDate, setCustom10DueDate] = useState<string>(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 7);
+    return d.toISOString().split('T')[0];
+  });
+  const [custom10Desc, setCustom10Desc] = useState<string>('');
+  const [invoiceIssueSuccess, setInvoiceIssueSuccess] = useState<string | null>(null);
+
+  // Milestone classification helpers
+  const is90Advance = (inv: Invoice) => {
+    const text = (inv.items?.map(it => it.description).join(' ') || '') + ' ' + (inv.invoiceNumber || '');
+    return text.includes('90%') || text.toLowerCase().includes('advance') || text.toLowerCase().includes('mobilization');
+  };
+
+  const is10Commissioning = (inv: Invoice) => {
+    const text = (inv.items?.map(it => it.description).join(' ') || '') + ' ' + (inv.invoiceNumber || '');
+    return text.includes('10%') || text.toLowerCase().includes('commission') || text.toLowerCase().includes('net meter') || text.toLowerCase().includes('handover') || text.toLowerCase().includes('final');
+  };
+
+  const countAll = invoices.length;
+  const count90 = invoices.filter(is90Advance).length;
+  const count10 = invoices.filter(is10Commissioning).length;
+
   const filteredInvoices = invoices.filter(inv => {
     const matchesSearch = 
       inv.invoiceNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
       inv.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       inv.customerPhone.includes(searchTerm);
     const matchesStatus = statusFilter === 'All' || inv.status === statusFilter;
-    return matchesSearch && matchesStatus;
+    const matchesMilestone = 
+      milestoneFilter === 'All' ? true :
+      milestoneFilter === '90_advance' ? is90Advance(inv) :
+      is10Commissioning(inv);
+    return matchesSearch && matchesStatus && matchesMilestone;
   });
 
   // KPI Calculations
@@ -46,6 +78,86 @@ export const InvoicesView: React.FC = () => {
     setSelectedInvoice(inv);
     setPayAmount(inv.balanceDue);
     setShowPaymentModal(true);
+  };
+
+  const handleOpenIssue10Modal = (projectId?: string) => {
+    const defaultProj = (projectId ? projects.find(p => p.id === projectId) : null) || projects[0];
+    if (defaultProj) {
+      setSelectedProjectIdFor10(defaultProj.id);
+      const cust = customers.find(c => c.id === defaultProj.customerId);
+      const existing90 = invoices.find(i => (i.projectId === defaultProj.id || i.customerId === defaultProj.customerId) && is90Advance(i));
+      const totalOrderVal = cust?.totalOrderValue || (existing90 ? Math.round(existing90.totalAmount / 0.9) : defaultProj.capacityKw * 40000);
+      const pendingBal = (cust?.balanceAmount !== undefined && cust.balanceAmount > 0)
+        ? cust.balanceAmount
+        : Math.round(totalOrderVal * 0.1);
+
+      setCustom10Amount(pendingBal);
+      setCustom10Desc(`10% Final Milestone: System Commissioning, Net Metering & Plant Handover for ${defaultProj.capacityKw} kW Solar EPC Plant`);
+    }
+    setShowIssue10Modal(true);
+  };
+
+  const handleSelectProjectFor10 = (projId: string) => {
+    setSelectedProjectIdFor10(projId);
+    const proj = projects.find(p => p.id === projId);
+    if (!proj) return;
+    const cust = customers.find(c => c.id === proj.customerId);
+    const existing90 = invoices.find(i => (i.projectId === proj.id || i.customerId === proj.customerId) && is90Advance(i));
+    const totalOrderVal = cust?.totalOrderValue || (existing90 ? Math.round(existing90.totalAmount / 0.9) : proj.capacityKw * 40000);
+    const pendingBal = (cust?.balanceAmount !== undefined && cust.balanceAmount > 0)
+      ? cust.balanceAmount
+      : Math.round(totalOrderVal * 0.1);
+
+    setCustom10Amount(pendingBal);
+    setCustom10Desc(`10% Final Milestone: System Commissioning, Net Metering & Plant Handover for ${proj.capacityKw} kW Solar EPC Plant`);
+  };
+
+  const handleCreate10Invoice = (e: React.FormEvent) => {
+    e.preventDefault();
+    const proj = projects.find(p => p.id === selectedProjectIdFor10);
+    if (!proj) return;
+    const cust = customers.find(c => c.id === proj.customerId);
+
+    const amt = Number(custom10Amount);
+    if (amt <= 0) return;
+
+    const subtotal = Math.round(amt / 1.138);
+    const totalGst = amt - subtotal;
+    const cgst = Math.round(totalGst / 2);
+    const sgst = totalGst - cgst;
+
+    const newInv = createInvoice({
+      projectId: proj.id,
+      customerId: cust?.id || proj.customerId,
+      customerName: cust?.name || proj.customerName,
+      customerPhone: cust?.phone || proj.customerPhone,
+      customerGstin: cust?.gstin || '',
+      issueDate: new Date().toISOString().split('T')[0],
+      dueDate: custom10DueDate || new Date(Date.now() + 86400000 * 7).toISOString().split('T')[0],
+      subtotal: subtotal,
+      cgst: cgst,
+      sgst: sgst,
+      igst: 0,
+      totalAmount: amt,
+      paidAmount: 0,
+      balanceDue: amt,
+      status: 'Sent',
+      items: [
+        {
+          description: custom10Desc || `10% Final Milestone: System Commissioning, Net Metering & Plant Handover for ${proj.capacityKw} kW Solar EPC Plant`,
+          hsnCode: '995465',
+          quantity: 1,
+          rate: subtotal,
+          amount: subtotal
+        }
+      ]
+    });
+
+    setShowIssue10Modal(false);
+    setMilestoneFilter('10_commissioning');
+    setSelectedInvoice(newInv);
+    setInvoiceIssueSuccess(`Successfully issued 10% Commissioning Invoice ${newInv.invoiceNumber} for ${newInv.customerName} (₹${amt.toLocaleString('en-IN')})`);
+    setTimeout(() => setInvoiceIssueSuccess(null), 6000);
   };
 
   const handleRecordPayment = (e: React.FormEvent) => {
@@ -326,7 +438,24 @@ export const InvoicesView: React.FC = () => {
                 Automated milestone invoices, 13.8% composite solar GST compliance, and payment reconciliations.
               </p>
             </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => handleOpenIssue10Modal()}
+                className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow-md transition-all cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Issue 10% Commissioning Invoice</span>
+              </button>
+            </div>
           </div>
+
+          {invoiceIssueSuccess && (
+            <div className="p-3.5 bg-emerald-50 border border-emerald-300 rounded-xl text-xs font-semibold text-emerald-900 flex items-center gap-2.5 animate-in fade-in duration-200">
+              <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{invoiceIssueSuccess}</span>
+            </div>
+          )}
 
           {/* 4 Executive KPI Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -382,32 +511,82 @@ export const InvoicesView: React.FC = () => {
           {/* Full-Width High-Density Table Card */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
             {/* Filter Bar */}
-            <div className="p-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3 text-xs">
-              <div className="flex items-center gap-3 flex-1 min-w-[280px]">
-                <div className="relative flex-1 max-w-md">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                  <input
-                    type="text"
-                    placeholder="Search invoice number, client name, phone..."
-                    value={searchTerm}
-                    onChange={e => setSearchTerm(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  />
+            <div className="p-4 border-b border-slate-100 space-y-3.5 text-xs">
+              {/* Milestone Segmented Filter Bar */}
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="inline-flex p-1 bg-slate-100 rounded-xl border border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => setMilestoneFilter('All')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      milestoneFilter === 'All'
+                        ? 'bg-slate-900 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    All Invoices ({countAll})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMilestoneFilter('90_advance')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                      milestoneFilter === '90_advance'
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <span className={`w-2 h-2 rounded-full ${milestoneFilter === '90_advance' ? 'bg-white' : 'bg-emerald-500'}`} />
+                    <span>90% Mobilization Advance ({count90})</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMilestoneFilter('10_commissioning')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                      milestoneFilter === '10_commissioning'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <span className={`w-2 h-2 rounded-full ${milestoneFilter === '10_commissioning' ? 'bg-white' : 'bg-indigo-500'}`} />
+                    <span>10% Commissioning &amp; Handover ({count10})</span>
+                  </button>
+                </div>
+
+                <div className="text-[11px] font-semibold text-slate-500 hidden sm:block">
+                  {milestoneFilter === 'All' && 'Viewing all milestone invoices across lifecycle'}
+                  {milestoneFilter === '90_advance' && 'Viewing initial 90% advance mobilization invoices recorded at booking'}
+                  {milestoneFilter === '10_commissioning' && 'Viewing 10% final commissioning, net-metering & handover invoices'}
                 </div>
               </div>
 
-              <div className="flex items-center gap-2.5">
-                <select
-                  value={statusFilter}
-                  onChange={e => setStatusFilter(e.target.value)}
-                  className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                >
-                  <option value="All">All Invoices</option>
-                  <option value="Paid">Paid</option>
-                  <option value="Partially Paid">Partially Paid</option>
-                  <option value="Sent">Sent (Payment Due)</option>
-                  <option value="Draft">Draft</option>
-                </select>
+              {/* Search & Status Filter */}
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                <div className="flex items-center gap-3 flex-1 min-w-[280px]">
+                  <div className="relative flex-1 max-w-md">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      placeholder="Search invoice number, client name, phone..."
+                      value={searchTerm}
+                      onChange={e => setSearchTerm(e.target.value)}
+                      className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2.5">
+                  <select
+                    value={statusFilter}
+                    onChange={e => setStatusFilter(e.target.value)}
+                    className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="All">All Statuses</option>
+                    <option value="Paid">Paid</option>
+                    <option value="Partially Paid">Partially Paid</option>
+                    <option value="Sent">Sent (Payment Due)</option>
+                    <option value="Draft">Draft</option>
+                  </select>
+                </div>
               </div>
             </div>
 
@@ -451,8 +630,21 @@ export const InvoicesView: React.FC = () => {
                         </span>
                       </div>
 
-                      <div className="text-xs text-slate-700 bg-slate-50 p-2 rounded-lg font-medium">
-                        {milestoneDesc}
+                      <div className="text-xs text-slate-700 bg-slate-50 p-2.5 rounded-lg space-y-1">
+                        <div className="flex items-center gap-1.5">
+                          {is10Commissioning(inv) ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                              <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                              10% Commissioning &amp; Handover
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                              90% Mobilization Advance
+                            </span>
+                          )}
+                        </div>
+                        <div className="font-semibold text-slate-900">{milestoneDesc}</div>
                       </div>
 
                       <div className="grid grid-cols-2 gap-2 p-2.5 bg-slate-50 rounded-xl text-xs">
@@ -550,8 +742,21 @@ export const InvoicesView: React.FC = () => {
                           <td className="py-3.5 px-4 font-mono text-slate-600">
                             {inv.projectId}
                           </td>
-                          <td className="py-3.5 px-4 text-slate-800 font-medium truncate max-w-xs">
-                            {milestoneDesc}
+                          <td className="py-3.5 px-4 text-slate-800 font-medium max-w-xs">
+                            <div className="flex items-center gap-1.5 mb-1">
+                              {is10Commissioning(inv) ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                                  10% Commissioning
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                  90% Mobilization
+                                </span>
+                              )}
+                            </div>
+                            <div className="truncate text-xs font-semibold text-slate-900">{milestoneDesc}</div>
                           </td>
                           <td className="py-3.5 px-4 text-right font-mono text-slate-700">
                             ₹{inv.subtotal.toLocaleString('en-IN')}
@@ -682,6 +887,164 @@ export const InvoicesView: React.FC = () => {
                   className="px-5 py-2 font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-xs transition-colors cursor-pointer"
                 >
                   Confirm &amp; Issue Receipt
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Issue 10% Commissioning & Net Metering Balance Invoice Modal */}
+      {showIssue10Modal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-start justify-between border-b border-slate-100 pb-3">
+              <div>
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 mb-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                  Final 10% Milestone
+                </div>
+                <h3 className="font-bold text-slate-900 text-sm">Issue 10% Commissioning Invoice</h3>
+                <p className="text-xs text-slate-500">
+                  Generate statutory GST invoice for net-metering commissioning &amp; final handover.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowIssue10Modal(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleCreate10Invoice} className="space-y-4 text-xs">
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Select Solar Project / Client *</label>
+                <select
+                  value={selectedProjectIdFor10}
+                  onChange={e => handleSelectProjectFor10(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 text-xs font-semibold text-slate-800"
+                >
+                  {projects.map(p => {
+                    const cust = customers.find(c => c.id === p.customerId);
+                    const bal = cust?.balanceAmount !== undefined ? cust.balanceAmount : Math.round((p.capacityKw * 40000) * 0.1);
+                    return (
+                      <option key={p.id} value={p.id}>
+                        {p.customerName} • {p.capacityKw} kW ({p.id}) — Balance: ₹{bal.toLocaleString('en-IN')}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+
+              {/* Selected Project Financial Breakdown */}
+              {(() => {
+                const proj = projects.find(p => p.id === selectedProjectIdFor10);
+                const cust = customers.find(c => c.id === proj?.customerId);
+                const existing90 = invoices.find(i => (i.projectId === proj?.id || i.customerId === proj?.customerId) && is90Advance(i));
+                const totalOrderVal = cust?.totalOrderValue || (existing90 ? Math.round(existing90.totalAmount / 0.9) : (proj?.capacityKw || 5) * 40000);
+                const existing10 = invoices.find(i => (i.projectId === proj?.id || i.customerId === proj?.customerId) && is10Commissioning(i));
+
+                return (
+                  <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                    <div className="flex justify-between items-center text-[11px] text-slate-600">
+                      <span>Total EPC Order Value:</span>
+                      <strong className="font-mono text-slate-900">₹{totalOrderVal.toLocaleString('en-IN')}</strong>
+                    </div>
+                    <div className="flex justify-between items-center text-[11px] text-slate-600">
+                      <span>90% Advance Mobilization (Invoiced):</span>
+                      <span className="font-mono font-semibold text-emerald-700">
+                        {existing90 ? `₹${existing90.totalAmount.toLocaleString('en-IN')} (${existing90.status})` : `₹${Math.round(totalOrderVal * 0.9).toLocaleString('en-IN')}`}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center text-[11px] pt-1.5 border-t border-slate-200 font-bold text-slate-900">
+                      <span>10% Handover Balance Due:</span>
+                      <span className="font-mono text-indigo-700 text-sm">
+                        ₹{(cust?.balanceAmount !== undefined ? cust.balanceAmount : Math.round(totalOrderVal * 0.1)).toLocaleString('en-IN')}
+                      </span>
+                    </div>
+                    {existing10 && (
+                      <div className="p-2 bg-amber-50 border border-amber-200 text-amber-900 rounded-lg text-[11px] font-medium">
+                        Notice: A 10% invoice ({existing10.invoiceNumber}) already exists for this project. Status: {existing10.status}.
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">10% Milestone Amount (₹) *</label>
+                  <input
+                    type="number"
+                    min={1}
+                    required
+                    value={custom10Amount}
+                    onChange={e => setCustom10Amount(Number(e.target.value))}
+                    className="w-full p-2.5 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 font-mono font-bold text-slate-900 text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Due Date *</label>
+                  <input
+                    type="date"
+                    required
+                    value={custom10DueDate}
+                    onChange={e => setCustom10DueDate(e.target.value)}
+                    className="w-full p-2.5 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 font-semibold text-slate-800"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Invoice Line Item Description *</label>
+                <input
+                  type="text"
+                  required
+                  value={custom10Desc}
+                  onChange={e => setCustom10Desc(e.target.value)}
+                  className="w-full p-2.5 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 text-xs font-medium"
+                />
+              </div>
+
+              {/* Statutory GST Math Preview */}
+              <div className="p-3 bg-indigo-50/60 border border-indigo-200 rounded-xl space-y-1.5 text-[11px]">
+                <div className="flex justify-between text-indigo-950 font-bold">
+                  <span>SAC Code: 995465</span>
+                  <span>Composite Solar GST: 13.8%</span>
+                </div>
+                <div className="flex justify-between text-slate-600">
+                  <span>Taxable Base Subtotal:</span>
+                  <span className="font-mono font-semibold">₹{Math.round(custom10Amount / 1.138).toLocaleString('en-IN')}</span>
+                </div>
+                <div className="flex justify-between text-slate-600">
+                  <span>CGST (6.9%) + SGST (6.9%):</span>
+                  <span className="font-mono font-semibold">
+                    ₹{(custom10Amount - Math.round(custom10Amount / 1.138)).toLocaleString('en-IN')}
+                  </span>
+                </div>
+                <div className="flex justify-between text-slate-900 font-extrabold pt-1 border-t border-indigo-200">
+                  <span>Gross Invoice Total:</span>
+                  <span className="font-mono text-indigo-900">₹{custom10Amount.toLocaleString('en-IN')}</span>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowIssue10Modal(false)}
+                  className="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Generate &amp; Issue 10% Invoice</span>
                 </button>
               </div>
             </form>

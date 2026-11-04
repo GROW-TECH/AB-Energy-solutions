@@ -2147,11 +2147,20 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const createInvoice = (invoiceData: Partial<Invoice>): Invoice => {
-    const invId = `INV-2026-${String(invoices.length + 1).padStart(3, '0')}`;
+    let maxInvNum = 20;
+    for (const inv of invoices) {
+      const match = (inv.id && inv.id.match(/INV-2026-(\d+)/)) || (inv.invoiceNumber && inv.invoiceNumber.match(/INV-2026-(?:00)?(\d+)/));
+      if (match) {
+        const n = parseInt(match[1], 10);
+        if (n > maxInvNum) maxInvNum = n;
+      }
+    }
+    const nextNum = maxInvNum + 1;
+    const invId = `INV-2026-${String(nextNum).padStart(3, '0')}`;
     const newInv = {
       ...invoiceData,
-      id: invId,
-      invoiceNumber: `INV-2026-00${String(invoices.length + 1).padStart(3, '0')}`,
+      id: invoiceData.id || invId,
+      invoiceNumber: invoiceData.invoiceNumber || `INV-2026-00${String(nextNum).padStart(3, '0')}`,
       status: invoiceData.status || 'Sent',
     } as Invoice;
     setInvoices(prev => [newInv, ...prev]);
