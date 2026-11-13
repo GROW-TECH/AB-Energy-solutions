@@ -6,7 +6,7 @@ import {
   Sparkles, AlertCircle, Pencil
 } from 'lucide-react';
 import { useCrm } from '../../context/CrmContext';
-import { Lead, LeadStatus, Priority, CustomerApplicationType, SolarSystemType, SiteSurvey } from '../../types';
+import { Lead, LeadStatus, LeadSource, Priority, CustomerApplicationType, SolarSystemType, SiteSurvey } from '../../types';
 import { initiateLeadCall } from '../../utils/telephonyBridge';
 
 interface LeadsViewProps {

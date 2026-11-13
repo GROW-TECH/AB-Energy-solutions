@@ -398,17 +398,17 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
                     </div>
                   </div>
                   <div className="text-left sm:text-right font-mono text-[10px] text-slate-500">
-                    Quote: <strong className="text-emerald-700">{quotation.quotationNumber}</strong> &bull; GST: 33FSQPA3244H1ZU
+                    Quote: <strong className="text-emerald-700">{quote.quotationNumber}</strong> &bull; GST: 33FSQPA3244H1ZU
                   </div>
                 </div>
 
                 <div>
                   <h2 className="font-black text-black text-sm mb-3">
-                    Subject: Proposal for Supply, Installation, Testing &amp; Commissioning of {quotation.systemCapacityKw} kW Grid-Connected Rooftop Solar Power System
+                    Subject: Proposal for Supply, Installation, Testing &amp; Commissioning of {quote.systemCapacityKw} kW Grid-Connected Rooftop Solar Power System
                   </h2>
                   <p className="mb-2 font-medium">Dear Sir,</p>
                   <p className="mb-2">
-                    Thank you for giving us the opportunity to submit our quotation for your {quotation.systemCapacityKw} kW Solar Rooftop Project. We are pleased to offer our professional turnkey services as detailed below.
+                    Thank you for giving us the opportunity to submit our quotation for your {quote.systemCapacityKw} kW Solar Rooftop Project. We are pleased to offer our professional turnkey services as detailed below.
                   </p>
                   <p>
                     The quotation includes the complete supply, installation, testing, and commissioning of a Grid-Connected Solar Rooftop System.
@@ -457,7 +457,7 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
                     </div>
                   </div>
                   <div className="text-left sm:text-right font-mono text-[10px] text-slate-500">
-                    Quote: <strong className="text-emerald-700">{quotation.quotationNumber}</strong> &bull; GST: 33FSQPA3244H1ZU
+                    Quote: <strong className="text-emerald-700">{quote.quotationNumber}</strong> &bull; GST: 33FSQPA3244H1ZU
                   </div>
                 </div>
 
@@ -743,7 +743,7 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
                     </div>
                   </div>
                   <div className="text-left sm:text-right font-mono text-[10px] text-slate-500">
-                    Quote: <strong className="text-emerald-700">{quotation.quotationNumber}</strong> &bull; GST: 33FSQPA3244H1ZU
+                    Quote: <strong className="text-emerald-700">{quote.quotationNumber}</strong> &bull; GST: 33FSQPA3244H1ZU
                   </div>
                 </div>
 
@@ -1039,7 +1039,7 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
           quotationNumber={quote.quotationNumber}
           initialCapacityKw={quote.systemCapacityKw}
           initialDomesticPrice={quote.totalAmount}
-          initialSubsidyAmount={quote.subsidyAmount}
+          initialSubsidyAmount={quote.subsidyAmount || 0}
           onSave={async (data) => {
             return await handleSaveQuotationEdit(data);
           }}

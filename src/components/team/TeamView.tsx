@@ -515,6 +515,8 @@ export const TeamView: React.FC = () => {
     'Purchase Team': 'Procurement, Vendor PO Issuance, GRN Inwarding & Warehouse Stock',
     'Installation Team': 'Rooftop Mounting, Quality Checklist & Safety QA',
     'Accounts': 'Tax Invoices, GST Compliance & Milestone Payments',
+    'Auditor': 'Statutory Audit, Tax Invoices & Ledger Verification',
+    'CEO': 'Strategic Oversight, Executive Dashboards & Board Reporting',
     'Service Team': 'Inverter Fault Tickets, AMC Care & Warranty Claims',
     'Customer': 'Self-service Solar Telemetry, Generation & Documents',
   };
@@ -541,6 +543,8 @@ export const TeamView: React.FC = () => {
     'Purchase Team': { leads: false, survey: false, survey_approval: false, quotes: false, projects: false, installation: false, finance: false, service: false, admin: false },
     'Installation Team': { leads: false, survey: false, survey_approval: false, quotes: false, projects: false, installation: true, finance: false, service: false, admin: false },
     'Accounts': { leads: false, survey: false, survey_approval: false, quotes: false, projects: false, installation: false, finance: true, service: false, admin: false },
+    'Auditor': { leads: false, survey: false, survey_approval: false, quotes: false, projects: false, installation: false, finance: true, service: false, admin: false },
+    'CEO': { leads: true, survey: true, survey_approval: true, quotes: true, projects: true, installation: true, finance: true, service: true, admin: true },
     'Service Team': { leads: false, survey: false, survey_approval: false, quotes: false, projects: false, installation: false, finance: false, service: true, admin: false },
     'Customer': { leads: false, survey: false, survey_approval: false, quotes: false, projects: false, installation: false, finance: false, service: false, admin: false },
   };

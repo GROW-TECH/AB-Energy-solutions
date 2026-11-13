@@ -33,77 +33,7 @@ export const AdvancePaymentsView: React.FC<AdvancePaymentsViewProps> = ({
   const [auditorSendingAdvId, setAuditorSendingAdvId] = useState<string | null>(null);
 
   const handleDirectPrint = () => {
-    const elementId = receiptViewTab === 'receipt' ? 'printable-payment-receipt-body' : 'printable-advance-tax-invoice';
-    const content = document.getElementById(elementId);
-    if (!content) {
-      window.print();
-      return;
-    }
-
-    const iframe = document.createElement('iframe');
-    iframe.style.position = 'fixed';
-    iframe.style.right = '0';
-    iframe.style.bottom = '0';
-    iframe.style.width = '0';
-    iframe.style.height = '0';
-    iframe.style.border = '0';
-    document.body.appendChild(iframe);
-
-    const doc = iframe.contentWindow?.document;
-    if (!doc) {
-      window.print();
-      return;
-    }
-
-    doc.open();
-    doc.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>${receiptViewTab === 'receipt' ? 'Payment-In Receipt' : 'Tax Invoice'} - AB Energy Solutions</title>
-          <style>
-            @page { size: A4 portrait; margin: 15mm 20mm; }
-            * { box-sizing: border-box; }
-            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #0f172a; margin: 0; padding: 25px; background: #fff; }
-            .header-wrap { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
-            .company-name { font-size: 18px; font-weight: 900; color: #000; letter-spacing: 0.5px; margin-bottom: 4px; }
-            .company-meta { font-size: 11px; color: #334155; line-height: 1.45; }
-            .logo-wrap img { height: 65px; max-width: 180px; object-fit: contain; }
-            .sep-line { border-top: 1.5px solid #cbd5e1; margin: 14px 0; }
-            .receipt-title { text-align: center; font-size: 20px; font-weight: 900; color: #334155; margin: 12px 0; letter-spacing: 0.5px; }
-            .party-meta-grid { display: flex; justify-content: space-between; font-size: 12px; margin: 20px 0 15px; }
-            .party-label { font-size: 11px; font-weight: 700; color: #64748b; margin-bottom: 4px; text-transform: uppercase; }
-            .party-name { font-size: 15px; font-weight: 900; color: #000; }
-            .meta-item { margin-bottom: 4px; }
-            .payment-table-head { display: flex; justify-content: space-between; font-size: 11px; font-weight: 800; color: #64748b; text-transform: uppercase; border-top: 1px solid #cbd5e1; padding-top: 12px; }
-            .payment-table-body { display: flex; justify-content: space-between; align-items: flex-start; font-size: 13px; margin: 8px 0 16px; }
-            .desc-main { font-weight: 800; color: #000; font-size: 13px; }
-            .desc-sub { font-size: 11px; color: #64748b; margin-top: 2px; }
-            .amount-bold { font-size: 18px; font-weight: 900; color: #000; font-family: monospace; }
-            .mode-row { font-size: 11px; color: #334155; font-weight: 600; margin-top: 4px; }
-            .words-box { margin-top: 25px; font-size: 12px; border-top: 1px solid #e2e8f0; padding-top: 12px; }
-            .words-title { font-size: 11px; font-weight: 700; color: #64748b; margin-bottom: 2px; }
-            .words-val { font-size: 13px; font-weight: 700; color: #000; }
-            .sign-container { margin-top: 60px; display: flex; justify-content: flex-end; }
-            .sign-block { text-align: center; width: 220px; }
-            .sign-for { font-size: 12px; font-weight: 800; color: #000; margin-bottom: 30px; }
-            .sign-title { font-size: 11px; color: #64748b; font-weight: 600; border-top: 1px dashed #94a3b8; padding-top: 6px; }
-          </style>
-        </head>
-        <body>
-          ${content.innerHTML}
-        </body>
-      </html>
-    `);
-    doc.close();
-
-    setTimeout(() => {
-      iframe.contentWindow?.focus();
-      iframe.contentWindow?.print();
-      setTimeout(() => {
-        document.body.removeChild(iframe);
-      }, 2500);
-    }, 350);
+    window.print();
   };
 
   const handleSendAdvanceToAuditor = async (rec: any) => {
@@ -451,7 +381,7 @@ export const AdvancePaymentsView: React.FC<AdvancePaymentsViewProps> = ({
                     {/* View Screenshot button */}
                     {rec.paymentScreenshot && (
                       <button
-                        onClick={() => setSelectedScreenshotUrl(rec.paymentScreenshot)}
+                        onClick={() => setSelectedScreenshotUrl(rec.paymentScreenshot || null)}
                         className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer transition-colors border border-slate-300"
                         title="View Customer Advance Payment Screenshot"
                       >
@@ -925,7 +855,7 @@ export const AdvancePaymentsView: React.FC<AdvancePaymentsViewProps> = ({
                           </td>
                           <td className="p-3 text-center font-mono">{item.hsnCode || '995465'}</td>
                           <td className="p-3 text-center font-mono font-bold">{item.quantity}</td>
-                          <td className="p-3 text-right font-mono">₹{item.rate.toLocaleString('en-IN')}</td>
+                          <td className="p-3 text-right font-mono">₹{(item.rate ?? item.unitRate ?? 0).toLocaleString('en-IN')}</td>
                           <td className="p-3 text-right font-mono font-bold text-slate-900">₹{item.amount.toLocaleString('en-IN')}</td>
                         </tr>
                       ))}

@@ -2436,7 +2436,7 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
           quotationNumber={selectedQuoteForPreview.quotationNumber}
           initialCapacityKw={selectedQuoteForPreview.systemCapacityKw}
           initialDomesticPrice={selectedQuoteForPreview.totalAmount}
-          initialSubsidyAmount={selectedQuoteForPreview.subsidyAmount}
+          initialSubsidyAmount={selectedQuoteForPreview.subsidyAmount || 0}
           onSave={async (data) => {
             return await handleSaveSubEdit(data);
           }}

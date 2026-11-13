@@ -1633,7 +1633,11 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onNavigate }) => {
                       const isCheckedIn = Boolean(latestAtt || selectedProject.attendancePhotoUrl);
                       const gpsText = latestAtt?.latitude 
                         ? `${Number(latestAtt.latitude).toFixed(4)}° N, ${Number(latestAtt.longitude).toFixed(4)}° E`
-                        : (selectedProject.attendanceGpsCoords || null);
+                        : typeof selectedProject.attendanceGpsCoords === 'string'
+                        ? selectedProject.attendanceGpsCoords
+                        : (selectedProject.attendanceGpsCoords?.lat && selectedProject.attendanceGpsCoords?.lng)
+                        ? `${selectedProject.attendanceGpsCoords.lat.toFixed(4)}° N, ${selectedProject.attendanceGpsCoords.lng.toFixed(4)}° E`
+                        : null;
                       const timeText = latestAtt?.checkInTime 
                         ? `${latestAtt.date || 'Today'}, ${latestAtt.checkInTime}`
                         : latestAtt?.date 

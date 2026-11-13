@@ -24,12 +24,14 @@ export interface AuthUser {
   email: string;
   role: Role;
   username: string;
+  phone?: string;
   customerId?: string;
   employeeId?: string;
   avatar?: string;
 }
 
 interface CrmContextType {
+  showToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
   // Auth state & Actions
   currentUser: AuthUser | null;
   isAuthenticated: boolean;
@@ -3005,6 +3007,15 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   return (
     <CrmContext.Provider value={{
+      showToast: (msg: string, type?: 'success' | 'error' | 'info') => {
+        try {
+          if (typeof window !== 'undefined' && (window as any).showAppToast) {
+            (window as any).showAppToast(msg, type);
+          } else {
+            console.log(`[Toast ${type || 'info'}]:`, msg);
+          }
+        } catch {}
+      },
       currentUser,
       isAuthenticated,
       isRestoringSession,

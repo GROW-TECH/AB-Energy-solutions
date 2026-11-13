@@ -1345,7 +1345,7 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
   const openLiveCamera = (
     title: string,
     facing: 'user' | 'environment',
-    target: { type: 'category'; category: SurveyPhotoCategory } | { type: 'customer_photo' } | { type: 'doc_front' } | { type: 'doc_back' }
+    target: { type: 'category'; category: SurveyPhotoCategory } | { type: 'customer_photo' } | { type: 'doc_front' } | { type: 'doc_back' } | { type: 'client_approval_doc' }
   ) => {
     if (!isEditingMode) {
       showToast('Click "Edit Survey" first to enable camera capture.', 'info');

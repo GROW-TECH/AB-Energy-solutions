@@ -16,7 +16,7 @@ export const InvoicesView: React.FC = () => {
 
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
-  const [milestoneFilter, setMilestoneFilter] = useState<'All' | '90_advance' | '10_commissioning'>('All');
+  const [milestoneFilter, setMilestoneFilter] = useState<'All' | '90_advance' | '10_commissioning' | 'auditor_received'>('All');
   const [activeViewMode, setActiveViewMode] = useState<'grid' | 'document'>('grid');
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(invoices[0] || null);
 
@@ -117,7 +117,9 @@ export const InvoicesView: React.FC = () => {
     if (!editingInvoice) return;
     const newItem = {
       description: 'Solar System Components / EPC Milestone Service',
+      hsnCode: '995465',
       quantity: 1,
+      rate: 10000,
       unitRate: 10000,
       amount: 10000
     };
@@ -566,7 +568,7 @@ export const InvoicesView: React.FC = () => {
                       <td className="p-3 font-semibold text-slate-900">{item.description}</td>
                       <td className="p-3 text-center font-mono text-slate-500">{item.hsnCode}</td>
                       <td className="p-3 text-center">{item.quantity}</td>
-                      <td className="p-3 text-right font-mono">₹{item.rate.toLocaleString('en-IN')}</td>
+                      <td className="p-3 text-right font-mono">₹{(item.rate ?? item.unitRate ?? 0).toLocaleString('en-IN')}</td>
                       <td className="p-3 text-right font-mono font-bold text-slate-900">₹{item.amount.toLocaleString('en-IN')}</td>
                     </tr>
                   ))}

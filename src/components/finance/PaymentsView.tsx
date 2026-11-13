@@ -6,6 +6,8 @@ import {
 } from 'lucide-react';
 import { useCrm } from '../../context/CrmContext';
 import { Payment } from '../../types';
+import { convertNumberToWords } from '../../utils/quotationEngine';
+import { getApiUrl } from '../../utils/apiUrl';
 
 export const PaymentsView: React.FC = () => {
   const { payments, customers, verifyPaymentScreenshot, showToast } = useCrm();
@@ -354,86 +356,192 @@ export const PaymentsView: React.FC = () => {
         </div>
       </div>
 
-      {/* Payment Receipt Modal */}
+      {/* Payment Receipt Modal - Official Payment-In Receipt (Matches Image 2) */}
       {selectedReceipt && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+        <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto print:p-0 print:static print:bg-transparent print:backdrop-blur-none print-modal-overlay">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[94vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-150 print:max-w-full print:w-full print:max-h-none print:shadow-none print:border-none print:rounded-none print:overflow-visible print-modal-wrapper">
+            {/* Top Control Bar - Hidden in Print */}
+            <div className="p-4 bg-slate-900 text-white flex items-center justify-between gap-3 shrink-0 no-print print:hidden print-modal-header">
               <div className="flex items-center gap-2">
-                <Receipt className="w-5 h-5 text-emerald-600" />
-                <h3 className="font-bold text-slate-900 text-base">Payment Receipt Confirmation</h3>
+                <Receipt className="w-5 h-5 text-emerald-400" />
+                <h3 className="font-bold text-slate-100 text-sm">Official Payment-In Receipt Voucher</h3>
+                <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono text-xs border border-emerald-500/30">
+                  {selectedReceipt.paymentNumber}
+                </span>
               </div>
-              <button 
-                onClick={() => setSelectedReceipt(null)} 
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"
-              >
-                <X className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Print Receipt</span>
+                </button>
+                <button 
+                  type="button"
+                  onClick={() => setSelectedReceipt(null)} 
+                  className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
-            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200/80 space-y-2 text-xs">
-              <div className="flex justify-between">
-                <span className="text-slate-500">Receipt Voucher:</span>
-                <span className="font-mono font-bold text-slate-900">{selectedReceipt.paymentNumber}</span>
+            {/* Official Printable Payment-In Receipt Body (Matching Attached Image 2 Exactly) */}
+            <div id="printable-payment-receipt" className="printable-receipt-card p-8 sm:p-12 overflow-y-auto flex-1 space-y-6 text-xs text-slate-800 bg-white">
+              {/* Header Grid: Company Info Left, Official Logo Right */}
+              <div className="flex items-start justify-between gap-4">
+                <div className="space-y-0.5">
+                  <h2 className="font-black text-slate-950 text-base sm:text-lg tracking-tight uppercase">
+                    AB ENERGY SOLUTIONS
+                  </h2>
+                  <div className="text-[11px] text-slate-700 leading-snug">
+                    No 13, Thammampatty Main Road, Maheswari Theatre Opposite Street,<br />
+                    Vazhapadi, Salem, Tamil Nadu - 636115
+                  </div>
+                  <div className="text-[11px] text-slate-700 pt-1 space-y-0.5">
+                    <div>Phone no.: <span className="font-mono font-medium">9566499678</span></div>
+                    <div>Email: <span className="font-mono">abenergysolutiontn@gmail.com</span></div>
+                    <div>GSTIN: <span className="font-mono font-bold text-slate-900">33FSQPA3244H1ZU</span></div>
+                    <div>State: <span className="font-medium">33-Tamil Nadu</span></div>
+                  </div>
+                </div>
+
+                <div className="shrink-0 text-right">
+                  <img
+                    src={getApiUrl('/logo.png')}
+                    onError={(e: any) => { e.currentTarget.src = getApiUrl('/logo.jpg'); }}
+                    alt="AB Energy Solutions"
+                    className="h-16 w-auto object-contain"
+                  />
+                </div>
               </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Payment Date:</span>
-                <span className="font-semibold text-slate-800">{selectedReceipt.paymentDate}</span>
+
+              {/* Gray Separator Line */}
+              <div className="border-t border-slate-300 my-4" />
+
+              {/* Centered Document Title */}
+              <div className="text-center py-1">
+                <h3 className="text-lg sm:text-xl font-extrabold text-slate-600 tracking-wide uppercase">
+                  Payment-In
+                </h3>
               </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Customer:</span>
-                <span className="font-bold text-slate-900">{selectedReceipt.customerName}</span>
+
+              {/* Received From Left & Receipt Details Right */}
+              <div className="flex flex-col sm:flex-row justify-between gap-6 pt-2">
+                <div className="space-y-1">
+                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+                    Received From
+                  </span>
+                  <h4 className="font-black text-slate-900 text-sm sm:text-base uppercase tracking-tight">
+                    {selectedReceipt.customerName}
+                  </h4>
+                  {(() => {
+                    const matchedCust = customers.find(c => c.id === selectedReceipt.customerId || c.name === selectedReceipt.customerName);
+                    return matchedCust ? (
+                      <div className="text-[11px] text-slate-600 space-y-0.5">
+                        {matchedCust.phone && <div>Phone: <span className="font-mono">{matchedCust.phone}</span></div>}
+                        {matchedCust.address && <div className="text-slate-500 max-w-xs">{matchedCust.address}</div>}
+                      </div>
+                    ) : null;
+                  })()}
+                </div>
+
+                <div className="text-left sm:text-right space-y-1 font-mono">
+                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+                    Receipt Details
+                  </span>
+                  <div className="text-xs text-slate-800">
+                    Receipt No.: <strong className="text-slate-900 font-bold">{selectedReceipt.paymentNumber}</strong>
+                  </div>
+                  <div className="text-xs text-slate-800">
+                    Date: <strong className="text-slate-900 font-bold">{selectedReceipt.paymentDate}</strong>
+                  </div>
+                </div>
               </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Invoice Reference:</span>
-                <span className="font-mono font-semibold text-slate-800">{selectedReceipt.invoiceId}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Bank UTR / Transaction ID:</span>
-                <span className="font-mono text-slate-700">{selectedReceipt.transactionReference}</span>
-              </div>
-              {selectedReceipt.paymentScreenshot && (
-                <div className="pt-2 border-t border-slate-200">
-                  <span className="text-slate-500 block mb-1">Attached Payment Proof:</span>
-                  <div
-                    onClick={() => setSelectedScreenshotUrl(selectedReceipt.paymentScreenshot || null)}
-                    className="cursor-pointer group relative rounded-lg overflow-hidden border border-slate-300 max-h-32 bg-slate-900 flex items-center justify-center"
-                  >
-                    <img
-                      src={selectedReceipt.paymentScreenshot}
-                      alt="Proof"
-                      className="max-h-32 object-contain"
-                    />
-                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-xs font-bold transition-opacity">
-                      Click to Enlarge
+
+              {/* Payment Breakdown Table */}
+              <div className="pt-4 border-t border-slate-300">
+                <div className="flex justify-between text-xs font-bold text-slate-600 pb-2 border-b border-slate-200 uppercase tracking-wider">
+                  <span>Description</span>
+                  <span>Received</span>
+                </div>
+
+                <div className="py-4 space-y-3">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <div className="font-black text-slate-900 text-sm tracking-wide">
+                        {selectedReceipt.notes || (selectedReceipt.paymentNumber?.includes('ADV') ? 'ADVANCE' : 'MILESTONE PAYMENT')}
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-1">
+                        Invoice Reference: <span className="font-mono font-semibold text-slate-700">{selectedReceipt.invoiceId}</span>
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5">
+                        Payment Mode: <span className="font-medium text-slate-800">{selectedReceipt.paymentMode || 'Bank Transfer'}</span>
+                        {selectedReceipt.transactionReference && (
+                          <span className="font-mono ml-2 text-slate-600">(Ref: {selectedReceipt.transactionReference})</span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="text-right">
+                      <div className="text-base sm:text-lg font-black text-slate-900 font-mono">
+                        ₹ {selectedReceipt.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </div>
                     </div>
                   </div>
                 </div>
-              )}
-              <div className="flex justify-between pt-2 border-t border-slate-200">
-                <span className="font-bold text-slate-700">Amount Received:</span>
-                <span className="font-mono font-black text-emerald-700 text-sm">
-                  ₹{selectedReceipt.amount.toLocaleString('en-IN')}
-                </span>
-              </div>
-            </div>
 
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                onClick={() => setSelectedReceipt(null)}
-                className="px-4 py-2 border border-slate-200 hover:bg-slate-100 text-slate-700 font-bold rounded-xl text-xs"
-              >
-                Close
-              </button>
-              <button
-                onClick={() => {
-                  window.print();
-                }}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                <span>Print Official Receipt</span>
-              </button>
+                {/* Amount in Words */}
+                <div className="border-t border-slate-200 pt-3 space-y-1">
+                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+                    Amount In Words
+                  </span>
+                  <div className="text-xs font-bold text-slate-900 capitalize">
+                    {convertNumberToWords(selectedReceipt.amount)}
+                  </div>
+                </div>
+
+                {/* Attached Screenshot Proof if available */}
+                {selectedReceipt.paymentScreenshot && (
+                  <div className="no-print pt-4 border-t border-slate-200 mt-4">
+                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-2">
+                      Attached Payment Proof:
+                    </span>
+                    <div
+                      onClick={() => setSelectedScreenshotUrl(selectedReceipt.paymentScreenshot || null)}
+                      className="inline-block cursor-pointer group relative rounded-lg overflow-hidden border border-slate-300 max-h-24 bg-slate-900"
+                    >
+                      <img
+                        src={selectedReceipt.paymentScreenshot}
+                        alt="Proof"
+                        className="max-h-24 object-contain"
+                      />
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-[10px] font-bold transition-opacity">
+                        View Proof
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Signatory Footer */}
+                <div className="pt-12 flex justify-end">
+                  <div className="text-center space-y-8 min-w-[200px]">
+                    <div className="text-xs font-bold text-slate-800 uppercase">
+                      For: AB ENERGY SOLUTIONS
+                    </div>
+                    <div className="h-8 flex items-center justify-center">
+                      <span className="font-serif italic text-base text-slate-700 tracking-wider font-semibold">
+                        AB Energy Solutions
+                      </span>
+                    </div>
+                    <div className="border-t border-slate-400 pt-1 text-[11px] font-bold text-slate-600 uppercase tracking-wide">
+                      Authorized Signatory
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>

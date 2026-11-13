@@ -7,6 +7,8 @@ export async function createNotification(params: {
   message: string;
   type?: 'info' | 'success' | 'warning' | 'urgent';
   link?: string;
+  actionUrl?: string;
+  entityId?: string;
 }): Promise<void> {
   try {
     const id = `NOTIF-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;

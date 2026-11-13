@@ -9,12 +9,15 @@ export type Role =
   | 'Accounts'
   | 'Service Team'
   | 'Customer'
-  | 'Auditor';
+  | 'Auditor'
+  | 'CEO';
 
 export type UserRole = Role;
 
 export type LeadSource = 
   | 'Website'
+  | 'Website / Inbound'
+  | 'Direct / Inbound'
   | 'Google Ads'
   | 'Meta Ads'
   | 'Facebook'
@@ -26,7 +29,8 @@ export type LeadSource =
   | 'Exhibition'
   | 'Dealer'
   | 'Manual Entry'
-  | 'API';
+  | 'API'
+  | (string & {});
 
 export type LeadStatus = 
   | 'New'
@@ -34,26 +38,34 @@ export type LeadStatus =
   | 'Follow-up Scheduled'
   | 'Site Survey Scheduled'
   | 'Survey Completed'
+  | 'Site Survey Completed'
   | 'Quotation Sent'
+  | 'Proposal Sent'
   | 'Negotiation'
   | 'Qualified'
   | 'Won'
   | 'Lost'
-  | 'Attention Required';
+  | 'Unresponsive'
+  | 'Dropped'
+  | 'Attention Required'
+  | (string & {});
 
 export type ProjectStage = 
   | 'Booking'
   | 'Documentation'
   | 'Material Planning'
   | 'Material Ready'
+  | 'Material Procurement'
   | 'Material Arrived'
   | 'Installation Scheduled'
   | 'Installation In Progress'
   | 'Installation Completed'
   | 'Testing'
+  | 'Testing & Commissioning'
   | 'Commissioning'
   | 'Net Metering'
-  | 'Completed';
+  | 'Completed'
+  | (string & {});
 
 export type TicketStatus = 
   | 'Open'
@@ -80,10 +92,12 @@ export interface Employee {
   phone: string;
   role: Role;
   department: string;
-  avatar: string;
+  avatar?: string;
   activeLeadsCount: number;
   completedProjectsCount: number;
-  location: string;
+  location?: string;
+  status?: string;
+  employeeId?: string;
 }
 
 export type CustomerApplicationType = 'Home' | 'Residential' | 'Commercial' | 'Industrial' | 'Water Pump';
@@ -103,7 +117,7 @@ export interface Lead {
   priority: Priority;
   recommendedPriority?: Priority;
   priorityOverrideReason?: string;
-  buyingIntent?: 'Immediate (< 15 days)' | '1-2 months' | 'Budgetary / Researching' | 'Future (> 3 months)';
+  buyingIntent?: 'Immediate (< 15 days)' | 'Immediate (Within 15 days)' | '1-2 months' | 'Standard (1-2 months)' | 'Budgetary / Researching' | 'Future (> 3 months)' | (string & {});
   customerType?: CustomerApplicationType;
   systemType?: SolarSystemType;
   assignedToId: string;
@@ -111,10 +125,11 @@ export interface Lead {
   monthlyBill: number; // in ₹
   sanctionLoad: number; // in kW
   roofAreaSqFt: number;
-  roofType: 'RCC Flat' | 'Tin Shed' | 'Tiled' | 'Elevated Structure';
+  roofType: 'RCC Flat' | 'RCC Flat Terrace' | 'Tin Shed' | 'Industrial GI Sheet' | 'Tiled' | 'Elevated Structure' | (string & {});
   connectionSpace?: 'Single Space' | '2 Space' | '3 Space';
   recommendedKw: number;
   estimatedBudget: number; // in ₹
+  estimatedValue?: number;
   createdAt: string;
   updatedAt: string;
   lastContactedAt?: string;
@@ -191,7 +206,8 @@ export type SurveyStatus =
   | 'Changes Required' 
   | 'Approved' 
   | 'Completed' 
-  | 'Cancelled';
+  | 'Cancelled'
+  | 'Rejected';
 
 export type SurveyPhotoCategory = 
   | 'full_rooftop_view'
@@ -397,13 +413,18 @@ export interface QuotationVersion {
   packageTier?: 'Standard' | 'Premium Bifacial' | 'Commercial Heavy Duty';
 }
 
-export type QuotationStatus = 'Draft' | 'Sent' | 'Negotiation' | 'Accepted' | 'Customer_Accepted' | 'Converted_To_Project' | 'Declined' | 'Expired';
+export type QuotationStatus = 'Draft' | 'Sent' | 'Negotiation' | 'Accepted' | 'Customer_Accepted' | 'Converted_To_Project' | 'Declined' | 'Expired' | 'Under_Review' | (string & {});
 
 export interface Quotation {
   id: string; // e.g. QT-2026-00001
   quotationNumber: string; // Current version code, e.g. QT-2026-00001-V1
   leadId: string;
   leadName: string;
+  customerId?: string;
+  customerName?: string;
+  acceptedAt?: string;
+  auditorPhone?: string;
+  auditorNotes?: string;
   customerPhone: string;
   customerAddress: string;
   systemCapacityKw: number;
@@ -452,10 +473,8 @@ export interface Quotation {
   advancePaymentVerifiedBy?: string;
   advancePaymentVerifiedAt?: string;
   advancePaymentReceived?: boolean;
-  advancePaymentAmount?: number;
   advancePaymentDate?: string;
   advancePaymentMode?: string;
-  advancePaymentRef?: string;
   materialsPurchasedConfirmed?: boolean;
   materialsPurchasedAt?: string;
   materialsPurchasedBy?: string;
@@ -529,12 +548,6 @@ export interface Project {
   lastModifiedRole?: string;
   lastModifiedAt?: string;
   editHistory?: EditHistoryEntry[];
-  advancePaymentScreenshot?: string;
-  advancePaymentAmount?: number;
-  advancePaymentRef?: string;
-  advancePaymentVerified?: boolean;
-  advancePaymentVerifiedBy?: string;
-  advancePaymentVerifiedAt?: string;
 
   // Advance Payment Gate & Accounts Integration
   advancePaymentReceived?: boolean;
@@ -581,7 +594,7 @@ export interface Project {
     plantWithCustomer?: string;
   };
   commissioningVideoUrl?: string;
-  pmClearanceStatus?: 'Pending' | 'Approved';
+  pmClearanceStatus?: 'Pending' | 'Approved' | 'Cleared' | (string & {});
   pmClearedBy?: string;
   pmClearedAt?: string;
 
@@ -634,9 +647,10 @@ export interface Invoice {
   dueDate: string;
   items: {
     description: string;
-    hsnCode: string; // e.g. 8471, 8541 (Solar PV)
+    hsnCode?: string; // e.g. 8471, 8541 (Solar PV)
     quantity: number;
-    rate: number;
+    rate?: number;
+    unitRate?: number;
     amount: number;
   }[];
   subtotal: number;
@@ -648,7 +662,6 @@ export interface Invoice {
   balanceDue: number;
   status: 'Draft' | 'Sent' | 'Partially Paid' | 'Paid' | 'Overdue';
   notes?: string;
-  sentToAuditor?: boolean;
   sentToAuditor?: boolean;
   sentToAuditorAt?: string;
   auditorPhone?: string;
@@ -664,7 +677,7 @@ export interface Payment {
   customerName: string;
   amount: number;
   paymentDate: string;
-  paymentMode: 'NEFT/RTGS' | 'UPI' | 'Cheque' | 'Net Banking';
+  paymentMode: 'NEFT/RTGS' | 'UPI' | 'Cheque' | 'Net Banking' | 'Cash' | string;
   transactionReference: string;
   bankName?: string;
   status: 'Verified' | 'Pending Verification';
@@ -680,6 +693,10 @@ export interface Payment {
   verifiedBy?: string;
   verifiedAt?: string;
   verificationNotes?: string;
+  notes?: string;
+  entityType?: string;
+  entityId?: string;
+  entityName?: string;
 }
 
 export interface Warranty {
@@ -705,7 +722,7 @@ export interface AmcContract {
   customerAddress: string;
   projectId: string;
   capacityKw: number;
-  planName: 'Basic Solar Care' | 'Gold Annual Care' | 'Commercial Max Performance';
+  planName: 'Basic Solar Care' | 'Gold Annual Care' | 'Commercial Max Performance' | string;
   annualPrice: number;
   visitsPerYear: number;
   completedVisits: number;
@@ -725,9 +742,11 @@ export interface ServiceTicket {
   projectId?: string;
   issueCategory: 'Inverter Error / Offline' | 'Low Generation' | 'Panel Cleaning Required' | 'Cable / Tripping Issue' | 'Net Meter Display Error' | 'Structure Rust / Loose Clamp';
   severity: Priority;
+  priority?: Priority | string;
   status: TicketStatus;
   technicianId?: string;
   technicianName?: string;
+  assignedTechnicianName?: string;
   description: string;
   createdAt: string;
   scheduledDate?: string;
@@ -774,20 +793,20 @@ export interface AutomationLog {
 
 export interface ActivityTimelineItem {
   id: string;
-  entityType: 'Lead' | 'Customer' | 'Project' | 'Quotation' | 'Ticket';
+  entityType: 'Lead' | 'Customer' | 'Project' | 'Quotation' | 'Ticket' | 'Invoice' | 'Payment' | (string & {});
   entityId: string;
   timestamp: string;
   title: string;
   description: string;
   performedBy: string; // e.g. "Automation Engine" or employee name
-  iconType: 'lead' | 'survey' | 'quote' | 'project' | 'payment' | 'install' | 'warranty' | 'service' | 'alert';
+  iconType: 'lead' | 'survey' | 'quote' | 'project' | 'payment' | 'install' | 'warranty' | 'service' | 'alert' | 'invoice' | 'system' | (string & {});
 }
 
 export interface SystemNotification {
   id: string;
   title: string;
   message: string;
-  type: 'Task' | 'Lead' | 'Sales' | 'Payment' | 'Project' | 'Installation' | 'Inventory' | 'Service' | 'Warranty' | 'AMC';
+  type: 'Task' | 'Lead' | 'Sales' | 'Payment' | 'Project' | 'Installation' | 'Inventory' | 'Service' | 'Warranty' | 'AMC' | 'Quotation' | 'Invoice' | 'Customer' | (string & {});
   timestamp: string;
   isRead: boolean;
   targetId?: string;
@@ -837,6 +856,7 @@ export interface ExpenseItem {
   vendorName: string;
   paymentMode: 'Bank Transfer' | 'Company Card' | 'Petty Cash' | 'UPI';
   paymentDate: string;
+  date?: string;
   status: 'Paid' | 'Pending Approval' | 'Reimbursed';
   receiptReference?: string;
   invoiceDocument?: string;

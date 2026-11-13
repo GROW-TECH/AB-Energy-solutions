@@ -7,10 +7,12 @@ const JWT_SECRET = process.env.JWT_SECRET || 'ab_energy_solutions_default_dev_se
 
 export interface UserTokenPayload {
   userId: string;
+  id?: string;
   username: string;
   email: string;
   name: string;
   role: string;
+  phone?: string;
   employeeId?: string;
   customerId?: string;
   iat?: number;

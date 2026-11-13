@@ -180,10 +180,10 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({ onBackTo
     portal_application_no: `PMS-TN-2026-${(currentCustomer?.id || '98124').replace(/\D/g, '').slice(-5) || '98124'}`,
     application_submission_date: '2026-10-15',
     current_stage: customerProjects[0]?.stage === 'Completed' ? 7 :
-      customerProjects[0]?.stage === 'Net Metering & Handover' ? 6 :
-      customerProjects[0]?.stage === 'Testing & Commissioning' ? 5 :
-      customerProjects[0]?.stage === 'Installation' ? 4 :
-      customerProjects[0]?.stage === 'Material Procurement' ? 3 : 2,
+      (customerProjects[0]?.stage === 'Net Metering' || (customerProjects[0]?.stage as any) === 'Net Metering & Handover') ? 6 :
+      (customerProjects[0]?.stage === 'Commissioning' || customerProjects[0]?.stage === 'Testing' || (customerProjects[0]?.stage as any) === 'Testing & Commissioning') ? 5 :
+      (customerProjects[0]?.stage === 'Installation Completed' || customerProjects[0]?.stage === 'Installation In Progress' || (customerProjects[0]?.stage as any) === 'Installation') ? 4 :
+      (customerProjects[0]?.stage === 'Material Arrived' || customerProjects[0]?.stage === 'Material Ready' || (customerProjects[0]?.stage as any) === 'Material Procurement') ? 3 : 2,
     current_stage_name: 'Work Completion (WCR) Uploaded',
     stage_status: 'in_progress',
     days_in_current_stage: 3,
