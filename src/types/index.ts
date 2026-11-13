@@ -423,6 +423,8 @@ export interface Quotation {
   discountAmount?: number;
   discountApprovedBy?: string;
   subsidyAmount?: number;
+  centralSubsidyAmount?: number;
+  stateSubsidyAmount?: number;
   subsidyEligible?: boolean;
   indicativeNetCustomerCost?: number;
   taxableAmount?: number;
@@ -626,6 +628,7 @@ export interface Invoice {
   customerId: string;
   customerName: string;
   customerPhone: string;
+  customerAddress?: string;
   customerGstin?: string;
   issueDate: string;
   dueDate: string;
@@ -644,6 +647,8 @@ export interface Invoice {
   paidAmount: number;
   balanceDue: number;
   status: 'Draft' | 'Sent' | 'Partially Paid' | 'Paid' | 'Overdue';
+  notes?: string;
+  sentToAuditor?: boolean;
   sentToAuditor?: boolean;
   sentToAuditorAt?: string;
   auditorPhone?: string;
@@ -860,6 +865,15 @@ export interface Supplier {
   leadTimeDays: number;
   activeOrdersCount: number;
   isPreferred: boolean;
+  documents?: Array<{
+    id: string;
+    name: string;
+    fileType: string;
+    url: string;
+    uploadedAt: string;
+    size?: string;
+  }>;
+  primaryDocUrl?: string;
 }
 
 export interface PurchaseOrderItem {

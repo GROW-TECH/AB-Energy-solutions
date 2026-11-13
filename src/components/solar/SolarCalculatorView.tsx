@@ -50,12 +50,12 @@ export const SolarCalculatorView: React.FC<SolarCalculatorViewProps> = ({
   const grossCostPerWatt = recommendedKw <= 3 ? 65 : recommendedKw <= 10 ? 58 : 50;
   const grossPlantCost = recommendedKw * 1000 * grossCostPerWatt;
 
-  // PM Surya Ghar Muft Bijli Yojana Subsidy (Govt of India standard)
+  // PM Surya Ghar Central + Tamil Nadu State Top-Up Subsidy (G.O. Ms No. 102)
   let subsidy = 0;
   if (customerType === 'Residential') {
-    if (recommendedKw === 1) subsidy = 30000;
-    else if (recommendedKw === 2) subsidy = 60000;
-    else if (recommendedKw >= 3) subsidy = 78000; // max cap
+    if (recommendedKw <= 1) subsidy = 35000; // Central ₹30,000 + TN State ₹5,000
+    else if (recommendedKw === 2) subsidy = 70000; // Central ₹60,000 + TN State ₹10,000
+    else if (recommendedKw >= 3) subsidy = 100000; // Central ₹78,000 + TN State ₹22,000 max cap
   }
 
   const netInvestmentCost = Math.max(0, grossPlantCost - subsidy);
@@ -85,8 +85,8 @@ export const SolarCalculatorView: React.FC<SolarCalculatorViewProps> = ({
   const handleInstantQuote = () => {
     createQuotation({
       leadName: 'Solar Calculation Prospect',
-      customerPhone: '+91 98450-XXXXX',
-      customerAddress: 'Site Roof, Bengaluru',
+      customerPhone: '+91 95664-XXXXX',
+      customerAddress: 'Site Roof, Salem, Tamil Nadu',
       systemCapacityKw: recommendedKw,
     });
     setQuoteCreatedAlert(true);
@@ -201,7 +201,7 @@ export const SolarCalculatorView: React.FC<SolarCalculatorViewProps> = ({
             />
             <div className="flex justify-between text-[10px] text-slate-400 mt-0.5">
               <span>₹4.0 (Subsidized)</span>
-              <span>₹8.0 (BESCOM Avg)</span>
+              <span>₹8.5 (TANGEDCO Avg)</span>
               <span>₹15.0 (Commercial Peak)</span>
             </div>
           </div>

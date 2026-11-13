@@ -98,8 +98,10 @@ export interface QuotationCalculationResult {
   finalContractAmount: number; // Legally payable under contract (taxable + tax)
   amountInWords: string;
   
-  // Government Subsidy (PM Surya Ghar: Muft Bijli Yojana)
+  // Government Subsidy (PM Surya Ghar: Muft Bijli Yojana & Tamil Nadu G.O. Ms No. 102)
   subsidyEligible: boolean;
+  centralSubsidyAmount: number;
+  stateSubsidyAmount: number;
   subsidyAmount: number;
   subsidyNotes: string;
   indicativeNetCustomerCost: number; // Post-DBT subsidy indicative cost
@@ -132,9 +134,12 @@ export const QUOTATION_CONFIG = {
   DISCOUNT_APPROVAL_THRESHOLD_INR: 15000,
   MAX_DISCOUNT_PERCENT: 15, // max 15% discount allowed
   
-  // Default Company Location (Karnataka / Tamil Nadu)
-  DEFAULT_SUPPLIER_STATE: 'Karnataka',
-  DEFAULT_SUPPLIER_GSTIN: '29AABCS1429B1Z8',
+  // Default Company Location (Tamil Nadu)
+  DEFAULT_SUPPLIER_STATE: 'Tamil Nadu',
+  DEFAULT_SUPPLIER_GSTIN: '33FSQPA3244H1ZU',
+  DEFAULT_SUPPLIER_ADDRESS: 'No 13, Thammampatty Main Road, Maheswari Theatre Opposite Street, Vazhapadi, Salem, Tamil Nadu - 636115',
+  DEFAULT_SUPPLIER_PHONE: '+91 95664 99678',
+  DEFAULT_SUPPLIER_EMAIL: 'abenergysolutiontn@gmail.com',
   
   // Client-Configured Statutory Defaults:
   // - Solar Panels & Inverters: 5% GST
@@ -163,11 +168,22 @@ export const QUOTATION_CONFIG = {
   SPECIFIC_YIELD_KWH_PER_KWP: 1450,
   DEFAULT_TARIFF_INR: 8.20,
   
-  // PM Surya Ghar Muft Bijli Yojana Central Subsidy Slabs (Residential Only)
+  // PM Surya Ghar Muft Bijli Yojana Central Subsidy + Tamil Nadu State Top-Up (G.O. Ms No. 102)
   RESIDENTIAL_SUBSIDY: {
-    SLAB_1KW_MAX: 30000,
-    SLAB_2KW_MAX: 60000,
-    SLAB_3KW_AND_ABOVE_MAX: 78000,
+    // 1 kW: Central ₹30,000 + TN State ₹5,000 = ₹35,000
+    SLAB_1KW_CENTRAL: 30000,
+    SLAB_1KW_TN_TOPUP: 5000,
+    SLAB_1KW_MAX: 35000,
+
+    // 2 kW: Central ₹60,000 + TN State ₹10,000 = ₹70,000
+    SLAB_2KW_CENTRAL: 60000,
+    SLAB_2KW_TN_TOPUP: 10000,
+    SLAB_2KW_MAX: 70000,
+
+    // 3 kW and above: Central ₹78,000 + TN State ₹22,000 = ₹1,00,000
+    SLAB_3KW_CENTRAL: 78000,
+    SLAB_3KW_TN_TOPUP: 22000,
+    SLAB_3KW_AND_ABOVE_MAX: 100000,
   },
 };
 
@@ -546,27 +562,37 @@ export function calculateQuotation(input: QuotationCalculationInput): QuotationC
   const effectiveGstRate = taxableAmount > 0 ? Number(((totalGstAmount / taxableAmount) * 100).toFixed(2)) : 0;
   const amountInWords = convertNumberToWords(finalContractAmount);
 
-  // 9. Government Subsidy Calculation (PM Surya Ghar: Muft Bijli Yojana)
+  // 9. Government Subsidy Calculation (PM Surya Ghar + Tamil Nadu G.O. Ms No. 102)
   let subsidyEligible = false;
+  let centralSubsidyAmount = 0;
+  let stateSubsidyAmount = 0;
   let subsidyAmount = 0;
   let subsidyNotes = '';
 
   if (category === 'Residential') {
     subsidyEligible = true;
     if (capacityKw <= 1) {
+      centralSubsidyAmount = QUOTATION_CONFIG.RESIDENTIAL_SUBSIDY.SLAB_1KW_CENTRAL;
+      stateSubsidyAmount = QUOTATION_CONFIG.RESIDENTIAL_SUBSIDY.SLAB_1KW_TN_TOPUP;
       subsidyAmount = QUOTATION_CONFIG.RESIDENTIAL_SUBSIDY.SLAB_1KW_MAX;
-      subsidyNotes = 'Govt. Subsidy: ₹30,000 for 1 kW residential rooftop';
+      subsidyNotes = 'Combined Subsidy: ₹35,000 (Central PM Surya Ghar ₹30,000 + TN State Top-Up ₹5,000 under G.O. 102)';
     } else if (capacityKw <= 2) {
+      centralSubsidyAmount = QUOTATION_CONFIG.RESIDENTIAL_SUBSIDY.SLAB_2KW_CENTRAL;
+      stateSubsidyAmount = QUOTATION_CONFIG.RESIDENTIAL_SUBSIDY.SLAB_2KW_TN_TOPUP;
       subsidyAmount = QUOTATION_CONFIG.RESIDENTIAL_SUBSIDY.SLAB_2KW_MAX;
-      subsidyNotes = 'Govt. Subsidy: ₹60,000 for 2 kW residential rooftop';
+      subsidyNotes = 'Combined Subsidy: ₹70,000 (Central PM Surya Ghar ₹60,000 + TN State Top-Up ₹10,000 under G.O. 102)';
     } else {
+      centralSubsidyAmount = QUOTATION_CONFIG.RESIDENTIAL_SUBSIDY.SLAB_3KW_CENTRAL;
+      stateSubsidyAmount = QUOTATION_CONFIG.RESIDENTIAL_SUBSIDY.SLAB_3KW_TN_TOPUP;
       subsidyAmount = QUOTATION_CONFIG.RESIDENTIAL_SUBSIDY.SLAB_3KW_AND_ABOVE_MAX;
-      subsidyNotes = 'Govt. Subsidy: ₹78,000 maximum capped central subsidy for ≥ 3 kW';
+      subsidyNotes = 'Combined Subsidy: ₹1,00,000 Maximum Cap (Central ₹78,000 + TN State Top-Up ₹22,000 under G.O. 102)';
     }
   } else {
     subsidyEligible = false;
+    centralSubsidyAmount = 0;
+    stateSubsidyAmount = 0;
     subsidyAmount = 0;
-    subsidyNotes = 'Commercial / Industrial / Institutional installations are not eligible for residential central DBT subsidy.';
+    subsidyNotes = 'Commercial / Industrial / Institutional installations are not eligible for residential central DBT subsidy (40% accelerated depreciation applies).';
   }
 
   // Indicative net customer investment (Post Direct Benefit Transfer)
@@ -607,6 +633,8 @@ export function calculateQuotation(input: QuotationCalculationInput): QuotationC
     finalContractAmount,
     amountInWords,
     subsidyEligible,
+    centralSubsidyAmount,
+    stateSubsidyAmount,
     subsidyAmount,
     subsidyNotes,
     indicativeNetCustomerCost,
@@ -637,7 +665,7 @@ export function calculateQuotation(input: QuotationCalculationInput): QuotationC
       '50% upon material dispatch against warehouse delivery challan.',
       '10% upon successful DISCOM net-metering synchronization and commissioning sign-off.',
       'Quotation valid for 14 calendar days from date of issuance.',
-      'Central Govt. subsidy support is credited directly to the customer bank account post DISCOM inspection via DBT.',
+      'Combined Govt. subsidy support (PM Surya Ghar Central + Tamil Nadu State Top-Up under G.O. Ms No. 102 up to ₹1,00,000) is credited directly to customer bank account post DISCOM inspection via DBT.',
       'Standard 25-Year linear performance warranty on Tier-1 ALMM solar panels.',
     ],
     warranties: {

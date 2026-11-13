@@ -4,11 +4,12 @@ import {
   Calendar, FileText, CheckCircle2, ArrowRight, Printer, 
   Download, ShieldCheck, Clock, AlertCircle, ExternalLink, 
   Layers, Truck, Package, Check, Building2, User, Eye,
-  ShoppingCart, RefreshCw, X
+  ShoppingCart, RefreshCw, X, Send
 } from 'lucide-react';
 import { useCrm } from '../../context/CrmContext';
 import { Payment, Quotation, Project, Invoice } from '../../types';
 import { getApiUrl } from '../../utils/apiUrl';
+import { convertNumberToWords } from '../../utils/quotationEngine';
 
 interface AdvancePaymentsViewProps {
   onNavigateToTab?: (tab: string) => void;
@@ -24,10 +25,86 @@ export const AdvancePaymentsView: React.FC<AdvancePaymentsViewProps> = ({
 
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedInvoiceForPrint, setSelectedInvoiceForPrint] = useState<Invoice | null>(null);
+  const [selectedReceiptForPrint, setSelectedReceiptForPrint] = useState<any | null>(null);
+  const [receiptViewTab, setReceiptViewTab] = useState<'receipt' | 'tax_invoice'>('receipt');
   const [expandedMaterialId, setExpandedMaterialId] = useState<string | null>(null);
   const [selectedScreenshotUrl, setSelectedScreenshotUrl] = useState<string | null>(null);
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
   const [auditorSendingAdvId, setAuditorSendingAdvId] = useState<string | null>(null);
+
+  const handleDirectPrint = () => {
+    const elementId = receiptViewTab === 'receipt' ? 'printable-payment-receipt-body' : 'printable-advance-tax-invoice';
+    const content = document.getElementById(elementId);
+    if (!content) {
+      window.print();
+      return;
+    }
+
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentWindow?.document;
+    if (!doc) {
+      window.print();
+      return;
+    }
+
+    doc.open();
+    doc.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>${receiptViewTab === 'receipt' ? 'Payment-In Receipt' : 'Tax Invoice'} - AB Energy Solutions</title>
+          <style>
+            @page { size: A4 portrait; margin: 15mm 20mm; }
+            * { box-sizing: border-box; }
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #0f172a; margin: 0; padding: 25px; background: #fff; }
+            .header-wrap { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+            .company-name { font-size: 18px; font-weight: 900; color: #000; letter-spacing: 0.5px; margin-bottom: 4px; }
+            .company-meta { font-size: 11px; color: #334155; line-height: 1.45; }
+            .logo-wrap img { height: 65px; max-width: 180px; object-fit: contain; }
+            .sep-line { border-top: 1.5px solid #cbd5e1; margin: 14px 0; }
+            .receipt-title { text-align: center; font-size: 20px; font-weight: 900; color: #334155; margin: 12px 0; letter-spacing: 0.5px; }
+            .party-meta-grid { display: flex; justify-content: space-between; font-size: 12px; margin: 20px 0 15px; }
+            .party-label { font-size: 11px; font-weight: 700; color: #64748b; margin-bottom: 4px; text-transform: uppercase; }
+            .party-name { font-size: 15px; font-weight: 900; color: #000; }
+            .meta-item { margin-bottom: 4px; }
+            .payment-table-head { display: flex; justify-content: space-between; font-size: 11px; font-weight: 800; color: #64748b; text-transform: uppercase; border-top: 1px solid #cbd5e1; padding-top: 12px; }
+            .payment-table-body { display: flex; justify-content: space-between; align-items: flex-start; font-size: 13px; margin: 8px 0 16px; }
+            .desc-main { font-weight: 800; color: #000; font-size: 13px; }
+            .desc-sub { font-size: 11px; color: #64748b; margin-top: 2px; }
+            .amount-bold { font-size: 18px; font-weight: 900; color: #000; font-family: monospace; }
+            .mode-row { font-size: 11px; color: #334155; font-weight: 600; margin-top: 4px; }
+            .words-box { margin-top: 25px; font-size: 12px; border-top: 1px solid #e2e8f0; padding-top: 12px; }
+            .words-title { font-size: 11px; font-weight: 700; color: #64748b; margin-bottom: 2px; }
+            .words-val { font-size: 13px; font-weight: 700; color: #000; }
+            .sign-container { margin-top: 60px; display: flex; justify-content: flex-end; }
+            .sign-block { text-align: center; width: 220px; }
+            .sign-for { font-size: 12px; font-weight: 800; color: #000; margin-bottom: 30px; }
+            .sign-title { font-size: 11px; color: #64748b; font-weight: 600; border-top: 1px dashed #94a3b8; padding-top: 6px; }
+          </style>
+        </head>
+        <body>
+          ${content.innerHTML}
+        </body>
+      </html>
+    `);
+    doc.close();
+
+    setTimeout(() => {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+      setTimeout(() => {
+        document.body.removeChild(iframe);
+      }, 2500);
+    }, 350);
+  };
 
   const handleSendAdvanceToAuditor = async (rec: any) => {
     const invId = rec.linkedInvoice?.id || `INV-${rec.quote.id}`;
@@ -177,7 +254,23 @@ export const AdvancePaymentsView: React.FC<AdvancePaymentsViewProps> = ({
       ]
     };
 
+    const receiptObj = {
+      receiptNumber: rec.paymentNumber || `RCPT-${(rec.paymentId || '0001671').replace(/\D/g, '').slice(-6) || '0001671'}`,
+      date: rec.paymentDate,
+      customerName: rec.quote.leadName || rec.linkedProject?.customerName || 'Valued Customer',
+      customerPhone: rec.quote.customerPhone,
+      customerAddress: rec.quote.customerAddress,
+      amount: rec.advanceAmount,
+      amountInWords: convertNumberToWords(rec.advanceAmount),
+      paymentMode: rec.paymentMode || 'Cash',
+      transactionRef: rec.paymentRef,
+      capacityKw: rec.quote.systemCapacityKw || 5,
+      invoice: invoiceToPrint
+    };
+
+    setSelectedReceiptForPrint(receiptObj);
     setSelectedInvoiceForPrint(invoiceToPrint);
+    setReceiptViewTab('receipt');
   };
 
   return (
@@ -552,29 +645,56 @@ export const AdvancePaymentsView: React.FC<AdvancePaymentsViewProps> = ({
         )}
       </div>
 
-      {/* Official A4 GST Tax Invoice / Advance Receipt Modal (Matches Image 4) */}
-      {selectedInvoiceForPrint && (
-        <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto print:p-0 print:static print:bg-transparent print:backdrop-blur-none print-modal-overlay">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[92vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-150 print:max-w-full print:w-full print:max-h-none print:shadow-none print:border-none print:rounded-none print:overflow-visible print-modal-wrapper">
+      {/* Official A4 Payment-In Receipt & Tax Invoice Modal (Matches Image 2) */}
+      {(selectedReceiptForPrint || selectedInvoiceForPrint) && (
+        <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto print:p-0 print:static print:bg-transparent print:backdrop-blur-none print-modal-overlay">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[94vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-150 print:max-w-full print:w-full print:max-h-none print:shadow-none print:border-none print:rounded-none print:overflow-visible print-modal-wrapper">
             {/* Modal Controls - Hidden during Print */}
-            <div className="p-4 bg-slate-900 text-white flex items-center justify-between shrink-0 no-print print:hidden print-modal-header">
+            <div className="p-4 bg-slate-900 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0 no-print print:hidden print-modal-header">
               <div className="flex items-center gap-2">
                 <Printer className="w-4 h-4 text-emerald-400" />
-                <span className="font-bold text-sm">Official Tax Invoice &amp; Customer Advance Receipt</span>
+                <span className="font-bold text-sm">Customer Advance Payment-In Receipt</span>
                 <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono text-xs border border-emerald-500/30">
-                  {selectedInvoiceForPrint.invoiceNumber}
+                  {selectedReceiptForPrint?.receiptNumber || selectedInvoiceForPrint?.invoiceNumber}
                 </span>
               </div>
+
               <div className="flex items-center gap-2">
+                <div className="flex bg-slate-800 p-0.5 rounded-lg text-xs font-semibold">
+                  <button
+                    type="button"
+                    onClick={() => setReceiptViewTab('receipt')}
+                    className={`px-3 py-1 rounded-md transition-colors ${
+                      receiptViewTab === 'receipt' ? 'bg-emerald-600 text-white font-bold' : 'text-slate-300 hover:text-white'
+                    }`}
+                  >
+                    Payment-In Receipt
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setReceiptViewTab('tax_invoice')}
+                    className={`px-3 py-1 rounded-md transition-colors ${
+                      receiptViewTab === 'tax_invoice' ? 'bg-emerald-600 text-white font-bold' : 'text-slate-300 hover:text-white'
+                    }`}
+                  >
+                    GST Tax Invoice
+                  </button>
+                </div>
+
                 <button
-                  onClick={() => window.print()}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                  type="button"
+                  onClick={handleDirectPrint}
+                  className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
                 >
                   <Printer className="w-3.5 h-3.5" />
                   <span>Print Document</span>
                 </button>
                 <button
-                  onClick={() => setSelectedInvoiceForPrint(null)}
+                  type="button"
+                  onClick={() => {
+                    setSelectedInvoiceForPrint(null);
+                    setSelectedReceiptForPrint(null);
+                  }}
                   className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 cursor-pointer"
                 >
                   <X className="w-5 h-5" />
@@ -582,149 +702,288 @@ export const AdvancePaymentsView: React.FC<AdvancePaymentsViewProps> = ({
               </div>
             </div>
 
-            {/* Printable A4 Letterhead Body */}
-            <div id="printable-advance-tax-invoice" className="p-8 overflow-y-auto flex-1 space-y-6 text-xs text-slate-800 bg-white print:p-0 print:overflow-visible print:max-h-none print:h-auto print:w-full">
-              {/* Header Letterhead */}
-              <div className="flex items-start justify-between border-b-2 border-slate-900 pb-6">
-                <div>
-                  <div className="flex items-center gap-4 mb-2">
+            {/* TAB 1: OFFICIAL PAYMENT-IN RECEIPT (MATCHES USER ATTACHMENT IMAGE 2 EXACTLY) */}
+            {receiptViewTab === 'receipt' && selectedReceiptForPrint && (
+              <div id="printable-payment-receipt-body" className="p-8 sm:p-12 overflow-y-auto flex-1 space-y-6 text-xs text-slate-800 bg-white">
+                {/* Header Grid: Company Info Left, Official Logo Right */}
+                <div className="flex items-start justify-between gap-4">
+                  <div className="space-y-0.5">
+                    <h2 className="font-black text-slate-950 text-base sm:text-lg tracking-tight uppercase">
+                      AB ENERGY SOLUTIONS
+                    </h2>
+                    <div className="text-[11px] text-slate-700 leading-snug">
+                      No 13, Thammampatty Main Road, Maheswari Theatre Opposite Street,<br />
+                      Vazhapadi, Salem, Tamil Nadu - 636115
+                    </div>
+                    <div className="text-[11px] text-slate-700 pt-1 space-y-0.5">
+                      <div>Phone no.: <span className="font-mono font-medium">9566499678</span></div>
+                      <div>Email: <span className="font-mono">abenergysolutiontn@gmail.com</span></div>
+                      <div>GSTIN: <span className="font-mono font-bold text-slate-900">33FSQPA3244H1ZU</span></div>
+                      <div>State: <span className="font-medium">33-Tamil Nadu</span></div>
+                    </div>
+                  </div>
+
+                  <div className="shrink-0 text-right">
                     <img
                       src={getApiUrl('/logo.png')}
                       onError={(e: any) => { e.currentTarget.src = getApiUrl('/logo.jpg'); }}
                       alt="AB Energy Solutions"
-                      className="h-16 w-auto max-w-[200px] object-contain"
+                      className="h-16 w-auto object-contain"
                     />
-                    <div>
-                      <h2 className="font-black text-slate-900 text-xl tracking-tight uppercase leading-none">
-                        AB ENERGY SOLUTIONS
-                      </h2>
-                      <p className="text-xs text-slate-600 font-semibold mt-1">
-                        Certified Solar EPC &amp; Grid-Tied Renewable Power Systems
-                      </p>
+                  </div>
+                </div>
+
+                {/* Gray Separator Line */}
+                <div className="border-t border-slate-300 my-4" />
+
+                {/* Centered Document Title */}
+                <div className="text-center py-1">
+                  <h3 className="text-lg sm:text-xl font-extrabold text-slate-600 tracking-wide uppercase">
+                    Payment-In
+                  </h3>
+                </div>
+
+                {/* Received From Left & Receipt Details Right */}
+                <div className="flex flex-col sm:flex-row justify-between gap-6 pt-2">
+                  <div className="space-y-1">
+                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+                      Received From
+                    </span>
+                    <h4 className="font-black text-slate-900 text-sm sm:text-base uppercase tracking-tight">
+                      {selectedReceiptForPrint.customerName}
+                    </h4>
+                    {selectedReceiptForPrint.customerPhone && (
+                      <div className="text-[11px] text-slate-600 font-mono">
+                        Phone: {selectedReceiptForPrint.customerPhone}
+                      </div>
+                    )}
+                    {selectedReceiptForPrint.customerAddress && (
+                      <div className="text-[11px] text-slate-500 max-w-xs">
+                        {selectedReceiptForPrint.customerAddress}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="text-left sm:text-right space-y-1 font-mono">
+                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+                      Receipt Details
+                    </span>
+                    <div className="text-xs text-slate-800">
+                      Receipt No.: <strong className="text-slate-900 font-bold">{selectedReceiptForPrint.receiptNumber}</strong>
+                    </div>
+                    <div className="text-xs text-slate-800">
+                      Date: <strong className="text-slate-900 font-bold">{selectedReceiptForPrint.date}</strong>
                     </div>
                   </div>
-                  <div className="text-[11px] text-slate-500 space-y-0.5 mt-2">
-                    <div>GSTIN: <span className="font-mono font-bold text-slate-800">29AABCS1429B1Z8</span> &bull; Indiranagar, Bengaluru, KA 560038</div>
-                    <div>Email: support@abenergy.in &bull; Contact: +91 98450 00000</div>
+                </div>
+
+                {/* Payment Breakdown Table */}
+                <div className="pt-4 border-t border-slate-300">
+                  <div className="flex justify-between text-xs font-bold text-slate-600 pb-2 border-b border-slate-200 uppercase tracking-wider">
+                    <span>Description</span>
+                    <span>Received</span>
+                  </div>
+
+                  <div className="py-4 space-y-3">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <div className="font-black text-slate-900 text-sm tracking-wide">
+                          ADVANCE
+                        </div>
+                        <div className="text-[11px] text-slate-500 mt-0.5">
+                          90% Mobilization Advance for {selectedReceiptForPrint.capacityKw} kW Solar Rooftop Installation
+                        </div>
+                      </div>
+                      <div className="font-mono font-black text-slate-950 text-base sm:text-lg">
+                        ₹ {Number(selectedReceiptForPrint.amount).toLocaleString('en-IN')}.00
+                      </div>
+                    </div>
+
+                    <div className="flex justify-between items-center text-xs pt-2 border-t border-slate-100">
+                      <span className="font-semibold text-slate-600">Payment Mode</span>
+                      <span className="font-bold text-slate-900 font-mono">{selectedReceiptForPrint.paymentMode}</span>
+                    </div>
+
+                    {selectedReceiptForPrint.transactionRef && (
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="font-semibold text-slate-500">Transaction Ref / UTR</span>
+                        <span className="font-mono text-slate-700">{selectedReceiptForPrint.transactionRef}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Amount In Words Section */}
+                  <div className="border-t border-slate-300 pt-4 mt-2">
+                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                      Amount In Words
+                    </span>
+                    <div className="font-bold text-slate-900 text-xs sm:text-sm">
+                      {selectedReceiptForPrint.amountInWords}
+                    </div>
                   </div>
                 </div>
 
-                <div className="text-right">
-                  <span className="text-xs font-bold text-slate-400 uppercase tracking-widest block">TAX INVOICE</span>
-                  <span className="text-lg font-mono font-black text-slate-900 block mt-0.5">
-                    {selectedInvoiceForPrint.invoiceNumber}
-                  </span>
-                  <div className="text-[11px] text-slate-500 space-y-0.5 mt-1 font-mono">
-                    <div>Issue Date: {selectedInvoiceForPrint.issueDate}</div>
-                    <div>Payment Date: {selectedInvoiceForPrint.dueDate}</div>
+                {/* Authorized Signatory Block (Matching Image 2) */}
+                <div className="pt-16 sm:pt-20 flex justify-end">
+                  <div className="text-center w-56 space-y-2">
+                    <div className="text-xs font-bold text-slate-800">
+                      For: AB ENERGY SOLUTIONS
+                    </div>
+                    <div className="h-10 border-b border-dashed border-slate-400 mx-auto w-40" />
+                    <div className="text-xs font-bold text-slate-900">
+                      Authorized Signatory
+                    </div>
                   </div>
                 </div>
               </div>
+            )}
 
-              {/* Billed To / Client Details Grid */}
-              <div className="grid grid-cols-2 gap-6 p-4 bg-slate-50 border border-slate-200 rounded-xl">
-                <div>
-                  <span className="text-[10px] text-slate-400 font-bold uppercase block mb-1">Billed To (Client Details)</span>
-                  <h4 className="font-black text-slate-900 text-sm">{selectedInvoiceForPrint.customerName}</h4>
-                  <div className="text-slate-600 mt-1 space-y-0.5">
-                    <div>Contact: {selectedInvoiceForPrint.customerPhone || 'N/A'}</div>
-                    {selectedInvoiceForPrint.customerGstin && <div>Client GSTIN: {selectedInvoiceForPrint.customerGstin}</div>}
+            {/* TAB 2: DETAILED STATUTORY GST TAX INVOICE */}
+            {receiptViewTab === 'tax_invoice' && selectedInvoiceForPrint && (
+              <div id="printable-advance-tax-invoice" className="p-8 overflow-y-auto flex-1 space-y-6 text-xs text-slate-800 bg-white">
+                {/* Header Letterhead */}
+                <div className="flex items-start justify-between border-b-2 border-slate-900 pb-6">
+                  <div>
+                    <div className="flex items-center gap-4 mb-2">
+                      <img
+                        src={getApiUrl('/logo.png')}
+                        onError={(e: any) => { e.currentTarget.src = getApiUrl('/logo.jpg'); }}
+                        alt="AB Energy Solutions"
+                        className="h-16 w-auto max-w-[200px] object-contain"
+                      />
+                      <div>
+                        <h2 className="font-black text-slate-900 text-xl tracking-tight uppercase leading-none">
+                          AB ENERGY SOLUTIONS
+                        </h2>
+                        <p className="text-xs text-slate-600 font-semibold mt-1">
+                          Certified Solar EPC &amp; Grid-Tied Renewable Power Systems
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-[11px] text-slate-600 space-y-0.5 mt-2">
+                      <div>No 13, Thammampatty Main Road, Maheswari Theatre Opposite Street, Vazhapadi, Salem, Tamil Nadu - 636115</div>
+                      <div>GSTIN: <span className="font-mono font-bold text-slate-900">33FSQPA3244H1ZU</span> &bull; State: Tamil Nadu (33)</div>
+                      <div>Email: abenergysolutiontn@gmail.com &bull; Contact: +91 95664 99678</div>
+                    </div>
+                  </div>
+
+                  <div className="text-right">
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-widest block">TAX INVOICE</span>
+                    <span className="text-lg font-mono font-black text-slate-900 block mt-0.5">
+                      {selectedInvoiceForPrint.invoiceNumber}
+                    </span>
+                    <div className="text-[11px] text-slate-500 space-y-0.5 mt-1 font-mono">
+                      <div>Issue Date: {selectedInvoiceForPrint.issueDate}</div>
+                      <div>Payment Date: {selectedInvoiceForPrint.dueDate}</div>
+                    </div>
                   </div>
                 </div>
 
-                <div className="text-right">
-                  <span className="text-[10px] text-slate-400 font-bold uppercase block mb-1">EPC Project Details</span>
-                  <div className="font-mono font-bold text-slate-900">
-                    Project Ref: {selectedInvoiceForPrint.projectId || 'PROJECT-SOLAR-01'}
+                {/* Billed To / Client Details Grid */}
+                <div className="grid grid-cols-2 gap-6 p-4 bg-slate-50 border border-slate-200 rounded-xl">
+                  <div>
+                    <span className="text-[10px] text-slate-400 font-bold uppercase block mb-1">Billed To (Client Details)</span>
+                    <h4 className="font-black text-slate-900 text-sm">{selectedInvoiceForPrint.customerName}</h4>
+                    <div className="text-slate-600 mt-1 space-y-0.5">
+                      <div>Contact: {selectedInvoiceForPrint.customerPhone || 'N/A'}</div>
+                      {selectedInvoiceForPrint.customerGstin && <div>Client GSTIN: {selectedInvoiceForPrint.customerGstin}</div>}
+                    </div>
                   </div>
-                  <div className="text-slate-500 text-[11px] mt-1 space-y-0.5">
-                    <div>SAC Code: <span className="font-mono font-bold">995465</span> (Solar Turnkey EPC Contract)</div>
-                    <div>Reverse Charge: No &bull; Place of Supply: Tamil Nadu (33)</div>
+
+                  <div className="text-right">
+                    <span className="text-[10px] text-slate-400 font-bold uppercase block mb-1">EPC Project Details</span>
+                    <div className="font-mono font-bold text-slate-900">
+                      Project Ref: {selectedInvoiceForPrint.projectId || 'PROJECT-SOLAR-01'}
+                    </div>
+                    <div className="text-slate-500 text-[11px] mt-1 space-y-0.5">
+                      <div>SAC Code: <span className="font-mono font-bold">995465</span> (Solar Turnkey EPC Contract)</div>
+                      <div>Reverse Charge: No &bull; Place of Supply: Tamil Nadu (33)</div>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              {/* Invoice Line Items */}
-              <div className="border border-slate-200 rounded-xl overflow-hidden">
-                <table className="w-full text-left text-xs divide-y divide-slate-200">
-                  <thead className="bg-slate-100 font-bold text-[10px] uppercase text-slate-700">
-                    <tr>
-                      <th className="p-3 w-10 text-center">#</th>
-                      <th className="p-3">Description of Goods / Services</th>
-                      <th className="p-3 text-center">HSN/SAC</th>
-                      <th className="p-3 text-center">Qty</th>
-                      <th className="p-3 text-right">Taxable Rate (₹)</th>
-                      <th className="p-3 text-right">Total Amount (₹)</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 font-medium">
-                    {selectedInvoiceForPrint.items?.map((item, idx) => (
-                      <tr key={idx}>
-                        <td className="p-3 text-center font-mono text-slate-400">{idx + 1}</td>
-                        <td className="p-3">
-                          <div className="font-bold text-slate-900">{item.description}</div>
-                          <div className="text-[10px] text-slate-500">Includes procurement allocation of Tier-1 solar panels, inverter &amp; balance of system.</div>
-                        </td>
-                        <td className="p-3 text-center font-mono">{item.hsnCode || '995465'}</td>
-                        <td className="p-3 text-center font-mono font-bold">{item.quantity}</td>
-                        <td className="p-3 text-right font-mono">₹{item.rate.toLocaleString('en-IN')}</td>
-                        <td className="p-3 text-right font-mono font-bold text-slate-900">₹{item.amount.toLocaleString('en-IN')}</td>
+                {/* Invoice Line Items */}
+                <div className="border border-slate-200 rounded-xl overflow-hidden">
+                  <table className="w-full text-left text-xs divide-y divide-slate-200">
+                    <thead className="bg-slate-100 font-bold text-[10px] uppercase text-slate-700">
+                      <tr>
+                        <th className="p-3 w-10 text-center">#</th>
+                        <th className="p-3">Description of Goods / Services</th>
+                        <th className="p-3 text-center">HSN/SAC</th>
+                        <th className="p-3 text-center">Qty</th>
+                        <th className="p-3 text-right">Taxable Rate (₹)</th>
+                        <th className="p-3 text-right">Total Amount (₹)</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-medium">
+                      {selectedInvoiceForPrint.items?.map((item, idx) => (
+                        <tr key={idx}>
+                          <td className="p-3 text-center font-mono text-slate-400">{idx + 1}</td>
+                          <td className="p-3">
+                            <div className="font-bold text-slate-900">{item.description}</div>
+                            <div className="text-[10px] text-slate-500">Includes procurement allocation of Tier-1 solar panels, inverter &amp; balance of system.</div>
+                          </td>
+                          <td className="p-3 text-center font-mono">{item.hsnCode || '995465'}</td>
+                          <td className="p-3 text-center font-mono font-bold">{item.quantity}</td>
+                          <td className="p-3 text-right font-mono">₹{item.rate.toLocaleString('en-IN')}</td>
+                          <td className="p-3 text-right font-mono font-bold text-slate-900">₹{item.amount.toLocaleString('en-IN')}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Tax Calculations & Totals */}
+                <div className="flex flex-col sm:flex-row justify-between gap-6 pt-2">
+                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-slate-600 max-w-sm">
+                    <span className="font-bold text-slate-900 text-xs block">Bank Payment Details (NEFT / RTGS)</span>
+                    <div className="text-[11px] space-y-0.5 font-mono">
+                      <div>Account Name: <strong className="text-slate-800">AB Energy Solutions</strong></div>
+                      <div>Bank: State Bank of India / HDFC Bank</div>
+                      <div>Branch: Salem Main Branch</div>
+                      <div>GSTIN: 33FSQPA3244H1ZU</div>
+                    </div>
+                  </div>
+
+                  <div className="w-full sm:w-80 space-y-2">
+                    <div className="flex justify-between text-slate-600">
+                      <span>Subtotal (Taxable Amount)</span>
+                      <span className="font-mono font-bold">₹{selectedInvoiceForPrint.subtotal.toLocaleString('en-IN')}</span>
+                    </div>
+                    <div className="flex justify-between text-slate-600">
+                      <span>Composite Solar GST (CGST + SGST @ 13.8%)</span>
+                      <span className="font-mono font-bold">₹{(selectedInvoiceForPrint.cgst + selectedInvoiceForPrint.sgst + selectedInvoiceForPrint.igst).toLocaleString('en-IN')}</span>
+                    </div>
+                    <div className="flex justify-between text-sm font-black text-slate-900 pt-2 border-t border-slate-200">
+                      <span>Total Invoice Amount</span>
+                      <span className="font-mono">₹{selectedInvoiceForPrint.totalAmount.toLocaleString('en-IN')}</span>
+                    </div>
+                    <div className="flex justify-between text-xs font-bold text-emerald-700 pt-1">
+                      <span>Amount Paid to Date (Advance)</span>
+                      <span className="font-mono">- ₹{selectedInvoiceForPrint.paidAmount.toLocaleString('en-IN')}</span>
+                    </div>
+                    <div className="flex justify-between text-sm font-black text-slate-900 pt-2 border-t-2 border-slate-900">
+                      <span>Balance Due</span>
+                      <span className="font-mono text-emerald-700">₹{selectedInvoiceForPrint.balanceDue.toLocaleString('en-IN')} (Nil)</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Signatory Footer */}
+                <div className="pt-8 flex items-end justify-between border-t border-slate-200 text-slate-500 text-[11px]">
+                  <div>
+                    <p>Declaration: This invoice shows the actual price of goods and services described and that all particulars are true and correct.</p>
+                    <p className="mt-1 font-mono text-[10px] text-slate-400">Computer generated invoice. System verified receipt.</p>
+                  </div>
+
+                  <div className="text-center shrink-0">
+                    <div className="h-10"></div>
+                    <div className="font-bold text-slate-900">For AB Energy Solutions</div>
+                    <div className="text-[10px] text-slate-400">Authorized Signatory</div>
+                  </div>
+                </div>
               </div>
-
-              {/* Tax Calculations & Totals */}
-              <div className="flex flex-col sm:flex-row justify-between gap-6 pt-2">
-                <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-slate-600 max-w-sm">
-                  <span className="font-bold text-slate-900 text-xs block">Bank Payment Details (NEFT / RTGS)</span>
-                  <div className="text-[11px] space-y-0.5 font-mono">
-                    <div>Account Name: <strong className="text-slate-800">AB Energy Solutions Pvt Ltd</strong></div>
-                    <div>Account No: <strong className="text-slate-900">50200084920192</strong></div>
-                    <div>Bank: HDFC Bank, Indiranagar Branch</div>
-                    <div>IFSC: HDFC0001248</div>
-                  </div>
-                </div>
-
-                <div className="w-full sm:w-80 space-y-2">
-                  <div className="flex justify-between text-slate-600">
-                    <span>Subtotal (Taxable Amount)</span>
-                    <span className="font-mono font-bold">₹{selectedInvoiceForPrint.subtotal.toLocaleString('en-IN')}</span>
-                  </div>
-                  <div className="flex justify-between text-slate-600">
-                    <span>Composite Solar GST (CGST + SGST @ 13.8%)</span>
-                    <span className="font-mono font-bold">₹{(selectedInvoiceForPrint.cgst + selectedInvoiceForPrint.sgst + selectedInvoiceForPrint.igst).toLocaleString('en-IN')}</span>
-                  </div>
-                  <div className="flex justify-between text-sm font-black text-slate-900 pt-2 border-t border-slate-200">
-                    <span>Total Invoice Amount</span>
-                    <span className="font-mono">₹{selectedInvoiceForPrint.totalAmount.toLocaleString('en-IN')}</span>
-                  </div>
-                  <div className="flex justify-between text-xs font-bold text-emerald-700 pt-1">
-                    <span>Amount Paid to Date (Advance)</span>
-                    <span className="font-mono">- ₹{selectedInvoiceForPrint.paidAmount.toLocaleString('en-IN')}</span>
-                  </div>
-                  <div className="flex justify-between text-sm font-black text-slate-900 pt-2 border-t-2 border-slate-900">
-                    <span>Balance Due</span>
-                    <span className="font-mono text-emerald-700">₹{selectedInvoiceForPrint.balanceDue.toLocaleString('en-IN')} (Nil)</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Signatory Footer */}
-              <div className="pt-8 flex items-end justify-between border-t border-slate-200 text-slate-500 text-[11px]">
-                <div>
-                  <p>Declaration: This invoice shows the actual price of goods and services described and that all particulars are true and correct.</p>
-                  <p className="mt-1 font-mono text-[10px] text-slate-400">Computer generated invoice. System verified receipt.</p>
-                </div>
-
-                <div className="text-center shrink-0">
-                  <div className="h-10"></div>
-                  <div className="font-bold text-slate-900">For AB Energy Solutions</div>
-                  <div className="text-[10px] text-slate-400">Authorized Signatory</div>
-                </div>
-              </div>
-            </div>
+            )}
           </div>
         </div>
       )}

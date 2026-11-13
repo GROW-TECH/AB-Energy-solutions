@@ -173,7 +173,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({ onBackTo
     consumer_number: currentCustomer?.consumerNumberDiscom || '04-122-005-981',
     sanctioned_load_kw: currentCustomer?.totalSystemKw || 5,
     system_capacity_kw: currentCustomer?.totalSystemKw || 5,
-    subsidy_applicable_amount: (currentCustomer?.totalSystemKw || 5) <= 1 ? 30000 : (currentCustomer?.totalSystemKw || 5) <= 2 ? 60000 : ((currentCustomer?.totalSystemKw || 5) <= 10 ? 78000 : 0),
+    subsidy_applicable_amount: (currentCustomer?.totalSystemKw || 5) <= 1 ? 35000 : (currentCustomer?.totalSystemKw || 5) <= 2 ? 70000 : ((currentCustomer?.totalSystemKw || 5) <= 10 ? 100000 : 0),
     dcr_modules_used: true,
     panel_make_and_model: 'Tata Power Solar / Waaree 545W Mono PERC (DCR)',
     inverter_make_and_model: `${currentCustomer?.totalSystemKw || 5}kW On-Grid Solar Inverter`,
@@ -189,7 +189,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({ onBackTo
     days_in_current_stage: 3,
     is_delayed: false,
     tfr_number: customerProjects[0]?.discomSanctionNumber || 'TFR/NKL/2026/8421',
-    net_meter_number: customerProjects[0]?.discomSanctionNumber || 'BESCOM/SANCTION/7937',
+    net_meter_number: customerProjects[0]?.discomSanctionNumber || 'TANGEDCO/SANC/7937',
     inspecting_officer_name: 'Er. S. Selvakumar, AEE',
     inspecting_officer_phone: '+91 94433 12456',
     documents: {
@@ -326,7 +326,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({ onBackTo
               {currentCustomer?.name}&apos;s Solar Station
             </h1>
             <p className="text-xs text-slate-300 mt-1">
-              {currentCustomer?.totalSystemKw} kW On-Grid Rooftop System • DISCOM: {currentCustomer?.consumerNumberDiscom || 'BESCOM KA-0891'}
+              {currentCustomer?.totalSystemKw} kW On-Grid Rooftop System • DISCOM: {currentCustomer?.consumerNumberDiscom || 'TANGEDCO TN-0891'}
             </p>
           </div>
 
@@ -558,7 +558,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({ onBackTo
                   Bi-Directional Net-Meter Serial No.
                 </span>
                 <span className="font-mono font-bold text-emerald-700 text-xs block mt-0.5 truncate">
-                  {activeSubsidy.net_meter_number || 'BESCOM/SANCTION/7937'}
+                  {activeSubsidy.net_meter_number || 'TANGEDCO/SANC/7937'}
                 </span>
                 <span className="text-[10px] text-slate-500 block mt-0.5">Energized &amp; Grid-Synced</span>
               </div>

@@ -1065,8 +1065,8 @@ export const acceptQuotation = async (req: Request, res: Response) => {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           customerId, customerName, `${customerName.toLowerCase().replace(/\s+/g, '.')}@example.com`,
-          customerPhone, customerAddress || 'Site Address', 'Bengaluru', 'Karnataka', '560001',
-          `DISCOM-${Math.floor(1000000 + Math.random() * 9000000)}`, 'BESCOM', quote.lead_id,
+          customerPhone, customerAddress || 'Site Address', 'Salem', 'Tamil Nadu', '636115',
+          `DISCOM-${Math.floor(1000000 + Math.random() * 9000000)}`, 'TANGEDCO', quote.lead_id,
           capacityKw, quoteTotal, 0, quoteTotal, 'Under Installation', new Date().toISOString()
         ]
       );
@@ -1121,7 +1121,7 @@ export const acceptQuotation = async (req: Request, res: Response) => {
         quote.id, capacityKw, quoteTotal, 'Booking', new Date().toISOString().split('T')[0],
         targetDate, 'EMP-04', 'Karthik Raja', 'EMP-05', 'Muthu Vel',
         JSON.stringify(initialChecklist), JSON.stringify(initialTasks),
-        1, `BESCOM/SANCTION/${Date.now().toString().slice(-4)}`,
+        1, `TANGEDCO/SANC/${Date.now().toString().slice(-4)}`,
         `Converted deal from Quotation ${quote.quotation_number}. 40% Advance invoice issued (Unpaid).`,
         new Date().toISOString()
       ]

@@ -195,11 +195,16 @@ export const GovtSubsidyMasterView: React.FC = () => {
 
   const getWhatsAppMessage = (record: SubsidyRecord) => {
     const stage = STAGES.find(s => s.step === record.current_stage);
+    const cap = record.system_capacity_kw || 3;
+    const centralSub = cap <= 1 ? 30000 : cap <= 2 ? 60000 : 78000;
+    const stateSub = cap <= 1 ? 5000 : cap <= 2 ? 10000 : 22000;
+    const totalSub = record.subsidy_applicable_amount || (centralSub + stateSub);
+
     return `Namaste ${record.customer_name} ji,\n\nGreetings from AB Energy Solutions! Here is the latest official update on your Solar Subsidy & EB Net Metering application:\n\n` +
-      `🏛️ Scheme: PM Surya Ghar Muft Bijli Yojana\n` +
+      `🏛️ Scheme: PM Surya Ghar + Tamil Nadu State Top-Up (G.O. Ms No. 102)\n` +
       `📋 Portal App ID: ${record.portal_application_no}\n` +
       `⚡ Capacity: ${record.system_capacity_kw} kW (${record.dcr_modules_used ? 'DCR Indian Made Panels' : 'Standard'})\n` +
-      `💰 Expected Subsidy: ₹${record.subsidy_applicable_amount.toLocaleString('en-IN')}\n` +
+      `💰 Total Combined Subsidy: ₹${totalSub.toLocaleString('en-IN')}/- (Central: ₹${centralSub.toLocaleString('en-IN')} + TN State: ₹${stateSub.toLocaleString('en-IN')})\n` +
       `📍 Current Status: Stage ${record.current_stage}/7 - ${record.current_stage_name}\n` +
       (record.tfr_number ? `✅ EB Feasibility (TFR) Ref: ${record.tfr_number}\n` : '') +
       (record.net_meter_number ? `🔌 Net Meter No: ${record.net_meter_number}\n` : '') +
@@ -242,18 +247,18 @@ export const GovtSubsidyMasterView: React.FC = () => {
           <div className="space-y-2">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-xs font-semibold uppercase tracking-wider">
               <Landmark className="w-3.5 h-3.5" />
-              Central Government Subsidy & DISCOM Net-Metering Command Center
+              Central (MNRE) + Tamil Nadu State Top-Up (G.O. Ms No. 102) Command Center
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white flex items-center gap-3">
-              PM Surya Ghar: Muft Bijli Yojana
+              PM Surya Ghar + Tamil Nadu Solar Subsidy
               <span className="text-xs px-2.5 py-1 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/40 font-medium">
-                MNRE 2024–2026 Rules
+                Up to ₹1,00,000 Combined DBT
               </span>
             </h1>
             <p className="text-slate-300 text-sm max-w-2xl leading-relaxed">
               Track national portal applications (<code className="text-emerald-400 bg-emerald-950/60 px-1 py-0.5 rounded">pmsuryaghar.gov.in</code>), 
-              TANGEDCO/DISCOM Technical Feasibility Reports (TFR), DCR module verification, 
-              bi-directional net-meter commissioning, and customer DBT bank credits.
+              TANGEDCO Technical Feasibility Reports (TFR), DCR module verification, 
+              bi-directional net-meter commissioning, and automatic Direct Benefit Transfer (Central ₹78k + TN State ₹22k).
             </p>
           </div>
 
@@ -281,19 +286,23 @@ export const GovtSubsidyMasterView: React.FC = () => {
         <div className="mt-6 pt-5 border-t border-slate-800/80 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
           <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800">
             <div className="text-slate-400">1 kW Residential</div>
-            <div className="text-emerald-400 font-bold text-sm">₹30,000 Flat Subsidy</div>
+            <div className="text-emerald-400 font-bold text-sm">₹35,000 Combined</div>
+            <div className="text-[10px] text-slate-400">Central ₹30k + TN State ₹5k</div>
           </div>
           <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800">
             <div className="text-slate-400">2 kW Residential</div>
-            <div className="text-emerald-400 font-bold text-sm">₹60,000 Flat Subsidy</div>
+            <div className="text-emerald-400 font-bold text-sm">₹70,000 Combined</div>
+            <div className="text-[10px] text-slate-400">Central ₹60k + TN State ₹10k</div>
           </div>
           <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800">
             <div className="text-slate-400">3 kW to 10 kW Residential</div>
-            <div className="text-emerald-400 font-bold text-sm">₹78,000 Maximum Cap</div>
+            <div className="text-emerald-400 font-bold text-sm">₹1,00,000 Max Cap</div>
+            <div className="text-[10px] text-slate-400">Central ₹78k + TN State ₹22k</div>
           </div>
           <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800">
             <div className="text-slate-400">Commercial / Industrial</div>
-            <div className="text-amber-400 font-bold text-sm">₹0 (40% Depr. Benefit)</div>
+            <div className="text-amber-400 font-bold text-sm">₹0 (40% Tax Depr.)</div>
+            <div className="text-[10px] text-slate-400">Accelerated Tax Write-off</div>
           </div>
         </div>
       </div>
@@ -593,10 +602,10 @@ export const GovtSubsidyMasterView: React.FC = () => {
                         {record.portal_application_no}
                       </div>
                       <div className="text-slate-500 text-[11px] mt-0.5">
-                        <span className="font-medium text-slate-700">EB:</span> {record.consumer_number}
+                        <span className="font-medium text-slate-700">EB:</span> {record.consumer_number.replace(/BESCOM/gi, 'TANGEDCO')}
                       </div>
                       <div className="text-[10px] text-slate-400 truncate max-w-[190px]">
-                        {record.discom_section_office || record.discom_name}
+                        {(record.discom_section_office || record.discom_name || 'TANGEDCO Section Office').replace(/BESCOM/gi, 'TANGEDCO')}
                       </div>
                     </td>
 
@@ -627,12 +636,12 @@ export const GovtSubsidyMasterView: React.FC = () => {
 
                       {record.tfr_number && (
                         <div className="text-[10px] text-slate-500 mt-1 truncate">
-                          TFR: <span className="font-mono font-semibold">{record.tfr_number}</span>
+                          TFR: <span className="font-mono font-semibold">{record.tfr_number.replace(/BESCOM/gi, 'TANGEDCO')}</span>
                         </div>
                       )}
                       {record.net_meter_number && (
                         <div className="text-[10px] text-emerald-700 font-medium truncate">
-                          Meter: <span className="font-mono">{record.net_meter_number}</span>
+                          Meter: <span className="font-mono">{record.net_meter_number.replace(/BESCOM\/SANCTION/gi, 'TANGEDCO/SANC').replace(/BESCOM/gi, 'TANGEDCO')}</span>
                         </div>
                       )}
                     </td>
@@ -643,6 +652,9 @@ export const GovtSubsidyMasterView: React.FC = () => {
                         <>
                           <div className="font-bold text-emerald-700 text-sm">
                             ₹{record.subsidy_applicable_amount.toLocaleString('en-IN')}
+                          </div>
+                          <div className="text-[10px] text-emerald-800 font-medium">
+                            Central + TN State (G.O. 102)
                           </div>
                           {record.current_stage === 7 ? (
                             <span className="inline-flex items-center gap-1 text-[10px] text-emerald-600 font-semibold">
@@ -855,10 +867,10 @@ export const GovtSubsidyMasterView: React.FC = () => {
 
                       <div>
                         <label className="block text-slate-600 font-semibold mb-1">
-                          Subsidy Amount Applicable
+                          Combined Subsidy (Central + TN G.O. 102)
                         </label>
                         <div className="px-3 py-2 bg-emerald-50 text-emerald-800 font-bold border border-emerald-200 rounded-lg">
-                          ₹{selectedRecord.subsidy_applicable_amount.toLocaleString('en-IN')} (Fixed CFA)
+                          ₹{selectedRecord.subsidy_applicable_amount.toLocaleString('en-IN')} (Combined DBT)
                         </div>
                       </div>
                     </div>

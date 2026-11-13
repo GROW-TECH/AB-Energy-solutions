@@ -83,7 +83,7 @@ const initialSubsidies: SubsidyRecord[] = [
     consumer_number: '04-122-005-981',
     sanctioned_load_kw: 25,
     system_capacity_kw: 20,
-    subsidy_applicable_amount: 78000, // Capped at 78,000 max for domestic
+    subsidy_applicable_amount: 100000, // Combined Central ₹78k + TN State ₹22k under G.O. 102
     dcr_modules_used: true,
     panel_make_and_model: 'Tata Power Solar 545W Mono PERC (DCR)',
     inverter_make_and_model: 'Sungrow 20kW On-Grid Inverter',
@@ -130,7 +130,7 @@ const initialSubsidies: SubsidyRecord[] = [
     consumer_number: '04-188-012-340',
     sanctioned_load_kw: 5,
     system_capacity_kw: 3.3,
-    subsidy_applicable_amount: 78000,
+    subsidy_applicable_amount: 100000,
     dcr_modules_used: true,
     panel_make_and_model: 'Waaree 550W Bi-facial DCR',
     inverter_make_and_model: 'Growatt 3.3kW Single Phase',
@@ -151,7 +151,7 @@ const initialSubsidies: SubsidyRecord[] = [
     net_meter_number: 'L&T-GEN-98214-2026',
     net_meter_install_date: '2026-09-16',
     commissioning_certificate_date: '2026-09-18',
-    dbt_disbursal_amount: 78000,
+    dbt_disbursal_amount: 100000,
     dbt_bank_utr: 'PMAY20261008009214SBI',
     dbt_credit_date: '2026-10-08',
     documents: {
@@ -165,7 +165,7 @@ const initialSubsidies: SubsidyRecord[] = [
       net_meter_test_report: true,
       commissioning_cert: true,
     },
-    notes: 'Subsidy of ₹78,000 credited to customer State Bank of India account. Project fully closed.',
+    notes: 'Combined subsidy of ₹1,00,000 (Central ₹78k + TN State ₹22k) credited to customer State Bank of India account. Project fully closed.',
     last_updated: '2026-10-08'
   },
   {
@@ -183,7 +183,7 @@ const initialSubsidies: SubsidyRecord[] = [
     consumer_number: '04-099-001-442',
     sanctioned_load_kw: 6,
     system_capacity_kw: 5,
-    subsidy_applicable_amount: 78000,
+    subsidy_applicable_amount: 100000,
     dcr_modules_used: true,
     panel_make_and_model: 'Adani Solar 540W Mono DCR',
     inverter_make_and_model: 'Solis 5kW Dual MPPT',
@@ -330,9 +330,9 @@ export async function syncLiveProjectsWithSubsidies(cached: SubsidyRecord[]): Pr
       
       let applicableSubsidy = 0;
       if (isResidential) {
-        if (capKw <= 1) applicableSubsidy = 30000;
-        else if (capKw <= 2) applicableSubsidy = 60000;
-        else applicableSubsidy = 78000;
+        if (capKw <= 1) applicableSubsidy = 35000;
+        else if (capKw <= 2) applicableSubsidy = 70000;
+        else applicableSubsidy = 100000;
       }
 
       const stageInfo = mapProjectStageToSubsidyStage(p.stage || 'Booking');
@@ -350,9 +350,9 @@ export async function syncLiveProjectsWithSubsidies(cached: SubsidyRecord[]): Pr
           is_eligible: isResidential,
           ineligibility_reason: isResidential ? undefined : 'Commercial/Industrial installation: 40% tax depreciation applicable in lieu of residential subsidy.',
           site_address: p.customer_address || 'Tamil Nadu, India',
-          discom_name: p.customer_discom || 'TANGEDCO',
+          discom_name: (p.customer_discom || 'TANGEDCO').replace(/BESCOM/gi, 'TANGEDCO'),
           discom_section_office: 'Local Section Office',
-          consumer_number: p.consumer_number_discom || p.discom_sanction_number || 'Pending Consumer No',
+          consumer_number: (p.consumer_number_discom || p.discom_sanction_number || 'Pending Consumer No').replace(/BESCOM/gi, 'TANGEDCO'),
           sanctioned_load_kw: capKw,
           system_capacity_kw: capKw,
           subsidy_applicable_amount: applicableSubsidy,
@@ -366,7 +366,7 @@ export async function syncLiveProjectsWithSubsidies(cached: SubsidyRecord[]): Pr
           stage_status: p.stage === 'Completed' ? 'completed' : 'in_progress',
           days_in_current_stage: 1,
           is_delayed: false,
-          net_meter_number: p.discom_sanction_number || undefined,
+          net_meter_number: p.discom_sanction_number ? p.discom_sanction_number.replace(/BESCOM\/SANCTION/gi, 'TANGEDCO/SANC').replace(/BESCOM/gi, 'TANGEDCO') : undefined,
           net_meter_install_date: p.net_meter_installed_date || undefined,
           commissioning_certificate_date: p.commissioning_date || undefined,
           documents: {

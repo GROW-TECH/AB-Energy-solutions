@@ -115,8 +115,11 @@ interface CrmContextType {
   sendInvoiceToAuditor: (invoiceId: string, auditorPhone?: string, notes?: string) => Promise<boolean>;
   sendExpenseToAuditor: (expenseId: string, auditorPhone?: string, notes?: string) => Promise<boolean>;
   createInvoice: (invoiceData: Partial<Invoice>) => Invoice;
+  updateInvoice: (invoiceId: string, updates: Partial<Invoice>) => void;
   addExpense: (expenseData: Partial<ExpenseItem>) => ExpenseItem;
+  updateExpense: (expenseId: string, updates: Partial<ExpenseItem>) => void;
   addSupplier: (supplierData: Partial<Supplier>) => Supplier;
+  updateSupplier: (supplierId: string, updates: Partial<Supplier>) => void;
   createPurchaseOrder: (poData: Partial<PurchaseOrder>) => PurchaseOrder;
   receivePurchaseOrder: (poId: string) => void;
   addProduct: (productData: Partial<InventoryProduct>) => InventoryProduct;
@@ -1890,7 +1893,7 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       materialShortageFlag: false,
       warrantyActivated: false,
       amcInitiated: false,
-      discomSanctionNumber: `BESCOM/SANCTION/${Date.now().toString().slice(-4)}`,
+      discomSanctionNumber: `TANGEDCO/SANC/${Date.now().toString().slice(-4)}`,
       notes: `Converted deal from Quotation ${quote.quotationNumber}. 90% Advance invoice issued (Unpaid).`,
       tasks: [
         { id: `PT-${Date.now()}-1`, title: 'DISCOM Net-metering application & sanction', stage: 'Documentation', isCompleted: false, assignedRole: 'Project Manager', assignedToName: pm.name, dueDate: new Date(Date.now() + 86400000 * 3).toISOString().split('T')[0] },
@@ -2505,6 +2508,15 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return newInv;
   };
 
+  const updateInvoice = (invoiceId: string, updates: Partial<Invoice>): void => {
+    setInvoices(prev => prev.map(inv => inv.id === invoiceId ? { ...inv, ...updates } : inv));
+    authFetch(`/api/invoices/${invoiceId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates)
+    }).catch(err => console.error('Failed to update invoice:', err));
+  };
+
   // 9. AUTOMATION: Service Desk & Ticket Routing
   const createServiceTicket = (ticketData: Partial<ServiceTicket>): ServiceTicket => {
     const ticketId = `TKT-2026-${String(tickets.length + 1).padStart(3, '0')}`;
@@ -2744,6 +2756,15 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return newExp;
   };
 
+  const updateExpense = (expenseId: string, updates: Partial<ExpenseItem>): void => {
+    setExpenses(prev => prev.map(exp => exp.id === expenseId ? { ...exp, ...updates } : exp));
+    authFetch(`/api/expenses/${expenseId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates)
+    }).catch(err => console.error('Failed to update expense:', err));
+  };
+
   // 13. Suppliers & Purchase Orders
   const addSupplier = (supplierData: Partial<Supplier>): Supplier => {
     const supId = `SUP-${String(suppliers.length + 1).padStart(2, '0')}`;
@@ -2753,19 +2774,25 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       name: supplierData.name || 'Solar Supplier',
       category: supplierData.category || 'Solar Panels',
       rating: supplierData.rating || 4.8,
-      gstin: supplierData.gstin || '29AAACW0000A1Z0',
+      gstin: supplierData.gstin || '33AAACW0000A1Z0',
       contactPerson: supplierData.contactPerson || 'Vendor Manager',
       email: supplierData.email || 'orders@vendor.com',
       phone: supplierData.phone || '+91 98000-00000',
-      city: supplierData.city || 'Bengaluru',
-      state: supplierData.state || 'Karnataka',
+      city: supplierData.city || 'Salem',
+      state: supplierData.state || 'Tamil Nadu',
       paymentTerms: supplierData.paymentTerms || '30 Days Net',
       leadTimeDays: supplierData.leadTimeDays || 5,
       activeOrdersCount: 0,
       isPreferred: supplierData.isPreferred ?? true,
+      documents: supplierData.documents || [],
+      primaryDocUrl: supplierData.primaryDocUrl || (supplierData.documents?.[0]?.url),
     };
     setSuppliers(prev => [newSup, ...prev]);
     return newSup;
+  };
+
+  const updateSupplier = (supplierId: string, updates: Partial<Supplier>): void => {
+    setSuppliers(prev => prev.map(s => s.id === supplierId ? { ...s, ...updates } : s));
   };
 
   const createPurchaseOrder = (poData: Partial<PurchaseOrder>): PurchaseOrder => {
@@ -3049,8 +3076,11 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       sendInvoiceToAuditor,
       sendExpenseToAuditor,
       createInvoice,
+      updateInvoice,
       addExpense,
+      updateExpense,
       addSupplier,
+      updateSupplier,
       createPurchaseOrder,
       receivePurchaseOrder,
       addProduct,

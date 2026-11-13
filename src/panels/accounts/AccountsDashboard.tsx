@@ -197,7 +197,7 @@ export const AccountsDashboard: React.FC<AccountsDashboardProps> = ({
               </li>
               <li className="flex items-start gap-2.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 mt-1.5 flex-shrink-0" />
-                <span>PM Surya Ghar: ₹33,000 subsidy per kW up to 2 kW, and ₹78,000 flat for 3 kW and above.</span>
+                <span>PM Surya Ghar + Tamil Nadu G.O. 102: Up to ₹1,00,000 combined subsidy (₹78,000 Central + ₹22,000 TN State top-up for ≥ 3 kW).</span>
               </li>
               <li className="flex items-start gap-2.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 mt-1.5 flex-shrink-0" />

@@ -300,7 +300,11 @@ export const EditCapacitySubsidyModal: React.FC<EditCapacitySubsidyModalProps> =
     if (isOpen) {
       setCapacity(initialCapacityKw || 5);
       setPrice(initialDomesticPrice || 0);
-      setSubsidy(initialSubsidyAmount !== undefined && initialSubsidyAmount !== null ? initialSubsidyAmount : (initialCapacityKw >= 3 ? 78000 : initialCapacityKw * 30000));
+      setSubsidy(
+        initialSubsidyAmount !== undefined && initialSubsidyAmount !== null 
+          ? initialSubsidyAmount 
+          : (initialCapacityKw >= 3 ? 100000 : initialCapacityKw === 2 ? 70000 : initialCapacityKw * 35000)
+      );
       setError(null);
     }
   }, [isOpen, initialCapacityKw, initialDomesticPrice, initialSubsidyAmount]);
@@ -421,10 +425,10 @@ export const EditCapacitySubsidyModal: React.FC<EditCapacitySubsidyModalProps> =
                 <span>Govt Subsidy Support (₹ DBT Subsidy)</span>
                 <button
                   type="button"
-                  onClick={() => setSubsidy(capacity >= 3 ? 78000 : capacity * 30000)}
+                  onClick={() => setSubsidy(capacity >= 3 ? 100000 : capacity === 2 ? 70000 : capacity * 35000)}
                   className="text-[11px] text-emerald-700 font-bold hover:underline cursor-pointer"
                 >
-                  Apply Standard DBT Slabs
+                  Apply TN State + Central DBT Slabs (G.O. 102)
                 </button>
               </label>
               <input

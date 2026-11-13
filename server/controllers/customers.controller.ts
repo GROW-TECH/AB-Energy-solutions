@@ -8,8 +8,8 @@ export const createCustomer = async (req: Request, res: Response) => {
       `INSERT INTO customers (id, name, email, phone, alternate_phone, address, city, state, pincode, consumer_number_discom, discom_name, gstin, converted_from_lead_id, total_system_kw, total_order_value, paid_amount, balance_amount, status, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        c.id, c.name, c.email || '', c.phone, c.alternatePhone || null, c.address, c.city || 'Bengaluru',
-        c.state || 'Karnataka', c.pincode || '560001', c.consumerNumberDiscom || null, c.discomName || 'BESCOM',
+        c.id, c.name, c.email || '', c.phone, c.alternatePhone || null, c.address, c.city || 'Salem',
+        c.state || 'Tamil Nadu', c.pincode || '636115', c.consumerNumberDiscom || null, c.discomName || 'TANGEDCO',
         c.gstin || null, c.convertedFromLeadId || null, c.totalSystemKw || 0, c.totalOrderValue || 0,
         c.paidAmount || 0, c.balanceAmount || 0, c.status || 'Active', c.createdAt || new Date().toISOString()
       ]

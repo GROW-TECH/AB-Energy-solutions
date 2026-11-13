@@ -341,6 +341,9 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
                     <span className="font-mono font-black text-black text-xs block">
                       GST: 33FSQPA3244H1ZU
                     </span>
+                    <span className="text-[10px] text-slate-500 block">
+                      Vazhapadi, Salem, Tamil Nadu - 636115
+                    </span>
                   </div>
                 </div>
 
@@ -683,7 +686,9 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
                       </thead>
                       <tbody>
                         {(() => {
-                          const estSubsidy = quote.subsidyAmount !== undefined && quote.subsidyAmount !== null ? quote.subsidyAmount : (quote.systemCapacityKw >= 3 ? 78000 : quote.systemCapacityKw * 30000);
+                          const estSubsidy = quote.subsidyAmount !== undefined && quote.subsidyAmount !== null 
+                            ? quote.subsidyAmount 
+                            : (quote.systemCapacityKw >= 3 ? 100000 : quote.systemCapacityKw === 2 ? 70000 : quote.systemCapacityKw * 35000);
                           const netEffective = Math.max(0, quote.totalAmount - estSubsidy);
 
                           return (
@@ -697,7 +702,7 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
                               </td>
                               <td className="py-3 px-3 font-bold text-emerald-700">
                                 <span className="text-sm font-black font-mono block">₹{Math.round(estSubsidy).toLocaleString('en-IN')}/-</span>
-                                <span className="text-[10px] text-emerald-600 font-semibold block">Direct DBT to Account</span>
+                                <span className="text-[10px] text-emerald-600 font-semibold block">Central + TN State (G.O. 102)</span>
                               </td>
                               <td className="py-3 px-3 font-bold text-slate-900">
                                 <span className="text-sm font-black font-mono text-emerald-900 block">₹{Math.round(netEffective).toLocaleString('en-IN')}/-</span>
@@ -771,7 +776,7 @@ export const QuotationProposalModal: React.FC<QuotationProposalModalProps> = ({
                         Phone: <strong className="text-white">+91 95664 99678</strong> | Email: abenergysolutiontn@gmail.com
                       </div>
                       <div className="text-xs text-slate-300">
-                        1/359, Maruthi Nagar, Chinnakavandanur, Namakkal, TN - 636202
+                        No 13, Thammampatty Main Road, Maheswari Theatre Opposite Street, Vazhapadi, Salem, Tamil Nadu - 636115
                       </div>
                       <div className="text-[10px] text-emerald-400 font-semibold pt-0.5">
                         12+ Years Solar Experience &bull; TNEB C-Licence Certified Enterprise

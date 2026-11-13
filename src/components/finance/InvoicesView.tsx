@@ -3,14 +3,14 @@ import {
   Receipt, Plus, Search, Filter, Printer, Download, 
   CheckCircle2, Clock, AlertTriangle, ArrowRight, ArrowLeft,
   CreditCard, Check, IndianRupee, ShieldCheck, Sparkles, Building, Zap, Calendar, User, CheckCircle,
-  Phone, Send, X
+  Phone, Send, X, Pencil, Trash2
 } from 'lucide-react';
 import { useCrm } from '../../context/CrmContext';
 import { getApiUrl } from '../../utils/apiUrl';
 import { Invoice } from '../../types';
 
 export const InvoicesView: React.FC = () => {
-  const { invoices, recordPayment, createInvoice, projects, customers, sendInvoiceToAuditor, activeRole, currentUser } = useCrm();
+  const { invoices, recordPayment, createInvoice, updateInvoice, projects, customers, sendInvoiceToAuditor, activeRole, currentUser } = useCrm();
 
   const isAuditor = activeRole === 'Auditor' || currentUser?.role === 'Auditor';
 
@@ -45,6 +45,116 @@ export const InvoicesView: React.FC = () => {
     } finally {
       setAuditorSendingId(null);
     }
+  };
+
+  // Edit Invoice State & Handlers
+  const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
+
+  const handleStartEditInvoice = (inv: Invoice) => {
+    setEditingInvoice(JSON.parse(JSON.stringify(inv)));
+  };
+
+  const handleSaveEditInvoice = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingInvoice) return;
+
+    const subtotal = editingInvoice.items.reduce((s, it) => s + (Number(it.amount) || 0), 0);
+    const cgst = Number(editingInvoice.cgst) ?? Math.round(subtotal * 0.069);
+    const sgst = Number(editingInvoice.sgst) ?? Math.round(subtotal * 0.069);
+    const igst = Number(editingInvoice.igst) || 0;
+    const totalAmount = subtotal + cgst + sgst + igst;
+    const paidAmount = Number(editingInvoice.paidAmount) || 0;
+    const balanceDue = Math.max(0, totalAmount - paidAmount);
+
+    const updated: Invoice = {
+      ...editingInvoice,
+      subtotal,
+      cgst,
+      sgst,
+      igst,
+      totalAmount,
+      paidAmount,
+      balanceDue,
+      status: balanceDue === 0 ? 'Paid' : (paidAmount > 0 ? 'Partially Paid' : (editingInvoice.status || 'Sent')),
+    };
+
+    updateInvoice(editingInvoice.id, updated);
+    if (selectedInvoice?.id === editingInvoice.id) {
+      setSelectedInvoice(updated);
+    }
+    setEditingInvoice(null);
+    setInvoiceIssueSuccess(`Invoice ${updated.invoiceNumber} updated successfully!`);
+    setTimeout(() => setInvoiceIssueSuccess(null), 3000);
+  };
+
+  const handleUpdateLineItem = (index: number, field: string, val: any) => {
+    if (!editingInvoice) return;
+    const newItems = [...editingInvoice.items];
+    const current = { ...newItems[index], [field]: val };
+    if (field === 'quantity' || field === 'unitRate') {
+      const q = field === 'quantity' ? Number(val) : Number(current.quantity);
+      const r = field === 'unitRate' ? Number(val) : Number(current.unitRate);
+      current.amount = Math.round(q * r);
+    }
+    newItems[index] = current;
+    const newSubtotal = newItems.reduce((s, it) => s + (Number(it.amount) || 0), 0);
+    const newCgst = Math.round(newSubtotal * 0.069);
+    const newSgst = Math.round(newSubtotal * 0.069);
+    const newTotal = newSubtotal + newCgst + newSgst + (Number(editingInvoice.igst) || 0);
+    const curPaid = Number(editingInvoice.paidAmount) || 0;
+    setEditingInvoice({
+      ...editingInvoice,
+      items: newItems,
+      subtotal: newSubtotal,
+      cgst: newCgst,
+      sgst: newSgst,
+      totalAmount: newTotal,
+      balanceDue: Math.max(0, newTotal - curPaid),
+    });
+  };
+
+  const handleAddLineItem = () => {
+    if (!editingInvoice) return;
+    const newItem = {
+      description: 'Solar System Components / EPC Milestone Service',
+      quantity: 1,
+      unitRate: 10000,
+      amount: 10000
+    };
+    const newItems = [...editingInvoice.items, newItem];
+    const newSubtotal = newItems.reduce((s, it) => s + (Number(it.amount) || 0), 0);
+    const newCgst = Math.round(newSubtotal * 0.069);
+    const newSgst = Math.round(newSubtotal * 0.069);
+    const newTotal = newSubtotal + newCgst + newSgst + (Number(editingInvoice.igst) || 0);
+    const curPaid = Number(editingInvoice.paidAmount) || 0;
+    setEditingInvoice({
+      ...editingInvoice,
+      items: newItems,
+      subtotal: newSubtotal,
+      cgst: newCgst,
+      sgst: newSgst,
+      totalAmount: newTotal,
+      balanceDue: Math.max(0, newTotal - curPaid),
+    });
+  };
+
+  const handleRemoveLineItem = (index: number) => {
+    if (!editingInvoice || editingInvoice.items.length <= 1) return;
+    const newItems = editingInvoice.items.filter((_, i) => i !== index);
+    const newSubtotal = newItems.reduce((s, it) => s + (Number(it.amount) || 0), 0);
+    const newCgst = Math.round(newSubtotal * 0.069);
+    const newSgst = Math.round(newSubtotal * 0.069);
+    const newTotal = newSubtotal + newCgst + newSgst + (Number(editingInvoice.igst) || 0);
+    const curPaid = Number(editingInvoice.paidAmount) || 0;
+    setEditingInvoice({
+      ...editingInvoice,
+      items: newItems,
+      subtotal: newSubtotal,
+      cgst: newCgst,
+      sgst: newSgst,
+      totalAmount: newTotal,
+      balanceDue: Math.max(0, newTotal - curPaid),
+    });
   };
 
   // Issue 10% Commissioning Invoice modal state
@@ -342,6 +452,17 @@ export const InvoicesView: React.FC = () => {
                 <span>Print Tax Invoice</span>
               </button>
 
+              {!isAuditor && (
+                <button
+                  type="button"
+                  onClick={() => handleStartEditInvoice(selectedInvoice)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 font-bold text-emerald-800 rounded-lg shadow-xs transition-colors cursor-pointer text-xs"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                  <span>Edit Invoice</span>
+                </button>
+              )}
+
               {!isAuditor && selectedInvoice.balanceDue > 0 && (
                 <button
                   onClick={() => {
@@ -368,14 +489,17 @@ export const InvoicesView: React.FC = () => {
                   className="h-16 w-auto object-contain"
                 />
                 <div>
-                  <h2 className="text-xl font-black tracking-tight text-slate-900">
+                  <h2 className="text-xl font-black tracking-tight text-emerald-950">
                     AB ENERGY SOLUTIONS
                   </h2>
                   <p className="text-xs text-slate-600 font-semibold mt-0.5">
                     Certified Solar EPC &amp; Grid-Tied Renewable Power Systems
                   </p>
-                  <p className="text-[11px] text-slate-500 mt-0.5">
-                    GSTIN: 29AABCS1429B1Z8 • Indiranagar, Bengaluru, KA 560038 • support@abenergy.in
+                  <p className="text-[11px] text-slate-600 mt-0.5 font-medium">
+                    No 13, Thammampatty Main Road, Maheswari Theatre Opposite Street, Vazhapadi, Salem, Tamil Nadu - 636115
+                  </p>
+                  <p className="text-[11px] font-mono font-bold text-slate-700 mt-0.5">
+                    GSTIN: 33FSQPA3244H1ZU &bull; State: Tamil Nadu (33) &bull; Phone: +91 95664 99678 &bull; abenergysolutiontn@gmail.com
                   </p>
                 </div>
               </div>
@@ -457,10 +581,11 @@ export const InvoicesView: React.FC = () => {
                 <span className="font-bold text-slate-900 block uppercase tracking-wider text-[10px]">
                   Bank Payment Details (NEFT / RTGS)
                 </span>
-                <p>Account Name: <strong>AB Energy Solutions Pvt Ltd</strong></p>
+                <p>Account Name: <strong>AB Energy Solutions</strong></p>
                 <p>Account No: <strong>50200084920192</strong></p>
-                <p>Bank: <strong>HDFC Bank, Indiranagar Branch</strong></p>
+                <p>Bank: <strong>HDFC Bank, Vazhapadi / Salem Branch</strong></p>
                 <p>IFSC: <strong>HDFC0001248</strong></p>
+                <p>UPI ID: <strong>abenergysolutiontn@okaxis</strong></p>
               </div>
 
               {/* Total Calculation */}
@@ -820,6 +945,16 @@ export const InvoicesView: React.FC = () => {
                             Record Payment
                           </button>
                         )}
+                        {!isAuditor && (
+                          <button
+                            type="button"
+                            onClick={() => handleStartEditInvoice(inv)}
+                            className="p-1.5 text-slate-500 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
+                            title="Edit Invoice"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                         <button
                           onClick={() => {
                             handleSelectInvoice(inv);
@@ -967,6 +1102,16 @@ export const InvoicesView: React.FC = () => {
                               >
                                 View Doc
                               </button>
+                              {!isAuditor && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleStartEditInvoice(inv)}
+                                  className="p-1.5 text-slate-500 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
+                                  title="Edit Invoice"
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                               {!isAuditor && inv.balanceDue > 0 && (
                                 <button
                                   onClick={() => {
@@ -1235,6 +1380,309 @@ export const InvoicesView: React.FC = () => {
                 >
                   <Plus className="w-4 h-4" />
                   <span>Generate &amp; Issue 10% Invoice</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Invoice Modal */}
+      {editingInvoice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden border border-slate-200">
+            <div className="flex items-center justify-between p-4 bg-emerald-950 text-white">
+              <div className="flex items-center gap-2">
+                <Pencil className="w-5 h-5 text-emerald-400" />
+                <div>
+                  <h3 className="font-bold text-sm">Edit Tax Invoice ({editingInvoice.invoiceNumber})</h3>
+                  <p className="text-[10px] text-emerald-300">Milestone EPC &amp; GST Tax Compliance Editor</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setEditingInvoice(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditInvoice} className="p-5 space-y-4 text-xs max-h-[85vh] overflow-y-auto">
+              {/* Row 1: Invoice metadata */}
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Invoice Number *</label>
+                  <input
+                    type="text"
+                    value={editingInvoice.invoiceNumber}
+                    onChange={(e) => setEditingInvoice({ ...editingInvoice, invoiceNumber: e.target.value })}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 font-mono font-bold"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Issue Date *</label>
+                  <input
+                    type="date"
+                    value={editingInvoice.issueDate}
+                    onChange={(e) => setEditingInvoice({ ...editingInvoice, issueDate: e.target.value })}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 font-semibold"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Due Date *</label>
+                  <input
+                    type="date"
+                    value={editingInvoice.dueDate}
+                    onChange={(e) => setEditingInvoice({ ...editingInvoice, dueDate: e.target.value })}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 font-semibold"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Invoice Status</label>
+                  <select
+                    value={editingInvoice.status}
+                    onChange={(e) => setEditingInvoice({ ...editingInvoice, status: e.target.value as any })}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 font-semibold"
+                  >
+                    <option value="Draft">Draft</option>
+                    <option value="Sent">Sent</option>
+                    <option value="Partially Paid">Partially Paid</option>
+                    <option value="Paid">Paid</option>
+                    <option value="Overdue">Overdue</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Row 2: Customer Details */}
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+                <span className="font-bold text-slate-900 block text-xs">Customer / Client Information</span>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">Customer Name *</label>
+                    <input
+                      type="text"
+                      value={editingInvoice.customerName}
+                      onChange={(e) => setEditingInvoice({ ...editingInvoice, customerName: e.target.value })}
+                      className="w-full p-2 rounded-lg border border-slate-300 bg-white font-semibold"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">Phone Number</label>
+                    <input
+                      type="text"
+                      value={editingInvoice.customerPhone}
+                      onChange={(e) => setEditingInvoice({ ...editingInvoice, customerPhone: e.target.value })}
+                      className="w-full p-2 rounded-lg border border-slate-300 bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">Client GSTIN</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 33AAAAA0000A1Z5"
+                      value={editingInvoice.customerGstin || ''}
+                      onChange={(e) => setEditingInvoice({ ...editingInvoice, customerGstin: e.target.value })}
+                      className="w-full p-2 rounded-lg border border-slate-300 bg-white font-mono"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">Installation Site Address</label>
+                  <input
+                    type="text"
+                    value={editingInvoice.customerAddress || ''}
+                    onChange={(e) => setEditingInvoice({ ...editingInvoice, customerAddress: e.target.value })}
+                    className="w-full p-2 rounded-lg border border-slate-300 bg-white"
+                    placeholder="Full installation site address"
+                  />
+                </div>
+              </div>
+
+              {/* Row 3: Line Items */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-900 text-xs">Milestone Line Items</span>
+                  <button
+                    type="button"
+                    onClick={handleAddLineItem}
+                    className="px-2.5 py-1 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-lg cursor-pointer transition-colors flex items-center gap-1"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add Item</span>
+                  </button>
+                </div>
+
+                <div className="border border-slate-200 rounded-xl overflow-hidden">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-100 text-slate-700 font-semibold border-b border-slate-200">
+                      <tr>
+                        <th className="p-2.5">Description</th>
+                        <th className="p-2.5 w-20 text-center">Qty</th>
+                        <th className="p-2.5 w-32 text-right">Unit Rate (₹)</th>
+                        <th className="p-2.5 w-32 text-right">Amount (₹)</th>
+                        <th className="p-2.5 w-12 text-center"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {editingInvoice.items.map((item, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50/50">
+                          <td className="p-2">
+                            <input
+                              type="text"
+                              value={item.description}
+                              onChange={(e) => handleUpdateLineItem(idx, 'description', e.target.value)}
+                              className="w-full p-1.5 rounded border border-slate-300 text-xs font-medium"
+                              required
+                            />
+                          </td>
+                          <td className="p-2 text-center">
+                            <input
+                              type="number"
+                              min="1"
+                              value={item.quantity}
+                              onChange={(e) => handleUpdateLineItem(idx, 'quantity', e.target.value)}
+                              className="w-full p-1.5 rounded border border-slate-300 text-xs text-center font-mono"
+                              required
+                            />
+                          </td>
+                          <td className="p-2 text-right">
+                            <input
+                              type="number"
+                              value={item.rate || item.unitRate || 0}
+                              onChange={(e) => handleUpdateLineItem(idx, 'unitRate', e.target.value)}
+                              className="w-full p-1.5 rounded border border-slate-300 text-xs text-right font-mono"
+                              required
+                            />
+                          </td>
+                          <td className="p-2 text-right font-mono font-bold text-slate-900">
+                            ₹{(Number(item.amount) || 0).toLocaleString('en-IN')}
+                          </td>
+                          <td className="p-2 text-center">
+                            {editingInvoice.items.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveLineItem(idx)}
+                                className="p-1 text-slate-400 hover:text-red-600 rounded transition-colors cursor-pointer"
+                                title="Remove line item"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Row 4: Tax Calculation Breakdown & Payments */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Invoice Notes / Payment Terms</label>
+                  <textarea
+                    rows={4}
+                    value={editingInvoice.notes || ''}
+                    onChange={(e) => setEditingInvoice({ ...editingInvoice, notes: e.target.value })}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 text-xs"
+                    placeholder="Statutory payment instructions, bank details, or delivery remarks..."
+                  />
+                </div>
+
+                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs">
+                  <div className="flex justify-between text-slate-600">
+                    <span>Taxable Subtotal:</span>
+                    <span className="font-mono font-bold text-slate-900">
+                      ₹{editingInvoice.items.reduce((s, it) => s + (Number(it.amount) || 0), 0).toLocaleString('en-IN')}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[10px] text-slate-500 font-semibold mb-0.5">CGST (6.9%)</label>
+                      <input
+                        type="number"
+                        value={editingInvoice.cgst}
+                        onChange={(e) => setEditingInvoice({ ...editingInvoice, cgst: Number(e.target.value) })}
+                        className="w-full p-1.5 rounded border border-slate-300 font-mono text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-slate-500 font-semibold mb-0.5">SGST (6.9%)</label>
+                      <input
+                        type="number"
+                        value={editingInvoice.sgst}
+                        onChange={(e) => setEditingInvoice({ ...editingInvoice, sgst: Number(e.target.value) })}
+                        className="w-full p-1.5 rounded border border-slate-300 font-mono text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between items-center pt-2 border-t border-slate-200 text-slate-900 font-extrabold text-sm">
+                    <span>Total Amount (₹):</span>
+                    <span className="font-mono text-emerald-800 text-base">
+                      ₹{(
+                        editingInvoice.items.reduce((s, it) => s + (Number(it.amount) || 0), 0) +
+                        (Number(editingInvoice.cgst) || 0) +
+                        (Number(editingInvoice.sgst) || 0) +
+                        (Number(editingInvoice.igst) || 0)
+                      ).toLocaleString('en-IN')}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-200">
+                    <div>
+                      <label className="block text-[10px] text-slate-500 font-semibold mb-0.5">Amount Paid (₹)</label>
+                      <input
+                        type="number"
+                        value={editingInvoice.paidAmount}
+                        onChange={(e) => {
+                          const p = Number(e.target.value) || 0;
+                          const sub = editingInvoice.items.reduce((s, it) => s + (Number(it.amount) || 0), 0);
+                          const tot = sub + (Number(editingInvoice.cgst) || 0) + (Number(editingInvoice.sgst) || 0) + (Number(editingInvoice.igst) || 0);
+                          setEditingInvoice({
+                            ...editingInvoice,
+                            paidAmount: p,
+                            balanceDue: Math.max(0, tot - p),
+                          });
+                        }}
+                        className="w-full p-1.5 rounded border border-slate-300 font-mono text-xs font-semibold text-emerald-700"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-slate-500 font-semibold mb-0.5">Balance Due (₹)</label>
+                      <div className="p-1.5 rounded bg-emerald-50 border border-emerald-300 font-mono text-xs font-bold text-emerald-900">
+                        ₹{(
+                          Math.max(0, (
+                            editingInvoice.items.reduce((s, it) => s + (Number(it.amount) || 0), 0) +
+                            (Number(editingInvoice.cgst) || 0) +
+                            (Number(editingInvoice.sgst) || 0) +
+                            (Number(editingInvoice.igst) || 0)
+                          ) - (Number(editingInvoice.paidAmount) || 0))
+                        ).toLocaleString('en-IN')}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setEditingInvoice(null)}
+                  className="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-xs transition-colors cursor-pointer"
+                >
+                  Save Invoice Changes
                 </button>
               </div>
             </form>

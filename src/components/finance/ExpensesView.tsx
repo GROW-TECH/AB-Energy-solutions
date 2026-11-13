@@ -4,11 +4,11 @@ import { ExpenseItem } from '../../types';
 import { 
   DollarSign, Plus, Search, Filter, Calendar, FileText, 
   CreditCard, CheckCircle2, Clock, AlertCircle, X, Download, Tag,
-  Upload, Eye, ShieldCheck, Phone, Send, ImageIcon, Check
+  Upload, Eye, ShieldCheck, Phone, Send, ImageIcon, Check, Pencil
 } from 'lucide-react';
 
 export const ExpensesView: React.FC = () => {
-  const { expenses, addExpense, projects, activeRole, currentUser, sendExpenseToAuditor } = useCrm();
+  const { expenses, addExpense, updateExpense, projects, activeRole, currentUser, sendExpenseToAuditor } = useCrm();
 
   const isAuditor = activeRole === 'Auditor' || currentUser?.role === 'Auditor';
 
@@ -38,6 +38,51 @@ export const ExpensesView: React.FC = () => {
 
   // Direct Send to Auditor state
   const [auditorSendingExpId, setAuditorSendingExpId] = useState<string | null>(null);
+
+  // Edit Expense / Bill State
+  const [editingExpense, setEditingExpense] = useState<ExpenseItem | null>(null);
+  const [editInvoiceDoc, setEditInvoiceDoc] = useState<string>('');
+  const [editInvoiceDocName, setEditInvoiceDocName] = useState<string>('');
+
+  const handleStartEdit = (exp: ExpenseItem) => {
+    setEditingExpense(JSON.parse(JSON.stringify(exp)));
+    setEditInvoiceDoc(exp.invoiceDocument || '');
+    setEditInvoiceDocName(exp.invoiceFileName || '');
+  };
+
+  const handleEditFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setEditInvoiceDocName(file.name);
+      const reader = new FileReader();
+      reader.onload = (uploadEvent) => {
+        if (uploadEvent.target?.result) {
+          setEditInvoiceDoc(uploadEvent.target.result as string);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleSaveEditExpense = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingExpense) return;
+    const baseAmt = Number(editingExpense.amount) || 0;
+    const taxAmt = Number(editingExpense.taxAmount) || 0;
+    const totalAmt = baseAmt + taxAmt;
+    const selectedProj = projects.find(p => p.id === editingExpense.projectId);
+
+    updateExpense(editingExpense.id, {
+      ...editingExpense,
+      amount: baseAmt,
+      taxAmount: taxAmt,
+      totalAmount: totalAmt,
+      projectName: selectedProj ? `${selectedProj.customerName} (${selectedProj.capacityKw} kW)` : (editingExpense.projectId ? editingExpense.projectName : 'General Overhead'),
+      invoiceDocument: editInvoiceDoc || undefined,
+      invoiceFileName: editInvoiceDoc ? (editInvoiceDocName || 'Invoice Bill') : undefined,
+    });
+    setEditingExpense(null);
+  };
 
   const handleDirectSendExpenseToAuditor = async (exp: ExpenseItem) => {
     setAuditorSendingExpId(exp.id);
@@ -316,7 +361,19 @@ export const ExpensesView: React.FC = () => {
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-100">
+              <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-100 flex-wrap">
+                {!isAuditor && (
+                  <button
+                    type="button"
+                    onClick={() => handleStartEdit(exp)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg cursor-pointer transition-colors"
+                    title="Edit Expense / Bill"
+                  >
+                    <Pencil className="w-3.5 h-3.5 text-slate-600" />
+                    <span>Edit Bill</span>
+                  </button>
+                )}
+
                 {exp.invoiceDocument ? (
                   <button
                     type="button"
@@ -375,12 +432,13 @@ export const ExpensesView: React.FC = () => {
                 <th className="py-3.5 px-4 text-right">Amount (₹)</th>
                 <th className="py-3.5 px-4 text-center">Invoice Bill</th>
                 <th className="py-3.5 px-4 text-center">Auditor</th>
+                {!isAuditor && <th className="py-3.5 px-4 text-center">Action</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200">
               {filteredExpenses.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center text-slate-400">
+                  <td colSpan={isAuditor ? 8 : 9} className="py-12 text-center text-slate-400">
                     <DollarSign className="w-10 h-10 mx-auto text-slate-300 mb-2" />
                     <p className="font-medium text-slate-600">No expense records found</p>
                   </td>
@@ -470,6 +528,19 @@ export const ExpensesView: React.FC = () => {
                         </button>
                       )}
                     </td>
+                    {!isAuditor && (
+                      <td className="py-3.5 px-4 text-center">
+                        <button
+                          type="button"
+                          onClick={() => handleStartEdit(exp)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg cursor-pointer transition-colors"
+                          title="Edit Expense / Bill"
+                        >
+                          <Pencil className="w-3.5 h-3.5 text-slate-600" />
+                          <span>Edit</span>
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))
               )}
@@ -662,6 +733,246 @@ export const ExpensesView: React.FC = () => {
                 >
                   Save Expense &amp; Document
                 </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Expense / Bill Modal */}
+      {editingExpense && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden border border-slate-200">
+            <div className="flex items-center justify-between p-4 bg-emerald-950 text-white">
+              <div className="flex items-center gap-2">
+                <Pencil className="w-4 h-4 text-emerald-400" />
+                <h3 className="font-bold text-sm">Edit Expense Voucher / Bill ({editingExpense.expenseNumber})</h3>
+              </div>
+              <button 
+                onClick={() => setEditingExpense(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditExpense} className="p-5 space-y-4 text-xs max-h-[85vh] overflow-y-auto">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Expense Title / Item *</label>
+                <input
+                  type="text"
+                  value={editingExpense.title}
+                  onChange={(e) => setEditingExpense({ ...editingExpense, title: e.target.value })}
+                  className="w-full p-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 outline-hidden"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Expense Category</label>
+                  <select
+                    value={editingExpense.category}
+                    onChange={(e) => setEditingExpense({ ...editingExpense, category: e.target.value as ExpenseItem['category'] })}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 outline-hidden"
+                  >
+                    <option value="Civil & Structural">Civil &amp; Structural</option>
+                    <option value="DISCOM Fees">DISCOM Fees</option>
+                    <option value="Cranage & Lifting">Cranage &amp; Lifting</option>
+                    <option value="Freight & Logistics">Freight &amp; Logistics</option>
+                    <option value="Electrical BOS">Electrical BOS</option>
+                    <option value="Safety & PPE">Safety &amp; PPE</option>
+                    <option value="Testing & Inspection">Testing &amp; Inspection</option>
+                    <option value="Travel & Site Allowance">Travel &amp; Site Allowance</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Link to Solar Project</label>
+                  <select
+                    value={editingExpense.projectId || ''}
+                    onChange={(e) => setEditingExpense({ ...editingExpense, projectId: e.target.value || undefined })}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 outline-hidden"
+                  >
+                    <option value="">General Overhead (No Project)</option>
+                    {projects.map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.id} - {p.customerName} ({p.capacityKw} kW)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Base Amount (₹) *</label>
+                  <input
+                    type="number"
+                    value={editingExpense.amount}
+                    onChange={(e) => setEditingExpense({ ...editingExpense, amount: Number(e.target.value) })}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 outline-hidden"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">GST Tax Amount (₹)</label>
+                  <input
+                    type="number"
+                    value={editingExpense.taxAmount}
+                    onChange={(e) => setEditingExpense({ ...editingExpense, taxAmount: Number(e.target.value) })}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 outline-hidden"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Vendor / Payee Name</label>
+                  <input
+                    type="text"
+                    value={editingExpense.vendorName}
+                    onChange={(e) => setEditingExpense({ ...editingExpense, vendorName: e.target.value })}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 outline-hidden"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Payment Mode</label>
+                  <select
+                    value={editingExpense.paymentMode}
+                    onChange={(e) => setEditingExpense({ ...editingExpense, paymentMode: e.target.value as ExpenseItem['paymentMode'] })}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 outline-hidden"
+                  >
+                    <option value="Bank Transfer">Bank Transfer</option>
+                    <option value="Company Card">Company Card</option>
+                    <option value="UPI">UPI</option>
+                    <option value="Petty Cash">Petty Cash</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Payment Date</label>
+                  <input
+                    type="date"
+                    value={editingExpense.paymentDate}
+                    onChange={(e) => setEditingExpense({ ...editingExpense, paymentDate: e.target.value })}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 outline-hidden"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Status</label>
+                  <select
+                    value={editingExpense.status}
+                    onChange={(e) => setEditingExpense({ ...editingExpense, status: e.target.value as ExpenseItem['status'] })}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 outline-hidden"
+                  >
+                    <option value="Paid">Paid</option>
+                    <option value="Pending Approval">Pending Approval</option>
+                    <option value="Reimbursed">Reimbursed</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Invoice / Receipt Reference No.</label>
+                <input
+                  type="text"
+                  value={editingExpense.receiptReference || ''}
+                  onChange={(e) => setEditingExpense({ ...editingExpense, receiptReference: e.target.value })}
+                  className="w-full p-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 outline-hidden"
+                />
+              </div>
+
+              {/* Upload / Replace Invoice Image or Document */}
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                <label className="block text-xs font-bold text-slate-800">
+                  Invoice Image or Document (Bill/Receipt)
+                </label>
+                <p className="text-[11px] text-slate-500">
+                  Attach or replace vendor tax invoice or payment receipt (.jpg, .png, .pdf).
+                </p>
+
+                {editInvoiceDoc ? (
+                  <div className="flex items-center justify-between p-2.5 bg-emerald-50 border border-emerald-300 rounded-xl">
+                    <div className="flex items-center gap-2 overflow-hidden">
+                      <ImageIcon className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span className="font-semibold text-emerald-950 text-xs truncate max-w-[220px]">
+                        {editInvoiceDocName || 'Invoice Bill Attached'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedDocView({
+                          title: editingExpense.title,
+                          url: editInvoiceDoc,
+                          fileName: editInvoiceDocName
+                        })}
+                        className="text-xs text-emerald-700 hover:text-emerald-900 font-bold px-2 py-1 rounded cursor-pointer"
+                      >
+                        View
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditInvoiceDoc('');
+                          setEditInvoiceDocName('');
+                        }}
+                        className="text-xs text-red-600 hover:text-red-800 font-bold px-2 py-1 rounded cursor-pointer"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <label className="flex flex-col items-center justify-center p-3.5 border-2 border-dashed border-emerald-300 hover:border-emerald-500 bg-white rounded-xl cursor-pointer transition-colors">
+                    <Upload className="w-5 h-5 text-emerald-600 mb-1" />
+                    <span className="text-xs font-bold text-emerald-800">Choose New Invoice Image / PDF</span>
+                    <span className="text-[10px] text-slate-400 mt-0.5">Click to browse (.jpg, .png, .pdf)</span>
+                    <input
+                      type="file"
+                      accept="image/*,application/pdf"
+                      onChange={handleEditFileUpload}
+                      className="hidden"
+                    />
+                  </label>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Notes / Remarks</label>
+                <textarea
+                  rows={2}
+                  value={editingExpense.notes || ''}
+                  onChange={(e) => setEditingExpense({ ...editingExpense, notes: e.target.value })}
+                  className="w-full p-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 outline-hidden text-xs"
+                />
+              </div>
+
+              <div className="pt-3 border-t border-slate-200 flex items-center justify-between">
+                <div className="font-bold text-slate-800 text-xs">
+                  Total Amount: <span className="font-mono text-emerald-700 font-extrabold">₹{((Number(editingExpense.amount) || 0) + (Number(editingExpense.taxAmount) || 0)).toLocaleString('en-IN')}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditingExpense(null)}
+                    className="px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 rounded-xl cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-xs cursor-pointer"
+                  >
+                    Save Changes
+                  </button>
+                </div>
               </div>
             </form>
           </div>

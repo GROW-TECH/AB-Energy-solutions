@@ -2368,9 +2368,12 @@ var QUOTATION_CONFIG = {
   DISCOUNT_APPROVAL_THRESHOLD_INR: 15e3,
   MAX_DISCOUNT_PERCENT: 15,
   // max 15% discount allowed
-  // Default Company Location (Karnataka / Tamil Nadu)
-  DEFAULT_SUPPLIER_STATE: "Karnataka",
-  DEFAULT_SUPPLIER_GSTIN: "29AABCS1429B1Z8",
+  // Default Company Location (Tamil Nadu)
+  DEFAULT_SUPPLIER_STATE: "Tamil Nadu",
+  DEFAULT_SUPPLIER_GSTIN: "33FSQPA3244H1ZU",
+  DEFAULT_SUPPLIER_ADDRESS: "No 13, Thammampatty Main Road, Maheswari Theatre Opposite Street, Vazhapadi, Salem, Tamil Nadu - 636115",
+  DEFAULT_SUPPLIER_PHONE: "+91 95664 99678",
+  DEFAULT_SUPPLIER_EMAIL: "abenergysolutiontn@gmail.com",
   // Client-Configured Statutory Defaults:
   // - Solar Panels & Inverters: 5% GST
   // - Structure, Cables/BOS, Installation Services: 18% GST
@@ -2395,11 +2398,20 @@ var QUOTATION_CONFIG = {
   // Solar irradiance & financial defaults
   SPECIFIC_YIELD_KWH_PER_KWP: 1450,
   DEFAULT_TARIFF_INR: 8.2,
-  // PM Surya Ghar Muft Bijli Yojana Central Subsidy Slabs (Residential Only)
+  // PM Surya Ghar Muft Bijli Yojana Central Subsidy + Tamil Nadu State Top-Up (G.O. Ms No. 102)
   RESIDENTIAL_SUBSIDY: {
-    SLAB_1KW_MAX: 3e4,
-    SLAB_2KW_MAX: 6e4,
-    SLAB_3KW_AND_ABOVE_MAX: 78e3
+    // 1 kW: Central ₹30,000 + TN State ₹5,000 = ₹35,000
+    SLAB_1KW_CENTRAL: 3e4,
+    SLAB_1KW_TN_TOPUP: 5e3,
+    SLAB_1KW_MAX: 35e3,
+    // 2 kW: Central ₹60,000 + TN State ₹10,000 = ₹70,000
+    SLAB_2KW_CENTRAL: 6e4,
+    SLAB_2KW_TN_TOPUP: 1e4,
+    SLAB_2KW_MAX: 7e4,
+    // 3 kW and above: Central ₹78,000 + TN State ₹22,000 = ₹1,00,000
+    SLAB_3KW_CENTRAL: 78e3,
+    SLAB_3KW_TN_TOPUP: 22e3,
+    SLAB_3KW_AND_ABOVE_MAX: 1e5
   }
 };
 function convertNumberToWords(amount) {
@@ -2724,24 +2736,34 @@ function calculateQuotation(input) {
   const effectiveGstRate = taxableAmount > 0 ? Number((totalGstAmount / taxableAmount * 100).toFixed(2)) : 0;
   const amountInWords = convertNumberToWords(finalContractAmount);
   let subsidyEligible = false;
+  let centralSubsidyAmount = 0;
+  let stateSubsidyAmount = 0;
   let subsidyAmount = 0;
   let subsidyNotes = "";
   if (category === "Residential") {
     subsidyEligible = true;
     if (capacityKw <= 1) {
+      centralSubsidyAmount = QUOTATION_CONFIG.RESIDENTIAL_SUBSIDY.SLAB_1KW_CENTRAL;
+      stateSubsidyAmount = QUOTATION_CONFIG.RESIDENTIAL_SUBSIDY.SLAB_1KW_TN_TOPUP;
       subsidyAmount = QUOTATION_CONFIG.RESIDENTIAL_SUBSIDY.SLAB_1KW_MAX;
-      subsidyNotes = "Govt. Subsidy: \u20B930,000 for 1 kW residential rooftop";
+      subsidyNotes = "Combined Subsidy: \u20B935,000 (Central PM Surya Ghar \u20B930,000 + TN State Top-Up \u20B95,000 under G.O. 102)";
     } else if (capacityKw <= 2) {
+      centralSubsidyAmount = QUOTATION_CONFIG.RESIDENTIAL_SUBSIDY.SLAB_2KW_CENTRAL;
+      stateSubsidyAmount = QUOTATION_CONFIG.RESIDENTIAL_SUBSIDY.SLAB_2KW_TN_TOPUP;
       subsidyAmount = QUOTATION_CONFIG.RESIDENTIAL_SUBSIDY.SLAB_2KW_MAX;
-      subsidyNotes = "Govt. Subsidy: \u20B960,000 for 2 kW residential rooftop";
+      subsidyNotes = "Combined Subsidy: \u20B970,000 (Central PM Surya Ghar \u20B960,000 + TN State Top-Up \u20B910,000 under G.O. 102)";
     } else {
+      centralSubsidyAmount = QUOTATION_CONFIG.RESIDENTIAL_SUBSIDY.SLAB_3KW_CENTRAL;
+      stateSubsidyAmount = QUOTATION_CONFIG.RESIDENTIAL_SUBSIDY.SLAB_3KW_TN_TOPUP;
       subsidyAmount = QUOTATION_CONFIG.RESIDENTIAL_SUBSIDY.SLAB_3KW_AND_ABOVE_MAX;
-      subsidyNotes = "Govt. Subsidy: \u20B978,000 maximum capped central subsidy for \u2265 3 kW";
+      subsidyNotes = "Combined Subsidy: \u20B91,00,000 Maximum Cap (Central \u20B978,000 + TN State Top-Up \u20B922,000 under G.O. 102)";
     }
   } else {
     subsidyEligible = false;
+    centralSubsidyAmount = 0;
+    stateSubsidyAmount = 0;
     subsidyAmount = 0;
-    subsidyNotes = "Commercial / Industrial / Institutional installations are not eligible for residential central DBT subsidy.";
+    subsidyNotes = "Commercial / Industrial / Institutional installations are not eligible for residential central DBT subsidy (40% accelerated depreciation applies).";
   }
   const indicativeNetCustomerCost = Math.max(0, finalContractAmount - subsidyAmount);
   const annualGenerationKwh = Math.round(actualCapacityKwp * QUOTATION_CONFIG.SPECIFIC_YIELD_KWH_PER_KWP);
@@ -2775,6 +2797,8 @@ function calculateQuotation(input) {
     finalContractAmount,
     amountInWords,
     subsidyEligible,
+    centralSubsidyAmount,
+    stateSubsidyAmount,
     subsidyAmount,
     subsidyNotes,
     indicativeNetCustomerCost,
@@ -2805,7 +2829,7 @@ function calculateQuotation(input) {
       "50% upon material dispatch against warehouse delivery challan.",
       "10% upon successful DISCOM net-metering synchronization and commissioning sign-off.",
       "Quotation valid for 14 calendar days from date of issuance.",
-      "Central Govt. subsidy support is credited directly to the customer bank account post DISCOM inspection via DBT.",
+      "Combined Govt. subsidy support (PM Surya Ghar Central + Tamil Nadu State Top-Up under G.O. Ms No. 102 up to \u20B91,00,000) is credited directly to customer bank account post DISCOM inspection via DBT.",
       "Standard 25-Year linear performance warranty on Tier-1 ALMM solar panels."
     ],
     warranties: {
@@ -4236,11 +4260,11 @@ var acceptQuotation = async (req, res) => {
           `${customerName.toLowerCase().replace(/\s+/g, ".")}@example.com`,
           customerPhone,
           customerAddress || "Site Address",
-          "Bengaluru",
-          "Karnataka",
-          "560001",
+          "Salem",
+          "Tamil Nadu",
+          "636115",
           `DISCOM-${Math.floor(1e6 + Math.random() * 9e6)}`,
-          "BESCOM",
+          "TANGEDCO",
           quote.lead_id,
           capacityKw,
           quoteTotal,
@@ -4310,7 +4334,7 @@ var acceptQuotation = async (req, res) => {
         JSON.stringify(initialChecklist),
         JSON.stringify(initialTasks),
         1,
-        `BESCOM/SANCTION/${Date.now().toString().slice(-4)}`,
+        `TANGEDCO/SANC/${Date.now().toString().slice(-4)}`,
         `Converted deal from Quotation ${quote.quotation_number}. 40% Advance invoice issued (Unpaid).`,
         (/* @__PURE__ */ new Date()).toISOString()
       ]
@@ -4579,11 +4603,11 @@ var createCustomer = async (req, res) => {
         c.phone,
         c.alternatePhone || null,
         c.address,
-        c.city || "Bengaluru",
-        c.state || "Karnataka",
-        c.pincode || "560001",
+        c.city || "Salem",
+        c.state || "Tamil Nadu",
+        c.pincode || "636115",
         c.consumerNumberDiscom || null,
-        c.discomName || "BESCOM",
+        c.discomName || "TANGEDCO",
         c.gstin || null,
         c.convertedFromLeadId || null,
         c.totalSystemKw || 0,
@@ -7453,11 +7477,11 @@ async function convertToEpcProject(req, res) {
           `${customerName.toLowerCase().replace(/\s+/g, ".")}@example.com`,
           customerPhone,
           customerAddress || "Site Address",
-          "Bengaluru",
-          "Karnataka",
-          "560001",
+          "Salem",
+          "Tamil Nadu",
+          "636115",
           `DISCOM-${Math.floor(1e6 + Math.random() * 9e6)}`,
-          "BESCOM",
+          "TANGEDCO",
           quote.lead_id,
           capacityKw,
           quoteTotal,
@@ -7530,7 +7554,7 @@ async function convertToEpcProject(req, res) {
         grn.id,
         grn.signed_pdf_url || null,
         poId,
-        `BESCOM/SANCTION/${Date.now().toString().slice(-4)}`,
+        `TANGEDCO/SANC/${Date.now().toString().slice(-4)}`,
         `Converted EPC Project from Quotation ${quote.quotation_number}. Materials verified & customer signature captured under GRN ${grn.grn_number}.`
       ]
     );
@@ -8845,8 +8869,8 @@ var initialSubsidies = [
     consumer_number: "04-122-005-981",
     sanctioned_load_kw: 25,
     system_capacity_kw: 20,
-    subsidy_applicable_amount: 78e3,
-    // Capped at 78,000 max for domestic
+    subsidy_applicable_amount: 1e5,
+    // Combined Central ₹78k + TN State ₹22k under G.O. 102
     dcr_modules_used: true,
     panel_make_and_model: "Tata Power Solar 545W Mono PERC (DCR)",
     inverter_make_and_model: "Sungrow 20kW On-Grid Inverter",
@@ -8893,7 +8917,7 @@ var initialSubsidies = [
     consumer_number: "04-188-012-340",
     sanctioned_load_kw: 5,
     system_capacity_kw: 3.3,
-    subsidy_applicable_amount: 78e3,
+    subsidy_applicable_amount: 1e5,
     dcr_modules_used: true,
     panel_make_and_model: "Waaree 550W Bi-facial DCR",
     inverter_make_and_model: "Growatt 3.3kW Single Phase",
@@ -8914,7 +8938,7 @@ var initialSubsidies = [
     net_meter_number: "L&T-GEN-98214-2026",
     net_meter_install_date: "2026-09-16",
     commissioning_certificate_date: "2026-09-18",
-    dbt_disbursal_amount: 78e3,
+    dbt_disbursal_amount: 1e5,
     dbt_bank_utr: "PMAY20261008009214SBI",
     dbt_credit_date: "2026-10-08",
     documents: {
@@ -8928,7 +8952,7 @@ var initialSubsidies = [
       net_meter_test_report: true,
       commissioning_cert: true
     },
-    notes: "Subsidy of \u20B978,000 credited to customer State Bank of India account. Project fully closed.",
+    notes: "Combined subsidy of \u20B91,00,000 (Central \u20B978k + TN State \u20B922k) credited to customer State Bank of India account. Project fully closed.",
     last_updated: "2026-10-08"
   },
   {
@@ -8946,7 +8970,7 @@ var initialSubsidies = [
     consumer_number: "04-099-001-442",
     sanctioned_load_kw: 6,
     system_capacity_kw: 5,
-    subsidy_applicable_amount: 78e3,
+    subsidy_applicable_amount: 1e5,
     dcr_modules_used: true,
     panel_make_and_model: "Adani Solar 540W Mono DCR",
     inverter_make_and_model: "Solis 5kW Dual MPPT",
@@ -9081,9 +9105,9 @@ async function syncLiveProjectsWithSubsidies(cached) {
       const isResidential = capKw <= 10;
       let applicableSubsidy = 0;
       if (isResidential) {
-        if (capKw <= 1) applicableSubsidy = 3e4;
-        else if (capKw <= 2) applicableSubsidy = 6e4;
-        else applicableSubsidy = 78e3;
+        if (capKw <= 1) applicableSubsidy = 35e3;
+        else if (capKw <= 2) applicableSubsidy = 7e4;
+        else applicableSubsidy = 1e5;
       }
       const stageInfo = mapProjectStageToSubsidyStage(p.stage || "Booking");
       if (existingIdx === -1) {
@@ -9098,9 +9122,9 @@ async function syncLiveProjectsWithSubsidies(cached) {
           is_eligible: isResidential,
           ineligibility_reason: isResidential ? void 0 : "Commercial/Industrial installation: 40% tax depreciation applicable in lieu of residential subsidy.",
           site_address: p.customer_address || "Tamil Nadu, India",
-          discom_name: p.customer_discom || "TANGEDCO",
+          discom_name: (p.customer_discom || "TANGEDCO").replace(/BESCOM/gi, "TANGEDCO"),
           discom_section_office: "Local Section Office",
-          consumer_number: p.consumer_number_discom || p.discom_sanction_number || "Pending Consumer No",
+          consumer_number: (p.consumer_number_discom || p.discom_sanction_number || "Pending Consumer No").replace(/BESCOM/gi, "TANGEDCO"),
           sanctioned_load_kw: capKw,
           system_capacity_kw: capKw,
           subsidy_applicable_amount: applicableSubsidy,
@@ -9114,7 +9138,7 @@ async function syncLiveProjectsWithSubsidies(cached) {
           stage_status: p.stage === "Completed" ? "completed" : "in_progress",
           days_in_current_stage: 1,
           is_delayed: false,
-          net_meter_number: p.discom_sanction_number || void 0,
+          net_meter_number: p.discom_sanction_number ? p.discom_sanction_number.replace(/BESCOM\/SANCTION/gi, "TANGEDCO/SANC").replace(/BESCOM/gi, "TANGEDCO") : void 0,
           net_meter_install_date: p.net_meter_installed_date || void 0,
           commissioning_certificate_date: p.commissioning_date || void 0,
           documents: {

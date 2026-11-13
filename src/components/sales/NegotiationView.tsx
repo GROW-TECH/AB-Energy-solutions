@@ -5,7 +5,7 @@ import {
   Printer, Download, ShieldCheck, Clock, AlertCircle, Edit3, 
   Save, RotateCcw, Check, Sparkles, Building2, User, 
   IndianRupee, ChevronRight, X, Layers, Truck, Package, ExternalLink,
-  Receipt
+  Receipt, Upload, ImageIcon
 } from 'lucide-react';
 import { useCrm } from '../../context/CrmContext';
 import { Quotation, QuotationVersion } from '../../types';
@@ -49,6 +49,7 @@ export const NegotiationView: React.FC<NegotiationViewProps> = ({
   const [advanceMode, setAdvanceMode] = useState<string>('NEFT/RTGS');
   const [advanceRef, setAdvanceRef] = useState<string>('');
   const [advanceDate, setAdvanceDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [advanceScreenshot, setAdvanceScreenshot] = useState<string>('');
 
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
     setToastMessage({ text, type });
@@ -104,6 +105,7 @@ export const NegotiationView: React.FC<NegotiationViewProps> = ({
     setAdvanceMode('NEFT/RTGS');
     setAdvanceRef(`ADV-${Date.now().toString().slice(-6)}`);
     setAdvanceDate(new Date().toISOString().split('T')[0]);
+    setAdvanceScreenshot('');
   };
 
   // Recalculate figures dynamically in negotiation drawer
@@ -165,6 +167,7 @@ export const NegotiationView: React.FC<NegotiationViewProps> = ({
             transactionReference: advanceRef || `ADV-${Date.now().toString().slice(-6)}`,
             paymentDate: advanceDate,
             isAdvance: true,
+            paymentScreenshot: advanceScreenshot || undefined,
             notes: `Customer Advance payment for Quotation ${selectedQuoteForNegotiation.quotationNumber || selectedQuoteForNegotiation.id}. ${negotiationNotes}`.trim(),
           });
           const linkedProj = projects.find(p => p.quotationId === selectedQuoteForNegotiation.id || p.leadId === selectedQuoteForNegotiation.leadId);
@@ -175,6 +178,8 @@ export const NegotiationView: React.FC<NegotiationViewProps> = ({
               advancePaymentMode: advanceMode,
               advancePaymentRef: advanceRef,
               advancePaymentDate: advanceDate,
+              advancePaymentScreenshot: advanceScreenshot || undefined,
+              advancePaymentVerified: false,
               advancePaymentNotes: negotiationNotes,
             });
           }
@@ -811,6 +816,58 @@ export const NegotiationView: React.FC<NegotiationViewProps> = ({
                         className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-emerald-500"
                       />
                     </div>
+                  </div>
+
+                  {/* Advance Payment Screenshot / Proof Upload */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Advance Payment Screenshot / Proof (For Accounts Verification)
+                    </label>
+                    {advanceScreenshot ? (
+                      <div className="relative border border-emerald-300 rounded-xl p-2.5 bg-emerald-50/60 flex items-center justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <img 
+                            src={advanceScreenshot} 
+                            alt="Advance Payment Proof" 
+                            className="w-12 h-12 object-cover rounded-lg border border-emerald-300 shadow-2xs"
+                          />
+                          <div>
+                            <span className="text-xs font-bold text-emerald-950 block">Payment Screenshot Attached</span>
+                            <span className="text-[10px] text-emerald-700 font-medium">Ready for Accounts team audit</span>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={selectedQuoteForNegotiation.status === 'Customer_Accepted'}
+                          onClick={() => setAdvanceScreenshot('')}
+                          className="px-2.5 py-1 text-xs text-rose-600 hover:bg-rose-50 rounded-lg font-bold border border-rose-200 transition-colors"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="border-2 border-dashed border-slate-300 hover:border-emerald-500 rounded-xl p-3 flex flex-col items-center justify-center cursor-pointer bg-slate-50 hover:bg-emerald-50/30 transition-colors">
+                        <Upload className="w-5 h-5 text-slate-400 mb-1" />
+                        <span className="text-xs font-bold text-slate-700">Click to upload payment screenshot / receipt</span>
+                        <span className="text-[10px] text-slate-400">PNG, JPG, or JPEG up to 5MB</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          disabled={selectedQuoteForNegotiation.status === 'Customer_Accepted'}
+                          onChange={e => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              const reader = new FileReader();
+                              reader.onload = ev => {
+                                setAdvanceScreenshot(ev.target?.result as string);
+                              };
+                              reader.readAsDataURL(file);
+                            }
+                          }}
+                        />
+                      </label>
+                    )}
                   </div>
                   <p className="text-[10px] text-amber-800 leading-tight">
                     Confirming this advance will automatically create a verified entry under <strong>Customer Advances</strong> in the Accounts panel and unlock Purchase Orders for material procurement.
