@@ -67,7 +67,8 @@ export interface SubsidyRecord {
 }
 
 // Initial realistic subsidy records matching existing projects
-const initialSubsidies: SubsidyRecord[] = [
+const initialSubsidies: SubsidyRecord[] = [];
+const _deprecatedSubsidies: any[] = [
   {
     id: 'SUB-2026-001',
     project_id: 'PROJECT-2026-023',
@@ -337,56 +338,7 @@ export async function syncLiveProjectsWithSubsidies(cached: SubsidyRecord[]): Pr
 
       const stageInfo = mapProjectStageToSubsidyStage(p.stage || 'Booking');
 
-      if (existingIdx === -1) {
-        // Auto-create tracking record for live project
-        const subId = `SUB-${cleanId.replace('PROJECT-', '').replace('PRJ-', '')}`;
-        const newRecord: SubsidyRecord = {
-          id: subId,
-          project_id: cleanId,
-          project_number: cleanId,
-          customer_name: p.customer_name || 'Valued Customer',
-          customer_phone: p.customer_phone || '',
-          customer_type: isResidential ? 'residential' : 'commercial',
-          is_eligible: isResidential,
-          ineligibility_reason: isResidential ? undefined : 'Commercial/Industrial installation: 40% tax depreciation applicable in lieu of residential subsidy.',
-          site_address: p.customer_address || 'Tamil Nadu, India',
-          discom_name: (p.customer_discom || 'TANGEDCO').replace(/BESCOM/gi, 'TANGEDCO'),
-          discom_section_office: 'Local Section Office',
-          consumer_number: (p.consumer_number_discom || p.discom_sanction_number || 'Pending Consumer No').replace(/BESCOM/gi, 'TANGEDCO'),
-          sanctioned_load_kw: capKw,
-          system_capacity_kw: capKw,
-          subsidy_applicable_amount: applicableSubsidy,
-          dcr_modules_used: isResidential,
-          panel_make_and_model: isResidential ? 'Tata Power Solar / Waaree 545W Mono PERC (DCR)' : 'Tier-1 High Efficiency Panels',
-          inverter_make_and_model: `${capKw}kW On-Grid Solar Inverter`,
-          portal_application_no: isResidential ? `PMS-TN-${new Date().getFullYear()}-${cleanId.replace(/\D/g, '').slice(-5) || Math.floor(10000 + Math.random() * 90000)}` : 'N/A (Commercial Project)',
-          application_submission_date: p.created_at ? new Date(p.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-          current_stage: isResidential ? stageInfo.stage : 0,
-          current_stage_name: isResidential ? stageInfo.stageName : 'Not Eligible (Commercial Project)',
-          stage_status: p.stage === 'Completed' ? 'completed' : 'in_progress',
-          days_in_current_stage: 1,
-          is_delayed: false,
-          net_meter_number: p.discom_sanction_number ? p.discom_sanction_number.replace(/BESCOM\/SANCTION/gi, 'TANGEDCO/SANC').replace(/BESCOM/gi, 'TANGEDCO') : undefined,
-          net_meter_install_date: p.net_meter_installed_date || undefined,
-          commissioning_certificate_date: p.commissioning_date || undefined,
-          documents: {
-            electricity_bill: true,
-            aadhaar_card: isResidential,
-            cancelled_cheque: false,
-            roof_photo_geotagged: true,
-            dcr_certificate: isResidential,
-            tfr_letter: Boolean(p.discom_sanction_number),
-            wcr_copy: p.stage === 'Testing & Commissioning' || p.stage === 'Net Metering & Handover' || p.stage === 'Completed',
-            net_meter_test_report: Boolean(p.net_meter_installed_date),
-            commissioning_cert: Boolean(p.commissioning_date),
-          },
-          notes: `Auto-linked from live Project ${cleanId}. Workflow synchronized with PM Surya Ghar portal.`,
-          last_updated: new Date().toISOString().split('T')[0]
-        };
-
-        updatedList.unshift(newRecord);
-        hasChanges = true;
-      } else {
+      if (existingIdx !== -1) {
         // Sync project updates if customer info changed or project stage advanced
         const existing = { ...updatedList[existingIdx] };
         let recordChanged = false;
@@ -573,5 +525,31 @@ subsidiesRouter.post('/', (req: Request, res: Response) => {
     success: true,
     message: 'Subsidy tracking record created successfully',
     subsidy: newRecord
+  });
+});
+
+// 5. Delete specific subsidy record
+subsidiesRouter.delete('/:id', (req: Request, res: Response) => {
+  const { id } = req.params;
+  let data = loadSubsidies();
+  const initialCount = data.length;
+  data = data.filter(s => s.id !== id && s.project_id !== id && s.project_number !== id);
+  saveSubsidies(data);
+
+  return res.json({
+    success: true,
+    message: 'Subsidy record deleted successfully',
+    deletedCount: initialCount - data.length,
+    remaining: data.length
+  });
+});
+
+// 6. Delete all existing subsidy records (Clear All)
+subsidiesRouter.delete('/', (_req: Request, res: Response) => {
+  saveSubsidies([]);
+  return res.json({
+    success: true,
+    message: 'All existing subsidy records have been cleared successfully',
+    remaining: 0
   });
 });

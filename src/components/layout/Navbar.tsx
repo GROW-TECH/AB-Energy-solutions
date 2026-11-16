@@ -22,10 +22,12 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenNewLead, onOpenSearch, onO
     previewRole,
     setDemoPreviewRole,
     notifications, 
+    addNotification,
     markNotificationRead, 
     markAllNotificationsRead,
     resetAllDemoData,
-    automationRules
+    automationRules,
+    employees
   } = useCrm();
 
   const [showNotifications, setShowNotifications] = useState(false);
@@ -51,6 +53,31 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenNewLead, onOpenSearch, onO
   const isCustomer = activeRole === 'Customer';
   const isSuperAdmin = currentUser?.role === 'Super Admin';
   const canCreateLead = isSuperAdmin || activeRole === 'Sales Manager' || activeRole === 'Sales Executive';
+
+  // Find matching employee for current user (to support dynamic name changes)
+  const matchedEmp = employees?.find(
+    e => (currentUser?.employeeId && e.id === currentUser.employeeId) ||
+         (currentUser?.email && e.email?.toLowerCase() === currentUser.email?.toLowerCase()) ||
+         (currentUser?.role === 'Super Admin' && e.role === 'Super Admin')
+  );
+
+  const displayName = (() => {
+    if (currentUser?.name && currentUser.name !== 'Super Admin' && currentUser.name !== 'Rajesh Sharma') {
+      return currentUser.name;
+    }
+    if (matchedEmp?.name && matchedEmp.name !== 'Super Admin') {
+      return matchedEmp.name;
+    }
+    if (currentUser?.name && currentUser.name !== 'Super Admin') {
+      return currentUser.name;
+    }
+    if (currentUser?.username && currentUser.username !== 'superadmin') {
+      return currentUser.username;
+    }
+    return matchedEmp?.name || currentUser?.name || currentUser?.username || 'Super Admin';
+  })();
+
+  const avatarInitials = activeRole.slice(0, 2).toUpperCase();
 
   const roles: Role[] = [
     'Super Admin',
@@ -155,6 +182,19 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenNewLead, onOpenSearch, onO
                     )}
                   </div>
                   <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
+                          Notification.requestPermission();
+                        }
+                        addNotification('AB Energy Alert Test', 'Real-time Android and CRM notifications are active and functioning correctly!', 'General');
+                      }}
+                      className="text-[10px] bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded font-semibold cursor-pointer transition-colors"
+                      title="Send a sample notification to this device"
+                    >
+                      Test Alert
+                    </button>
                     {unreadCount > 0 && (
                       <button 
                         onClick={markAllNotificationsRead}
@@ -226,21 +266,21 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenNewLead, onOpenSearch, onO
           <div className="relative">
             <button
               onClick={() => setShowRoleDropdown(!showRoleDropdown)}
-              className={`flex items-center gap-2 pl-2 pr-2.5 py-1.5 rounded-lg border transition-colors text-xs font-medium ${
+              className={`flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-lg border transition-colors text-xs font-medium cursor-pointer shadow-2xs ${
                 previewRole 
                   ? 'border-amber-300 bg-amber-50/80 text-amber-900 hover:bg-amber-100/60' 
-                  : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                  : 'border-slate-200 bg-slate-50/80 hover:bg-slate-100/90 text-slate-700'
               }`}
               title="Super Admin: Preview UI as another role (Presentation only)"
             >
               <div className="w-5 h-5 rounded-full bg-slate-900 text-emerald-400 flex items-center justify-center font-bold text-[10px]">
-                {activeRole.slice(0, 2).toUpperCase()}
+                {avatarInitials}
               </div>
-              <div className="text-left leading-tight hidden md:block">
-                <span className="font-bold block">{activeRole}</span>
-                {previewRole && (
-                  <span className="text-[9px] text-amber-600 font-semibold block uppercase tracking-wider">Preview Mode</span>
-                )}
+              <div className="flex flex-col text-left leading-tight">
+                <span className="hidden md:inline font-bold text-slate-900">{displayName}</span>
+                <span className="text-[10px] text-slate-500 font-semibold">
+                  {previewRole ? `Super Admin (${previewRole} Preview)` : activeRole}
+                </span>
               </div>
             </button>
 
@@ -313,10 +353,10 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenNewLead, onOpenSearch, onO
             className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50/80 hover:bg-slate-100/90 text-xs text-slate-700 font-medium cursor-pointer transition-colors shadow-2xs"
           >
             <div className="w-5 h-5 rounded-full bg-slate-900 text-emerald-400 flex items-center justify-center font-bold text-[10px]">
-              {currentUser?.role?.slice(0, 2).toUpperCase() || 'US'}
+              {avatarInitials}
             </div>
             <div className="flex flex-col text-left leading-tight">
-              <span className="hidden md:inline font-bold text-slate-900">{currentUser?.name || currentUser?.username}</span>
+              <span className="hidden md:inline font-bold text-slate-900">{displayName}</span>
               <span className="text-[10px] text-slate-500 font-semibold">{currentUser?.role}</span>
             </div>
           </button>

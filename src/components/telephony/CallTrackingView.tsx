@@ -252,10 +252,21 @@ export const CallTrackingView: React.FC = () => {
     setIsDeleting(true);
     try {
       const token = localStorage.getItem('ab_solar_token') || localStorage.getItem('ab_energy_auth_token') || '';
-      const res = await fetch(getApiUrl(`/api/telephony/calls/${targetId}`), {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` }
+      // Try POST first for shared hosting/cPanel Apache compatibility, fallback to DELETE
+      let res = await fetch(getApiUrl(`/api/telephony/calls/${targetId}/delete`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
       });
+      if (res.status === 404 || res.status === 405) {
+        res = await fetch(getApiUrl(`/api/telephony/calls/${targetId}`), {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${token}` }
+        });
+      }
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        throw new Error('Server returned unexpected response. Please restart Node.js in cPanel.');
+      }
       const data = await res.json();
       if (data.success) {
         setCalls(prev => prev.filter(c => c.id !== targetId));
@@ -270,6 +281,54 @@ export const CallTrackingView: React.FC = () => {
       showToast(err.message || 'Failed to delete call record', 'error');
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const handleClearAllCalls = async () => {
+    if (!window.confirm('Are you sure you want to permanently delete all call records from the database? This cannot be undone.')) {
+      return;
+    }
+    try {
+      const token = localStorage.getItem('ab_solar_token') || localStorage.getItem('ab_energy_auth_token') || '';
+      // Try POST first for shared hosting/cPanel Apache compatibility, fallback to DELETE
+      let res = await fetch(getApiUrl('/api/telephony/clear-all'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        }
+      });
+      if (res.status === 404 || res.status === 405) {
+        res = await fetch(getApiUrl('/api/telephony/clear-all'), {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${token}` }
+        });
+      }
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        throw new Error('Server returned HTML instead of JSON. Please click "Restart Application" in cPanel Setup Node.js App.');
+      }
+      const data = await res.json();
+      if (data.success) {
+        setCalls([]);
+        setMetrics({
+          total_calls_today: 0,
+          outgoing_count: 0,
+          incoming_count: 0,
+          missed_count: 0,
+          unresolved_missed_count: 0,
+          total_talk_time_seconds: 0
+        });
+        setTeamBreakdown([]);
+        setTotalRecords(0);
+        setTotalPages(1);
+        showToast('All call records cleared successfully!', 'success');
+      } else {
+        showToast(data.message || data.error || 'Failed to clear call records', 'error');
+      }
+    } catch (err: any) {
+      console.error('Failed to clear calls:', err);
+      showToast(err.message || 'Failed to clear calls', 'error');
     }
   };
 
@@ -390,9 +449,18 @@ export const CallTrackingView: React.FC = () => {
 
           <button
             onClick={fetchCalls}
-            className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
+            className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-sm font-medium transition-colors shadow-sm cursor-pointer"
           >
             Refresh Now
+          </button>
+
+          <button
+            onClick={handleClearAllCalls}
+            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-lg border border-rose-200 transition-colors cursor-pointer"
+            title="Permanently delete all call records from database"
+          >
+            <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+            <span>Clear All Calls</span>
           </button>
         </div>
       </div>

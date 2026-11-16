@@ -13,7 +13,7 @@ interface SuppliersViewProps {
 }
 
 export const SuppliersView: React.FC<SuppliersViewProps> = ({ onNavigateToPo }) => {
-  const { suppliers, addSupplier, updateSupplier } = useCrm();
+  const { suppliers, addSupplier, updateSupplier, deleteSupplier } = useCrm();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
@@ -288,8 +288,22 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({ onNavigateToPo }) 
               </div>
 
               <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
-                <div className="text-[11px] text-slate-500">
-                  Active POs: <span className="font-bold text-slate-800">{supplier.activeOrdersCount}</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (window.confirm(`Are you sure you want to delete supplier "${supplier.name}"?`)) {
+                        deleteSupplier(supplier.id);
+                      }
+                    }}
+                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer border border-transparent hover:border-rose-200"
+                    title={`Delete supplier ${supplier.name}`}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                  <div className="text-[11px] text-slate-500">
+                    Active POs: <span className="font-bold text-slate-800">{supplier.activeOrdersCount}</span>
+                  </div>
                 </div>
                 <button
                   onClick={onNavigateToPo}
@@ -303,6 +317,26 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({ onNavigateToPo }) 
           );
         })}
       </div>
+
+      {/* Empty State */}
+      {filteredSuppliers.length === 0 && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center space-y-3">
+          <div className="w-12 h-12 bg-slate-100 text-slate-400 rounded-2xl flex items-center justify-center mx-auto">
+            <Truck className="w-6 h-6" />
+          </div>
+          <h3 className="font-bold text-slate-800 text-sm">No Suppliers Found</h3>
+          <p className="text-xs text-slate-500 max-w-sm mx-auto">
+            All mock suppliers have been removed. Click &quot;Add Supplier&quot; to onboard your authorized solar vendors and upload their rate cards or certificates.
+          </p>
+          <button
+            onClick={() => setShowAddSupplierModal(true)}
+            className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs transition-colors cursor-pointer shadow-xs"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Add First Supplier</span>
+          </button>
+        </div>
+      )}
 
       {/* Add Supplier Modal with Document Upload */}
       {showAddSupplierModal && (

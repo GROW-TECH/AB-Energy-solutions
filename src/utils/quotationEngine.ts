@@ -676,3 +676,44 @@ export function calculateQuotation(input: QuotationCalculationInput): QuotationC
     },
   };
 }
+
+/**
+ * Robustly verifies whether a lead has an actual existing quotation in the system.
+ * Prevents recycled Lead IDs (e.g. after lead deletion) from accidentally inheriting
+ * orphaned quotations belonging to previous customers.
+ */
+export function checkLeadHasExistingQuote(
+  lead?: { id?: string; name?: string; phone?: string; quotationId?: string } | null,
+  quotations: Array<{ id?: string; leadId?: string; customerPhone?: string; leadName?: string; surveyId?: string }> = [],
+  linkedSurvey?: { id?: string; leadId?: string; status?: string } | null
+): boolean {
+  if (!lead || !lead.id) return false;
+
+  // 1. If lead explicitly has a quotationId assigned, verify that it actually exists in quotations
+  if (lead.quotationId && quotations.some(q => q.id === lead.quotationId)) {
+    return true;
+  }
+
+  const cleanPhone = (p?: string) => (p ? p.replace(/\D/g, '').slice(-10) : '');
+  const leadPhoneClean = cleanPhone(lead.phone);
+  const leadNameClean = lead.name?.trim().toLowerCase();
+
+  return quotations.some(q => {
+    // 2. Must match lead ID AND either customer phone or customer name to avoid ghost quotation inheritance
+    if (q.leadId === lead.id) {
+      const qPhoneClean = cleanPhone(q.customerPhone);
+      const qNameClean = q.leadName?.trim().toLowerCase();
+
+      if (leadPhoneClean && qPhoneClean && leadPhoneClean === qPhoneClean) return true;
+      if (leadNameClean && qNameClean && leadNameClean === qNameClean) return true;
+    }
+
+    // 3. Or matches via verified linked survey for this specific lead
+    if (linkedSurvey && linkedSurvey.leadId === lead.id && linkedSurvey.id && q.surveyId === linkedSurvey.id) {
+      return true;
+    }
+
+    return false;
+  });
+}
+

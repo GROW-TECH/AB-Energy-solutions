@@ -40,6 +40,8 @@ interface CrmContextType {
   login: (usernameOrData: string | { name: string; email: string; role: Role }, passwordOrNothing?: string) => Promise<{ success: boolean; error?: string; role?: Role; defaultTab?: string }>;
   logout: () => Promise<void>;
   authFetch: (url: string, options?: RequestInit) => Promise<Response>;
+  updateCurrentUser: (userData: Partial<AuthUser>) => void;
+  updateEmployee: (empId: string, updates: Partial<Employee>) => void;
 
   // Role & Demo Preview
   activeRole: Role;
@@ -122,6 +124,7 @@ interface CrmContextType {
   updateExpense: (expenseId: string, updates: Partial<ExpenseItem>) => void;
   addSupplier: (supplierData: Partial<Supplier>) => Supplier;
   updateSupplier: (supplierId: string, updates: Partial<Supplier>) => void;
+  deleteSupplier: (supplierId: string) => void;
   createPurchaseOrder: (poData: Partial<PurchaseOrder>) => PurchaseOrder;
   receivePurchaseOrder: (poId: string) => void;
   addProduct: (productData: Partial<InventoryProduct>) => InventoryProduct;
@@ -129,6 +132,8 @@ interface CrmContextType {
   deleteProduct: (productId: string) => void;
   addMaterialAllocation: (allocationData: Partial<MaterialAllocation>) => MaterialAllocation;
   updateMaterialAllocationStatus: (allocationId: string, status: MaterialAllocation['status']) => void;
+  deleteMaterialAllocation: (allocationId: string) => void;
+  clearAllMaterialAllocations: () => void;
   createServiceTicket: (ticketData: Partial<ServiceTicket>) => ServiceTicket;
   updateServiceTicket: (ticketId: string, updates: Partial<ServiceTicket>) => void;
   createCustomerPortalAccount: (customerId: string, username: string, password: string) => Promise<{ success: boolean; error?: string; username?: string }>;
@@ -139,6 +144,7 @@ interface CrmContextType {
   deleteFollowUp: (followUpId: string) => void;
   toggleAutomationRule: (ruleId: string) => void;
   addAutomationRule: (rule: Partial<AutomationRule>) => AutomationRule;
+  addNotification: (title: string, message: string, type: SystemNotification['type'], targetId?: string, targetType?: string) => void;
   markNotificationRead: (id: string) => void;
   markAllNotificationsRead: () => void;
   resetAllDemoData: () => void;
@@ -236,6 +242,15 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return response;
   };
 
+  const updateCurrentUser = (userData: Partial<AuthUser>) => {
+    setCurrentUser(prev => {
+      if (!prev) return null;
+      const updated = { ...prev, ...userData };
+      localStorage.setItem(`${STORAGE_KEY}_user`, JSON.stringify(updated));
+      return updated;
+    });
+  };
+
   const login = async (
     usernameOrData: string | { name: string; email: string; role: Role }, 
     passwordOrNothing?: string
@@ -329,6 +344,7 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       .then(data => {
         if (data.success && data.user) {
           setCurrentUser(data.user);
+          localStorage.setItem(`${STORAGE_KEY}_user`, JSON.stringify(data.user));
           setActiveRoleState(data.user.role);
           if (data.user.customerId) {
             setSelectedCustomerIdForPortal(data.user.customerId);
@@ -374,6 +390,14 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Relational Entities
   const [employees, setEmployees] = useState<Employee[]>(INITIAL_EMPLOYEES);
+
+  const updateEmployee = (empId: string, updates: Partial<Employee>) => {
+    setEmployees(prev => {
+      const updated = prev.map(emp => emp.id === empId ? { ...emp, ...updates } : emp);
+      localStorage.setItem(`${STORAGE_KEY}_employees`, JSON.stringify(updated));
+      return updated;
+    });
+  };
   const [leads, setLeads] = useState<Lead[]>(() => {
     const saved = localStorage.getItem(`${STORAGE_KEY}_leads`);
     return saved ? JSON.parse(saved) : [];
@@ -450,7 +474,17 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
   const [suppliers, setSuppliers] = useState<Supplier[]>(() => {
     const saved = localStorage.getItem(`${STORAGE_KEY}_suppliers`);
-    return saved ? JSON.parse(saved) : INITIAL_SUPPLIERS;
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        return Array.isArray(parsed)
+          ? parsed.filter((s: any) => !['SUP-01', 'SUP-02', 'SUP-03', 'SUP-04', 'SUP-05', 'SUP-06'].includes(s.id) && !['VEN-WAAREE', 'VEN-GROWATT', 'VEN-SUNGROW', 'VEN-APAR', 'VEN-METAL', 'VEN-TRUEPWR'].includes(s.supplierCode))
+          : [];
+      } catch {
+        return [];
+      }
+    }
+    return INITIAL_SUPPLIERS;
   });
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>(() => {
     const saved = localStorage.getItem(`${STORAGE_KEY}_pos`);
@@ -546,6 +580,17 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const refreshData = async () => {
     if (!token) return;
     try {
+      try {
+        const meRes = await authFetch('/api/auth/me');
+        if (meRes.ok) {
+          const meData = await meRes.json();
+          if (meData.success && meData.user) {
+            setCurrentUser(meData.user);
+            localStorage.setItem(`${STORAGE_KEY}_user`, JSON.stringify(meData.user));
+          }
+        }
+      } catch (_) {}
+
       const res = await authFetch('/api/bootstrap');
       if (res.status === 401) {
         logout();
@@ -775,6 +820,25 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       targetType,
     };
     setNotifications(prev => [notif, ...prev]);
+
+    // 1. Trigger authentic Android notification if running inside Android APK
+    if (typeof (window as any).AndroidCallTracker?.showNotification === 'function') {
+      try {
+        (window as any).AndroidCallTracker.showNotification(title, message);
+      } catch (err) {
+        console.warn('Native Android notification bridge error:', err);
+      }
+    }
+
+    // 2. Trigger standard Web Notification if supported and granted
+    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+      try {
+        new Notification(title, {
+          body: message,
+          icon: '/favicon.ico',
+        });
+      } catch (_) {}
+    }
   };
 
   // 1. AUTOMATION: Create Lead
@@ -783,7 +847,15 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const match = l.id.match(/LD-2026-(\d+)/);
       return match ? parseInt(match[1], 10) : 0;
     });
-    const maxNum = Math.max(28, ...existingNums, leads.length);
+    const quoteNums = quotations.map(q => {
+      const match = q.leadId?.match(/LD-2026-(\d+)/);
+      return match ? parseInt(match[1], 10) : 0;
+    });
+    const surveyNums = surveys.map(s => {
+      const match = s.leadId?.match(/LD-2026-(\d+)/);
+      return match ? parseInt(match[1], 10) : 0;
+    });
+    const maxNum = Math.max(28, ...existingNums, ...quoteNums, ...surveyNums, leads.length);
     const leadId = `LD-2026-${String(maxNum + 1).padStart(3, '0')}`;
     
     // Lead Assignment Resolution:
@@ -920,6 +992,8 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const deleteLead = (leadId: string) => {
     setLeads(prev => prev.filter(l => l.id !== leadId));
+    setQuotations(prev => prev.filter(q => q.leadId !== leadId));
+    setSurveys(prev => prev.filter(s => s.leadId !== leadId));
     authFetch(`/api/leads/${leadId}`, {
       method: 'DELETE',
     }).catch(err => console.error('Failed to delete lead from MySQL:', err));
@@ -1252,7 +1326,7 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             const currentPhotos = s.photos || [];
             return {
               ...s,
-              photos: [...currentPhotos, data.photo],
+              photos: [...currentPhotos, { ...data.photo, base64Data: photoData.base64Data }],
             };
           }
           return s;
@@ -1739,17 +1813,33 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       setQuotations(prev => prev.map(q => {
         if (q.id === quotationId) {
-          const v = q.versions[0] || {};
-          const updatedVer = {
-            ...v,
-            items: calc.items,
+          const defaultVer: QuotationVersion = q.versions[0] || {
+            version: q.currentVersion || 1,
+            quotationNumber: q.quotationNumber || `QT-${q.id}-V1`,
+            createdAt: new Date().toISOString(),
+            items: calc.items as any,
             subtotal: calc.subtotal,
+            subsidyDeduction: (calc as any).subsidyAmount || 0,
+            discount: calc.discountAmount || 0,
+            taxableAmount: calc.taxableAmount,
+            gstRate: 13.8,
+            gstAmount: calc.gstAmount,
+            netTotal: calc.finalContractAmount,
+            amountInWords: calc.amountInWords,
+            termsAndConditions: [],
+            paymentMilestones: [],
+          };
+          const updatedVer: QuotationVersion = {
+            ...defaultVer,
+            items: calc.items as any,
+            subtotal: calc.subtotal,
+            subsidyDeduction: (calc as any).subsidyAmount || defaultVer.subsidyDeduction || 0,
             discount: calc.discountAmount,
             taxableAmount: calc.taxableAmount,
             gstAmount: calc.gstAmount,
             netTotal: calc.finalContractAmount,
             amountInWords: calc.amountInWords,
-            notes: editPayload.notes || v.notes,
+            notes: editPayload.notes || defaultVer.notes,
           };
           return {
             ...q,
@@ -1762,7 +1852,7 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             gstAmount: calc.gstAmount,
             amountInWords: calc.amountInWords,
             versions: [updatedVer, ...q.versions.slice(1)],
-          };
+          } as Quotation;
         }
         return q;
       }));
@@ -2797,6 +2887,10 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setSuppliers(prev => prev.map(s => s.id === supplierId ? { ...s, ...updates } : s));
   };
 
+  const deleteSupplier = (supplierId: string): void => {
+    setSuppliers(prev => prev.filter(s => s.id !== supplierId));
+  };
+
   const createPurchaseOrder = (poData: Partial<PurchaseOrder>): PurchaseOrder => {
     const poId = `PO-${Date.now().toString().slice(-6)}`;
     const newPo: PurchaseOrder = {
@@ -2886,6 +2980,11 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       supplierName: productData.supplierName || (suppliers[0]?.name || 'Waaree Energies Ltd'),
     };
     setProducts(prev => [newProd, ...prev]);
+    authFetch('/api/inventory/products', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newProd),
+    }).catch(err => console.error('Failed to save product to MySQL:', err));
     addNotification('New SKU Cataloged', `Equipment ${newProd.name} (${newProd.sku}) added to inventory.`, 'Inventory', newProd.id, 'Project');
     return newProd;
   };
@@ -2907,6 +3006,9 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const deleteProduct = (productId: string) => {
     setProducts(prev => prev.filter(p => p.id !== productId && p.sku !== productId));
+    authFetch(`/api/inventory/products/${productId}`, {
+      method: 'DELETE',
+    }).catch(err => console.error('Failed to delete product from MySQL:', err));
   };
 
   const addMaterialAllocation = (allocationData: Partial<MaterialAllocation>): MaterialAllocation => {
@@ -2932,6 +3034,19 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const updateMaterialAllocationStatus = (allocationId: string, status: MaterialAllocation['status']) => {
     setMaterialAllocations(prev => prev.map(m => m.id === allocationId ? { ...m, status, dispatchDate: status === 'Dispatched' ? new Date().toISOString().split('T')[0] : m.dispatchDate } : m));
+  };
+
+  const deleteMaterialAllocation = (allocationId: string) => {
+    setMaterialAllocations(prev => {
+      const updated = prev.filter(m => m.id !== allocationId);
+      safeSetItem(`${STORAGE_KEY}_mat_alloc`, updated);
+      return updated;
+    });
+  };
+
+  const clearAllMaterialAllocations = () => {
+    setMaterialAllocations([]);
+    localStorage.removeItem(`${STORAGE_KEY}_mat_alloc`);
   };
 
   const addAutomationRule = (ruleData: Partial<AutomationRule>): AutomationRule => {
@@ -3023,6 +3138,8 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       login,
       logout,
       authFetch,
+      updateCurrentUser,
+      updateEmployee,
       activeRole,
       previewRole,
       setActiveRole,
@@ -3092,6 +3209,7 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       updateExpense,
       addSupplier,
       updateSupplier,
+      deleteSupplier,
       createPurchaseOrder,
       receivePurchaseOrder,
       addProduct,
@@ -3099,6 +3217,8 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       deleteProduct,
       addMaterialAllocation,
       updateMaterialAllocationStatus,
+      deleteMaterialAllocation,
+      clearAllMaterialAllocations,
       createServiceTicket,
       updateServiceTicket,
       createCustomerPortalAccount,
@@ -3109,6 +3229,7 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       deleteFollowUp,
       toggleAutomationRule,
       addAutomationRule,
+      addNotification,
       markNotificationRead,
       markAllNotificationsRead,
       resetAllDemoData,

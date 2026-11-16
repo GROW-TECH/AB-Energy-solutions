@@ -3,11 +3,19 @@ import { useCrm } from '../../context/CrmContext';
 import { MaterialAllocation } from '../../types';
 import { 
   Layers, Package, Truck, CheckCircle2, Clock, AlertTriangle, 
-  Search, Filter, ArrowRight, Warehouse, Check, MapPin, Plus, X
+  Search, Filter, ArrowRight, Warehouse, Check, MapPin, Plus, X, Trash2
 } from 'lucide-react';
 
 export const MaterialsPlanningView: React.FC = () => {
-  const { materialAllocations, updateMaterialAllocationStatus, addMaterialAllocation, projects, products } = useCrm();
+  const { 
+    materialAllocations, 
+    updateMaterialAllocationStatus, 
+    addMaterialAllocation, 
+    deleteMaterialAllocation, 
+    clearAllMaterialAllocations, 
+    projects, 
+    products 
+  } = useCrm();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState<string>('all');
@@ -100,10 +108,26 @@ export const MaterialsPlanningView: React.FC = () => {
           </div>
         </div>
         <div className="flex items-center gap-2.5">
+          {materialAllocations.length > 0 && (
+            <button
+              onClick={() => {
+                if (window.confirm('Are you sure you want to clear ALL BOM material indents? This action will permanently remove all mock or allocated entries.')) {
+                  clearAllMaterialAllocations();
+                }
+              }}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg transition-colors cursor-pointer"
+              title="Clear all BOM indents"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Clear All ({materialAllocations.length})</span>
+            </button>
+          )}
+
           <button
             onClick={() => setShowAddModal(true)}
             className="flex items-center gap-2 px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-xs transition-colors cursor-pointer"
           >
+            <Plus className="w-4 h-4" />
             <span>+ Add BOM Indent</span>
           </button>
         </div>
@@ -214,7 +238,14 @@ export const MaterialsPlanningView: React.FC = () => {
           {filteredAllocations.length === 0 ? (
             <div className="p-8 text-center text-slate-400">
               <Layers className="w-10 h-10 mx-auto text-slate-300 mb-2" />
-              <p className="font-medium text-slate-600 text-xs">No BOM materials match the filter</p>
+              <p className="font-semibold text-slate-700 text-xs">
+                {materialAllocations.length === 0 ? 'No Approved BOM Indents' : 'No BOM materials match the filter'}
+              </p>
+              <p className="text-[11px] text-slate-400 mt-1">
+                {materialAllocations.length === 0 
+                  ? 'All mock BOM allocations have been cleared. Click "+ Add BOM Indent" above.'
+                  : 'Try adjusting your search criteria.'}
+              </p>
             </div>
           ) : (
             filteredAllocations.map(item => (
@@ -228,9 +259,22 @@ export const MaterialsPlanningView: React.FC = () => {
                       <span className="text-emerald-700 font-semibold">{item.category}</span>
                     </div>
                   </div>
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border shrink-0 ${getStatusBadge(item.status)}`}>
-                    {item.status}
-                  </span>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border ${getStatusBadge(item.status)}`}>
+                      {item.status}
+                    </span>
+                    <button
+                      onClick={() => {
+                        if (window.confirm(`Delete BOM indent for "${item.productName}"?`)) {
+                          deleteMaterialAllocation(item.id);
+                        }
+                      }}
+                      className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                      title="Delete indent"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
 
                 <div className="p-2.5 bg-slate-50 rounded-xl text-xs space-y-1.5">
@@ -318,14 +362,22 @@ export const MaterialsPlanningView: React.FC = () => {
                 <th className="py-3.5 px-4">Warehouse Location</th>
                 <th className="py-3.5 px-4">Delivery Status</th>
                 <th className="py-3.5 px-4 text-right">Workflow Transition</th>
+                <th className="py-3.5 px-3 text-center w-12">Delete</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200">
               {filteredAllocations.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center text-slate-400">
+                  <td colSpan={7} className="py-12 text-center text-slate-400">
                     <Layers className="w-10 h-10 mx-auto text-slate-300 mb-2" />
-                    <p className="font-medium text-slate-600">No BOM materials match the filter</p>
+                    <p className="font-semibold text-slate-700 text-sm">
+                      {materialAllocations.length === 0 ? 'No Approved BOM Indents' : 'No BOM materials match the filter'}
+                    </p>
+                    <p className="text-xs text-slate-400 mt-1">
+                      {materialAllocations.length === 0 
+                        ? 'All mock BOM allocations have been cleared. Click "+ Add BOM Indent" above to allocate equipment to a project.'
+                        : 'Try adjusting your search criteria or filter options.'}
+                    </p>
                   </td>
                 </tr>
               ) : (
@@ -402,6 +454,19 @@ export const MaterialsPlanningView: React.FC = () => {
                           <CheckCircle2 className="w-3.5 h-3.5" /> Ready for Install
                         </span>
                       )}
+                    </td>
+                    <td className="py-3.5 px-3 text-center">
+                      <button
+                        onClick={() => {
+                          if (window.confirm(`Delete BOM indent for "${item.productName}"?`)) {
+                            deleteMaterialAllocation(item.id);
+                          }
+                        }}
+                        className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                        title="Delete indent"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </td>
                   </tr>
                 ))

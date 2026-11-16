@@ -18,6 +18,7 @@ import { AdvancePaymentsView } from '../../components/finance/AdvancePaymentsVie
 interface SalesPanelProps {
   initialSubTab?: 'dashboard' | 'leads' | 'pipeline' | 'followups' | 'quotations' | 'negotiations' | 'customers' | 'advances';
   targetQuoteLeadId?: string;
+  onClearTargetQuoteLead?: () => void;
   onTabChange?: (tab: string) => void;
   onOpenNewLead: () => void;
   onNavigateToQuotation: (leadId?: string) => void;
@@ -28,6 +29,7 @@ interface SalesPanelProps {
 export const SalesPanel: React.FC<SalesPanelProps> = ({
   initialSubTab = 'dashboard',
   targetQuoteLeadId,
+  onClearTargetQuoteLead,
   onTabChange,
   onOpenNewLead,
   onNavigateToQuotation,
@@ -148,6 +150,7 @@ export const SalesPanel: React.FC<SalesPanelProps> = ({
         {activeSubTab === 'quotations' && (
           <QuotationsView
             initialLeadId={targetQuoteLeadId}
+            onClearInitialLead={onClearTargetQuoteLead}
             onNavigateToProject={onNavigateToProject}
           />
         )}

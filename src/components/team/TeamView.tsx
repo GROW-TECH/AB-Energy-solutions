@@ -22,6 +22,8 @@ interface ManagedUser {
   location: string;
   isActive: boolean;
   createdAt: string;
+  employee_id?: string;
+  employeeId?: string;
   activeLeadsCount?: number;
   completedProjectsCount?: number;
 }
@@ -40,7 +42,9 @@ export const TeamView: React.FC = () => {
     updateProject, 
     assignProject, 
     autoAssignAllProjects,
-    refreshData 
+    refreshData,
+    updateCurrentUser,
+    updateEmployee 
   } = useCrm();
 
   // Active Sub-tab in User Management
@@ -397,6 +401,37 @@ export const TeamView: React.FC = () => {
       setActionSuccess(`Account for ${formData.name} updated successfully!`);
       setEditingUser(null);
       fetchUsers();
+
+      if (
+        editingUser.id === currentUser?.id ||
+        editingUser.username === currentUser?.username ||
+        (currentUser?.role === 'Super Admin' && (editingUser.role === 'Super Admin' || targetRole === 'Super Admin'))
+      ) {
+        updateCurrentUser({
+          name: formData.name,
+          email: formData.email,
+          role: targetRole,
+          phone: formData.phone,
+        });
+      }
+
+      const targetEmp = employees.find(
+        e => (editingUser.employee_id && e.id === editingUser.employee_id) ||
+             (editingUser.email && e.email?.toLowerCase() === editingUser.email?.toLowerCase()) ||
+             (editingUser.role === 'Super Admin' && e.role === 'Super Admin')
+      );
+      if (targetEmp) {
+        updateEmployee(targetEmp.id, {
+          name: formData.name,
+          email: formData.email,
+          phone: formData.phone,
+          department: formData.department,
+          location: formData.location,
+          role: targetRole,
+        });
+      }
+
+      refreshData();
     } catch (err: any) {
       setActionError(err.message);
     }

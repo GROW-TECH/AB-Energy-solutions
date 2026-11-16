@@ -83,6 +83,18 @@ async function startServer() {
         : (fs.existsSync(path.resolve(distPath, 'logo.png')) ? path.resolve(distPath, 'logo.png') : path.resolve(process.cwd(), 'public', 'logo.png'));
       res.sendFile(p);
     });
+    app.get(['/privacy-policy.html', '*/privacy-policy.html', '/privacy.html', '*/privacy.html'], (_req, res) => {
+      const p = fs.existsSync(path.resolve(distPath, 'privacy-policy.html'))
+        ? path.resolve(distPath, 'privacy-policy.html')
+        : path.resolve(process.cwd(), 'public', 'privacy-policy.html');
+      res.sendFile(p);
+    });
+    app.get(['/deleteaccount.html', '*/deleteaccount.html', '/delete-account.html', '*/delete-account.html'], (_req, res) => {
+      const p = fs.existsSync(path.resolve(distPath, 'deleteaccount.html'))
+        ? path.resolve(distPath, 'deleteaccount.html')
+        : path.resolve(process.cwd(), 'public', 'deleteaccount.html');
+      res.sendFile(p);
+    });
     app.get('*', (_req, res) => {
       res.sendFile(path.resolve(distPath, 'index.html'));
     });

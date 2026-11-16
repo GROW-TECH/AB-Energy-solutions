@@ -552,7 +552,7 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
               <input
                 type="number"
                 min={0}
-                step={500}
+                step="any"
                 placeholder="e.g. 14500"
                 value={monthlyBill === '' ? '' : monthlyBill}
                 onChange={e => setMonthlyBill(e.target.value === '' ? '' : Number(e.target.value))}
@@ -581,7 +581,7 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
               <input
                 type="number"
                 min={0}
-                step={50}
+                step="any"
                 placeholder="e.g. 1500"
                 value={roofAreaSqFt === '' ? '' : roofAreaSqFt}
                 onChange={e => setRoofAreaSqFt(e.target.value === '' ? '' : Number(e.target.value))}

@@ -53,7 +53,7 @@ export const PurchaseOrdersView: React.FC = () => {
   const [selectedProjectId, setSelectedProjectId] = useState<string>('');
   const [selectedBomId, setSelectedBomId] = useState<string>('');
   const [supplierId, setSupplierId] = useState(suppliersList[0]?.id || '');
-  const [supplierName, setSupplierName] = useState(suppliersList[0]?.name || 'Waaree Solar Tech');
+  const [supplierName, setSupplierName] = useState(suppliersList[0]?.name || '');
   const [deliveryWarehouse, setDeliveryWarehouse] = useState('Central Warehouse');
   const [expectedDate, setExpectedDate] = useState(new Date(Date.now() + 86400000 * 5).toISOString().split('T')[0]);
   const [poNotes, setPoNotes] = useState('');

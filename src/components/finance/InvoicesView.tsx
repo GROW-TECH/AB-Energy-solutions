@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { 
-  Receipt, Plus, Search, Filter, Printer, Download, 
+  Receipt, Plus, Search, Filter, Printer, Download, Upload,
   CheckCircle2, Clock, AlertTriangle, ArrowRight, ArrowLeft,
   CreditCard, Check, IndianRupee, ShieldCheck, Sparkles, Building, Zap, Calendar, User, CheckCircle,
   Phone, Send, X, Pencil, Trash2
@@ -25,6 +25,7 @@ export const InvoicesView: React.FC = () => {
   const [payAmount, setPayAmount] = useState<number>(selectedInvoice?.balanceDue || 0);
   const [payMode, setPayMode] = useState<any>('NEFT/RTGS');
   const [payRef, setPayRef] = useState(`NEFT-${Date.now().toString().slice(-6)}`);
+  const [payScreenshot, setPayScreenshot] = useState<string>('');
 
   // Direct Sent to Auditor State
   const [auditorSendingId, setAuditorSendingId] = useState<string | null>(null);
@@ -261,6 +262,8 @@ export const InvoicesView: React.FC = () => {
   const handleOpenRecordPayment = (inv: Invoice) => {
     setSelectedInvoice(inv);
     setPayAmount(inv.balanceDue);
+    setPayRef(`NEFT-${Date.now().toString().slice(-6)}`);
+    setPayScreenshot('');
     setShowPaymentModal(true);
   };
 
@@ -357,8 +360,10 @@ export const InvoicesView: React.FC = () => {
       paymentMode: payMode,
       transactionReference: payRef,
       bankName: 'HDFC Bank',
+      paymentScreenshot: payScreenshot || undefined,
     });
 
+    setPayScreenshot('');
     setShowPaymentModal(false);
     setSelectedInvoice({
       ...selectedInvoice,
@@ -467,10 +472,7 @@ export const InvoicesView: React.FC = () => {
 
               {!isAuditor && selectedInvoice.balanceDue > 0 && (
                 <button
-                  onClick={() => {
-                    setPayAmount(selectedInvoice.balanceDue);
-                    setShowPaymentModal(true);
-                  }}
+                  onClick={() => handleOpenRecordPayment(selectedInvoice)}
                   className="flex items-center gap-1.5 px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg shadow-xs transition-colors cursor-pointer"
                 >
                   <CreditCard className="w-3.5 h-3.5" />
@@ -1116,10 +1118,7 @@ export const InvoicesView: React.FC = () => {
                               )}
                               {!isAuditor && inv.balanceDue > 0 && (
                                 <button
-                                  onClick={() => {
-                                    handleSelectInvoice(inv);
-                                    setShowPaymentModal(true);
-                                  }}
+                                  onClick={() => handleOpenRecordPayment(inv)}
                                   className="px-2.5 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 font-semibold rounded-lg transition-colors cursor-pointer"
                                 >
                                   Pay
@@ -1196,6 +1195,54 @@ export const InvoicesView: React.FC = () => {
                   className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 font-mono"
                   placeholder="e.g. UTR-HDFC9842019"
                 />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">
+                  Payment Proof / Screenshot (Optional)
+                </label>
+                {payScreenshot ? (
+                  <div className="flex items-center justify-between p-2.5 bg-slate-50 border border-emerald-300 rounded-xl">
+                    <div className="flex items-center gap-2">
+                      <img
+                        src={payScreenshot}
+                        alt="Payment Proof"
+                        className="w-12 h-12 object-cover rounded-lg border border-slate-200"
+                      />
+                      <div>
+                        <span className="text-[11px] font-bold text-slate-800 block">Screenshot Attached</span>
+                        <span className="text-[10px] text-emerald-600 font-semibold block">Will be verified by Accounts</span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setPayScreenshot('')}
+                      className="px-2.5 py-1 text-[11px] font-bold text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ) : (
+                  <label className="flex items-center justify-center gap-2 px-3 py-2.5 border-2 border-dashed border-slate-300 hover:border-emerald-500 bg-slate-50 hover:bg-white rounded-xl text-xs font-semibold text-slate-700 hover:text-emerald-700 cursor-pointer transition-colors w-full">
+                    <Upload className="w-4 h-4 text-emerald-600" />
+                    <span>Upload Bank Transfer / UTR Screenshot</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          const reader = new FileReader();
+                          reader.onload = (ev) => {
+                            setPayScreenshot(ev.target?.result as string);
+                          };
+                          reader.readAsDataURL(file);
+                        }
+                      }}
+                    />
+                  </label>
+                )}
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">

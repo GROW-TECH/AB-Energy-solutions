@@ -8,6 +8,7 @@ import {
 import { useCrm } from '../../context/CrmContext';
 import { Lead, LeadStatus, Priority } from '../../types';
 import { initiateLeadCall } from '../../utils/telephonyBridge';
+import { checkLeadHasExistingQuote } from '../../utils/quotationEngine';
 
 interface PipelineViewProps {
   onOpenNewLead: () => void;
@@ -876,8 +877,9 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
 
               {(() => {
                 const linkedSurvey = surveys.find(s => s.leadId === selectedLead.id || s.id === selectedLead.surveyId);
-                const isSurveyApproved = linkedSurvey?.status === 'Approved' || selectedLead.status === 'Survey Completed' || selectedLead.status === 'Quotation Sent' || selectedLead.status === 'Negotiation' || selectedLead.status === 'Won' || Boolean(selectedLead.quotationId);
-                if (isSurveyApproved && onNavigateToQuotation) {
+                const hasExistingQuote = checkLeadHasExistingQuote(selectedLead, quotations, linkedSurvey);
+                const isSurveyApproved = Boolean(linkedSurvey && linkedSurvey.status === 'Approved');
+                if ((hasExistingQuote || isSurveyApproved) && onNavigateToQuotation) {
                   return (
                     <button
                       onClick={() => {
@@ -887,7 +889,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
                       className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
                     >
                       <FileText className="w-3.5 h-3.5" />
-                      <span>{selectedLead.quotationId ? 'Open Quotation' : 'Create Quotation'}</span>
+                      <span>{hasExistingQuote ? 'Open Quotation' : 'Create Quotation'}</span>
                     </button>
                   );
                 }

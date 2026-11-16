@@ -1859,11 +1859,22 @@ var login = async (req, res) => {
         (d) => d.username.toLowerCase() === identifier.toLowerCase() || d.email.toLowerCase() === identifier.toLowerCase()
       );
       if (demoMatch && (password === demoMatch.defaultPassword || demoMatch.username === "auditor" && (password === "Auditor@123" || password === "auditor123"))) {
+        let dynamicName = demoMatch.name;
+        try {
+          const [dbEmps] = await pool.query(
+            `SELECT name FROM employees WHERE username = ? OR role = ? LIMIT 1`,
+            [demoMatch.username, demoMatch.role]
+          );
+          if (dbEmps && dbEmps.length > 0 && dbEmps[0].name) {
+            dynamicName = dbEmps[0].name;
+          }
+        } catch (_) {
+        }
         const tokenPayload2 = {
           userId: demoMatch.employeeId || `USER-${demoMatch.username}`,
           username: demoMatch.username,
           email: demoMatch.email,
-          name: demoMatch.name,
+          name: dynamicName,
           role: demoMatch.role,
           phone: demoMatch.phone,
           employeeId: demoMatch.employeeId || null,
@@ -1897,16 +1908,25 @@ var login = async (req, res) => {
     }
     loginRateLimitMap.delete(ip);
     let userPhone = null;
+    let userName = user.name;
     const targetEmpId = user.employee_id || user.id;
     if (targetEmpId) {
-      const [empP] = await pool.query(`SELECT phone FROM employees WHERE id = ? OR username = ? OR email = ? LIMIT 1`, [targetEmpId, user.username || "", user.email || ""]);
-      if (empP && empP.length > 0) userPhone = empP[0].phone;
+      const [empP] = await pool.query(
+        `SELECT phone, name FROM employees WHERE id = ? OR username = ? OR email = ? OR (role = 'Super Admin' AND ? = 'Super Admin') LIMIT 1`,
+        [targetEmpId, user.username || "", user.email || "", user.role]
+      );
+      if (empP && empP.length > 0) {
+        if (empP[0].phone) userPhone = empP[0].phone;
+        if (empP[0].name && (!userName || userName === "Super Admin")) {
+          userName = empP[0].name;
+        }
+      }
     }
     const tokenPayload = {
       userId: user.id,
       username: user.username,
       email: user.email,
-      name: user.name,
+      name: userName || user.name,
       role: user.role,
       phone: userPhone,
       employeeId: user.employee_id || (user.role !== "Customer" ? user.id : null),
@@ -1929,16 +1949,43 @@ var getMe = async (req, res) => {
     if (!req.user) {
       return res.status(401).json({ success: false, error: "Unauthenticated." });
     }
-    const userObj = { ...req.user };
-    if (!userObj.phone && (userObj.employeeId || userObj.userId)) {
+    let userObj = { ...req.user };
+    try {
+      const [accs] = await pool.query(
+        `SELECT id, username, name, email, role, employee_id, customer_id, phone FROM user_accounts WHERE id = ? OR username = ? OR (role = 'Super Admin' AND ? = 'Super Admin') LIMIT 1`,
+        [req.user.userId || req.user.id, req.user.username, req.user.role]
+      );
+      if (accs && accs.length > 0) {
+        const acc = accs[0];
+        userObj = {
+          ...userObj,
+          id: acc.id,
+          userId: acc.id,
+          username: acc.username,
+          name: acc.name || userObj.name,
+          email: acc.email || userObj.email,
+          role: acc.role || userObj.role,
+          employeeId: acc.employee_id || userObj.employeeId,
+          customerId: acc.customer_id || userObj.customerId,
+          phone: acc.phone || userObj.phone
+        };
+      }
+    } catch (_) {
+    }
+    try {
       const [empP] = await pool.query(
-        `SELECT phone, name FROM employees WHERE id = ? OR id = ? OR email = ? LIMIT 1`,
-        [userObj.employeeId, userObj.userId, userObj.email || ""]
+        `SELECT phone, name FROM employees WHERE id = ? OR username = ? OR email = ? OR (role = 'Super Admin' AND ? = 'Super Admin') LIMIT 1`,
+        [userObj.employeeId || userObj.userId, userObj.username, userObj.email || "", userObj.role]
       );
       if (empP && empP.length > 0) {
-        userObj.phone = empP[0].phone;
-        if (!userObj.name) userObj.name = empP[0].name;
+        if (empP[0].name) {
+          userObj.name = empP[0].name;
+        }
+        if (empP[0].phone) {
+          userObj.phone = empP[0].phone;
+        }
       }
+    } catch (_) {
     }
     res.json({
       success: true,
@@ -2134,6 +2181,17 @@ var createLead = async (req, res) => {
           if (n > maxNum) maxNum = n;
         }
       }
+      try {
+        const [quoteIds] = await pool.query("SELECT lead_id as id FROM quotations WHERE lead_id LIKE 'LD-2026-%'");
+        for (const row of quoteIds) {
+          const match = row.id?.match(/LD-2026-(\d+)/);
+          if (match) {
+            const n = parseInt(match[1], 10);
+            if (n > maxNum) maxNum = n;
+          }
+        }
+      } catch (_) {
+      }
       finalId = `LD-2026-${String(maxNum + 1).padStart(3, "0")}`;
       l.id = finalId;
     }
@@ -2318,6 +2376,10 @@ var updateLead = async (req, res) => {
 var deleteLead = async (req, res) => {
   try {
     const { id } = req.params;
+    await pool.query("DELETE FROM quotations WHERE lead_id = ?", [id]).catch(() => {
+    });
+    await pool.query("DELETE FROM site_surveys WHERE lead_id = ?", [id]).catch(() => {
+    });
     await pool.query("DELETE FROM leads WHERE id = ?", [id]);
     res.json({ success: true, id });
   } catch (err) {
@@ -3228,7 +3290,7 @@ The quotation includes the complete supply, installation, testing, and commissio
       doc.font("Helvetica-Bold").fontSize(13).fillColor("#FFFFFF").text("A Boopathi BE.,", 55, p6Y + 14);
       doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#34D399").text("CEO & Managing Director  \u2022  AB ENERGY SOLUTIONS", 55, p6Y + 31);
       doc.font("Helvetica").fontSize(8).fillColor("#CBD5E1").text("Phone: +91 95664 99678   |   Email: abenergysolutiontn@gmail.com", 55, p6Y + 47);
-      doc.font("Helvetica").fontSize(8).fillColor("#CBD5E1").text("1/359, Maruthi Nagar, Chinnakavandanur, Namakkal, TN - 636202", 55, p6Y + 60);
+      doc.font("Helvetica").fontSize(8).fillColor("#CBD5E1").text("No 13, Thammampatty Main Road, Maheswari Theatre Opposite Street, Vazhapadi, Salem, Tamil Nadu - 636115", 55, p6Y + 60);
       doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#34D399").text("12+ Years Solar Experience   \u2022   TNEB C-Licence Certified Enterprise", 55, p6Y + 74);
       doc.rect(380, p6Y + 12, 160, 72).fillAndStroke("#FFFFFF", "#CBD5E1");
       doc.font("Helvetica-Bold").fontSize(8).fillColor(headingNavy).text("For AB ENERGY SOLUTIONS", 380, p6Y + 18, { width: 160, align: "center" });
@@ -5508,10 +5570,66 @@ var reserveInventory = async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 };
+var createProduct = async (req, res) => {
+  try {
+    const p = req.body;
+    const id = p.id || `PROD-${Date.now().toString().slice(-4)}`;
+    await pool.query(
+      `INSERT INTO inventory_products (
+        id, sku, name, category, brand, specifications, unit,
+        current_stock, reserved_stock, available_stock, min_threshold,
+        unit_cost, supplier_name
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        name = VALUES(name),
+        current_stock = VALUES(current_stock),
+        available_stock = VALUES(available_stock),
+        unit_cost = VALUES(unit_cost)`,
+      [
+        id,
+        p.sku || id,
+        p.name,
+        p.category || "Solar Panels",
+        p.brand || "",
+        p.specifications || "",
+        p.unit || "Nos",
+        Number(p.currentStock ?? p.current_stock ?? 0),
+        Number(p.reservedStock ?? p.reserved_stock ?? 0),
+        Number(p.availableStock ?? p.available_stock ?? p.currentStock ?? 0),
+        Number(p.minThreshold ?? p.min_threshold ?? 0),
+        Number(p.unitCost ?? p.unit_cost ?? 0),
+        p.supplierName || p.supplier_name || ""
+      ]
+    );
+    res.json({ success: true, id, product: { ...p, id } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var deleteProduct = async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query("DELETE FROM inventory_products WHERE id = ? OR sku = ?", [id, id]);
+    res.json({ success: true, id });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+var clearAllProducts = async (req, res) => {
+  try {
+    await pool.query("TRUNCATE TABLE inventory_products");
+    res.json({ success: true, message: "All inventory products cleared" });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
 
 // server/routes/inventory.routes.ts
 var inventoryRouter = Router9();
 inventoryRouter.post("/reserve", authenticateToken, requireRole(["Project Manager", "Installation Team"]), reserveInventory);
+inventoryRouter.post("/products", authenticateToken, createProduct);
+inventoryRouter.delete("/products/all", authenticateToken, clearAllProducts);
+inventoryRouter.delete("/products/:id", authenticateToken, deleteProduct);
 
 // server/routes/users.routes.ts
 import { Router as Router10 } from "express";
@@ -8839,204 +8957,40 @@ var deleteCallLog = async (req, res) => {
     });
   }
 };
+var clearAllCallLogs = async (req, res) => {
+  try {
+    await pool.query("TRUNCATE TABLE call_logs");
+    return res.json({
+      success: true,
+      message: "All call logs cleared successfully"
+    });
+  } catch (error) {
+    console.error("Error clearing call logs:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to clear call logs",
+      error: error.message
+    });
+  }
+};
 
 // server/routes/telephony.routes.ts
 var telephonyRouter = Router17();
 telephonyRouter.post("/sync-call", syncCallLog);
 telephonyRouter.get("/calls", authenticateToken, getCallLogs);
+telephonyRouter.delete("/clear-all", authenticateToken, clearAllCallLogs);
+telephonyRouter.post("/clear-all", authenticateToken, clearAllCallLogs);
 telephonyRouter.post("/resolve-missed/:id", authenticateToken, resolveMissedCall);
 telephonyRouter.patch("/calls/:id/disposition", authenticateToken, updateCallDisposition);
 telephonyRouter.delete("/calls/:id", authenticateToken, deleteCallLog);
+telephonyRouter.post("/calls/:id/delete", authenticateToken, deleteCallLog);
 
 // server/routes/subsidies.routes.ts
 import { Router as Router18 } from "express";
 import fs8 from "fs";
 import path8 from "path";
 var subsidiesRouter = Router18();
-var initialSubsidies = [
-  {
-    id: "SUB-2026-001",
-    project_id: "PROJECT-2026-023",
-    project_number: "PRJ-2026-023",
-    customer_name: "Vikrant Deshpande",
-    customer_phone: "+91 98450 12345",
-    customer_email: "vikrant.deshpande@example.com",
-    customer_type: "residential",
-    is_eligible: true,
-    site_address: "142, Anna Nagar West, Namakkal, Tamil Nadu - 637001",
-    discom_name: "TANGEDCO",
-    discom_section_office: "Namakkal Town AEE Office",
-    consumer_number: "04-122-005-981",
-    sanctioned_load_kw: 25,
-    system_capacity_kw: 20,
-    subsidy_applicable_amount: 1e5,
-    // Combined Central ₹78k + TN State ₹22k under G.O. 102
-    dcr_modules_used: true,
-    panel_make_and_model: "Tata Power Solar 545W Mono PERC (DCR)",
-    inverter_make_and_model: "Sungrow 20kW On-Grid Inverter",
-    portal_application_no: "PMS-TN-2026-98124",
-    application_submission_date: "2026-09-15",
-    current_stage: 5,
-    current_stage_name: "DISCOM Joint Inspection Scheduled",
-    stage_status: "in_progress",
-    days_in_current_stage: 4,
-    is_delayed: false,
-    tfr_number: "TFR/NKL/2026/8421",
-    tfr_approval_date: "2026-09-28",
-    vendor_selected_date: "2026-10-02",
-    wcr_submission_date: "2026-10-18",
-    joint_inspection_date: "2026-10-29",
-    inspecting_officer_name: "Er. S. Selvakumar, AEE/TANGEDCO",
-    inspecting_officer_phone: "+91 94433 12456",
-    documents: {
-      electricity_bill: true,
-      aadhaar_card: true,
-      cancelled_cheque: true,
-      roof_photo_geotagged: true,
-      dcr_certificate: true,
-      tfr_letter: true,
-      wcr_copy: true,
-      net_meter_test_report: false,
-      commissioning_cert: false
-    },
-    notes: "Structure and inverter installed with DCR modules. TANGEDCO AEE scheduled inspection for Thursday 11 AM.",
-    last_updated: "2026-10-25"
-  },
-  {
-    id: "SUB-2026-002",
-    project_id: "PROJECT-2026-021",
-    project_number: "PRJ-2026-021",
-    customer_name: "K. Balasubramaniam",
-    customer_phone: "+91 94432 87654",
-    customer_email: "bala.kumar@example.com",
-    customer_type: "residential",
-    is_eligible: true,
-    site_address: "88, Gandhi Road, Paramathi Velur, Namakkal - 637207",
-    discom_name: "TANGEDCO",
-    discom_section_office: "Paramathi Distribution Section",
-    consumer_number: "04-188-012-340",
-    sanctioned_load_kw: 5,
-    system_capacity_kw: 3.3,
-    subsidy_applicable_amount: 1e5,
-    dcr_modules_used: true,
-    panel_make_and_model: "Waaree 550W Bi-facial DCR",
-    inverter_make_and_model: "Growatt 3.3kW Single Phase",
-    portal_application_no: "PMS-TN-2026-77319",
-    application_submission_date: "2026-08-10",
-    current_stage: 7,
-    current_stage_name: "DBT Subsidy Disbursed to Bank",
-    stage_status: "completed",
-    days_in_current_stage: 0,
-    is_delayed: false,
-    tfr_number: "TFR/PMV/2026/3310",
-    tfr_approval_date: "2026-08-22",
-    vendor_selected_date: "2026-08-25",
-    wcr_submission_date: "2026-09-08",
-    joint_inspection_date: "2026-09-14",
-    inspecting_officer_name: "Er. R. Murugesan",
-    inspecting_officer_phone: "+91 94430 98123",
-    net_meter_number: "L&T-GEN-98214-2026",
-    net_meter_install_date: "2026-09-16",
-    commissioning_certificate_date: "2026-09-18",
-    dbt_disbursal_amount: 1e5,
-    dbt_bank_utr: "PMAY20261008009214SBI",
-    dbt_credit_date: "2026-10-08",
-    documents: {
-      electricity_bill: true,
-      aadhaar_card: true,
-      cancelled_cheque: true,
-      roof_photo_geotagged: true,
-      dcr_certificate: true,
-      tfr_letter: true,
-      wcr_copy: true,
-      net_meter_test_report: true,
-      commissioning_cert: true
-    },
-    notes: "Combined subsidy of \u20B91,00,000 (Central \u20B978k + TN State \u20B922k) credited to customer State Bank of India account. Project fully closed.",
-    last_updated: "2026-10-08"
-  },
-  {
-    id: "SUB-2026-003",
-    project_id: "PROJECT-2026-024",
-    project_number: "PRJ-2026-024",
-    customer_name: "S. Jayachandran",
-    customer_phone: "+91 97890 55432",
-    customer_email: "jayachandran.s@example.com",
-    customer_type: "residential",
-    is_eligible: true,
-    site_address: "12, Periyar Street, Rasipuram, Namakkal - 637408",
-    discom_name: "TANGEDCO",
-    discom_section_office: "Rasipuram East AEE",
-    consumer_number: "04-099-001-442",
-    sanctioned_load_kw: 6,
-    system_capacity_kw: 5,
-    subsidy_applicable_amount: 1e5,
-    dcr_modules_used: true,
-    panel_make_and_model: "Adani Solar 540W Mono DCR",
-    inverter_make_and_model: "Solis 5kW Dual MPPT",
-    portal_application_no: "PMS-TN-2026-102941",
-    application_submission_date: "2026-10-05",
-    current_stage: 2,
-    current_stage_name: "DISCOM Feasibility (TFR) Pending",
-    stage_status: "in_progress",
-    days_in_current_stage: 22,
-    is_delayed: true,
-    // Over 15 days threshold!
-    documents: {
-      electricity_bill: true,
-      aadhaar_card: true,
-      cancelled_cheque: true,
-      roof_photo_geotagged: true,
-      dcr_certificate: false,
-      tfr_letter: false,
-      wcr_copy: false,
-      net_meter_test_report: false,
-      commissioning_cert: false
-    },
-    notes: "ALERT: TFR pending for 22 days at Rasipuram section office due to transformer load inspection delay. Need urgent follow-up.",
-    last_updated: "2026-10-26"
-  },
-  {
-    id: "SUB-2026-004",
-    project_id: "PROJECT-2026-025",
-    project_number: "PRJ-2026-025",
-    customer_name: "R. Kaliappan Poultry Farm",
-    customer_phone: "+91 98427 66110",
-    customer_type: "commercial",
-    is_eligible: false,
-    ineligibility_reason: "Commercial / Industrial connection (HT/LT Tariff IIIB). Central PM Surya Ghar subsidy applies strictly to Domestic (Tariff IA) connections.",
-    site_address: "SF No. 240, Mohanur Road, Valayappatti, Namakkal - 637020",
-    discom_name: "TANGEDCO",
-    discom_section_office: "Mohanur Rural",
-    consumer_number: "04-045-008-112",
-    sanctioned_load_kw: 60,
-    system_capacity_kw: 50,
-    subsidy_applicable_amount: 0,
-    dcr_modules_used: false,
-    panel_make_and_model: "Jinko Solar 580W TOPCon (Non-DCR Tier 1)",
-    inverter_make_and_model: "Sungrow 50kW Commercial",
-    portal_application_no: "N/A (Commercial Solar Project)",
-    application_submission_date: "2026-10-12",
-    current_stage: 0,
-    current_stage_name: "Not Eligible (Commercial Project)",
-    stage_status: "completed",
-    days_in_current_stage: 0,
-    is_delayed: false,
-    documents: {
-      electricity_bill: true,
-      aadhaar_card: false,
-      cancelled_cheque: false,
-      roof_photo_geotagged: true,
-      dcr_certificate: false,
-      tfr_letter: true,
-      wcr_copy: false,
-      net_meter_test_report: false,
-      commissioning_cert: false
-    },
-    notes: "Zero government subsidy applicable. Customer claimed 40% Accelerated Depreciation tax deduction under Section 32 of Income Tax Act.",
-    last_updated: "2026-10-20"
-  }
-];
+var initialSubsidies = [];
 var DATA_FILE = path8.resolve(process.cwd(), "data", "subsidies.json");
 function loadSubsidies() {
   try {
@@ -9110,54 +9064,7 @@ async function syncLiveProjectsWithSubsidies(cached) {
         else applicableSubsidy = 1e5;
       }
       const stageInfo = mapProjectStageToSubsidyStage(p.stage || "Booking");
-      if (existingIdx === -1) {
-        const subId = `SUB-${cleanId.replace("PROJECT-", "").replace("PRJ-", "")}`;
-        const newRecord = {
-          id: subId,
-          project_id: cleanId,
-          project_number: cleanId,
-          customer_name: p.customer_name || "Valued Customer",
-          customer_phone: p.customer_phone || "",
-          customer_type: isResidential ? "residential" : "commercial",
-          is_eligible: isResidential,
-          ineligibility_reason: isResidential ? void 0 : "Commercial/Industrial installation: 40% tax depreciation applicable in lieu of residential subsidy.",
-          site_address: p.customer_address || "Tamil Nadu, India",
-          discom_name: (p.customer_discom || "TANGEDCO").replace(/BESCOM/gi, "TANGEDCO"),
-          discom_section_office: "Local Section Office",
-          consumer_number: (p.consumer_number_discom || p.discom_sanction_number || "Pending Consumer No").replace(/BESCOM/gi, "TANGEDCO"),
-          sanctioned_load_kw: capKw,
-          system_capacity_kw: capKw,
-          subsidy_applicable_amount: applicableSubsidy,
-          dcr_modules_used: isResidential,
-          panel_make_and_model: isResidential ? "Tata Power Solar / Waaree 545W Mono PERC (DCR)" : "Tier-1 High Efficiency Panels",
-          inverter_make_and_model: `${capKw}kW On-Grid Solar Inverter`,
-          portal_application_no: isResidential ? `PMS-TN-${(/* @__PURE__ */ new Date()).getFullYear()}-${cleanId.replace(/\D/g, "").slice(-5) || Math.floor(1e4 + Math.random() * 9e4)}` : "N/A (Commercial Project)",
-          application_submission_date: p.created_at ? new Date(p.created_at).toISOString().split("T")[0] : (/* @__PURE__ */ new Date()).toISOString().split("T")[0],
-          current_stage: isResidential ? stageInfo.stage : 0,
-          current_stage_name: isResidential ? stageInfo.stageName : "Not Eligible (Commercial Project)",
-          stage_status: p.stage === "Completed" ? "completed" : "in_progress",
-          days_in_current_stage: 1,
-          is_delayed: false,
-          net_meter_number: p.discom_sanction_number ? p.discom_sanction_number.replace(/BESCOM\/SANCTION/gi, "TANGEDCO/SANC").replace(/BESCOM/gi, "TANGEDCO") : void 0,
-          net_meter_install_date: p.net_meter_installed_date || void 0,
-          commissioning_certificate_date: p.commissioning_date || void 0,
-          documents: {
-            electricity_bill: true,
-            aadhaar_card: isResidential,
-            cancelled_cheque: false,
-            roof_photo_geotagged: true,
-            dcr_certificate: isResidential,
-            tfr_letter: Boolean(p.discom_sanction_number),
-            wcr_copy: p.stage === "Testing & Commissioning" || p.stage === "Net Metering & Handover" || p.stage === "Completed",
-            net_meter_test_report: Boolean(p.net_meter_installed_date),
-            commissioning_cert: Boolean(p.commissioning_date)
-          },
-          notes: `Auto-linked from live Project ${cleanId}. Workflow synchronized with PM Surya Ghar portal.`,
-          last_updated: (/* @__PURE__ */ new Date()).toISOString().split("T")[0]
-        };
-        updatedList.unshift(newRecord);
-        hasChanges = true;
-      } else {
+      if (existingIdx !== -1) {
         const existing = { ...updatedList[existingIdx] };
         let recordChanged = false;
         if (p.customer_name && existing.customer_name !== p.customer_name) {
@@ -9318,6 +9225,27 @@ subsidiesRouter.post("/", (req, res) => {
     success: true,
     message: "Subsidy tracking record created successfully",
     subsidy: newRecord
+  });
+});
+subsidiesRouter.delete("/:id", (req, res) => {
+  const { id } = req.params;
+  let data = loadSubsidies();
+  const initialCount = data.length;
+  data = data.filter((s) => s.id !== id && s.project_id !== id && s.project_number !== id);
+  saveSubsidies(data);
+  return res.json({
+    success: true,
+    message: "Subsidy record deleted successfully",
+    deletedCount: initialCount - data.length,
+    remaining: data.length
+  });
+});
+subsidiesRouter.delete("/", (_req, res) => {
+  saveSubsidies([]);
+  return res.json({
+    success: true,
+    message: "All existing subsidy records have been cleared successfully",
+    remaining: 0
   });
 });
 
@@ -9707,6 +9635,14 @@ async function startServer() {
     });
     app.get(["/favicon.ico", "*/favicon.ico"], (_req, res) => {
       const p = fs9.existsSync(path9.resolve(distPath, "favicon.ico")) ? path9.resolve(distPath, "favicon.ico") : fs9.existsSync(path9.resolve(distPath, "logo.png")) ? path9.resolve(distPath, "logo.png") : path9.resolve(process.cwd(), "public", "logo.png");
+      res.sendFile(p);
+    });
+    app.get(["/privacy-policy.html", "*/privacy-policy.html", "/privacy.html", "*/privacy.html"], (_req, res) => {
+      const p = fs9.existsSync(path9.resolve(distPath, "privacy-policy.html")) ? path9.resolve(distPath, "privacy-policy.html") : path9.resolve(process.cwd(), "public", "privacy-policy.html");
+      res.sendFile(p);
+    });
+    app.get(["/deleteaccount.html", "*/deleteaccount.html", "/delete-account.html", "*/delete-account.html"], (_req, res) => {
+      const p = fs9.existsSync(path9.resolve(distPath, "deleteaccount.html")) ? path9.resolve(distPath, "deleteaccount.html") : path9.resolve(process.cwd(), "public", "deleteaccount.html");
       res.sendFile(p);
     });
     app.get("*", (_req, res) => {

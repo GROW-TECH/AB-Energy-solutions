@@ -99,11 +99,22 @@ export const login = async (req: Request, res: Response) => {
         d => (d.username.toLowerCase() === identifier.toLowerCase() || d.email.toLowerCase() === identifier.toLowerCase())
       );
       if (demoMatch && (password === demoMatch.defaultPassword || (demoMatch.username === 'auditor' && (password === 'Auditor@123' || password === 'auditor123')))) {
+        let dynamicName = demoMatch.name;
+        try {
+          const [dbEmps]: any = await pool.query(
+            `SELECT name FROM employees WHERE username = ? OR role = ? LIMIT 1`,
+            [demoMatch.username, demoMatch.role]
+          );
+          if (dbEmps && dbEmps.length > 0 && dbEmps[0].name) {
+            dynamicName = dbEmps[0].name;
+          }
+        } catch (_) {}
+
         const tokenPayload = {
           userId: demoMatch.employeeId || `USER-${demoMatch.username}`,
           username: demoMatch.username,
           email: demoMatch.email,
-          name: demoMatch.name,
+          name: dynamicName,
           role: demoMatch.role,
           phone: demoMatch.phone,
           employeeId: demoMatch.employeeId || null,
@@ -147,17 +158,26 @@ export const login = async (req: Request, res: Response) => {
 
     // Issue signed JWT token valid for 24 hours
     let userPhone = null;
+    let userName = user.name;
     const targetEmpId = user.employee_id || user.id;
     if (targetEmpId) {
-      const [empP]: any = await pool.query(`SELECT phone FROM employees WHERE id = ? OR username = ? OR email = ? LIMIT 1`, [targetEmpId, user.username || '', user.email || '']);
-      if (empP && empP.length > 0) userPhone = empP[0].phone;
+      const [empP]: any = await pool.query(
+        `SELECT phone, name FROM employees WHERE id = ? OR username = ? OR email = ? OR (role = 'Super Admin' AND ? = 'Super Admin') LIMIT 1`,
+        [targetEmpId, user.username || '', user.email || '', user.role]
+      );
+      if (empP && empP.length > 0) {
+        if (empP[0].phone) userPhone = empP[0].phone;
+        if (empP[0].name && (!userName || userName === 'Super Admin')) {
+          userName = empP[0].name;
+        }
+      }
     }
 
     const tokenPayload = {
       userId: user.id,
       username: user.username,
       email: user.email,
-      name: user.name,
+      name: userName || user.name,
       role: user.role,
       phone: userPhone,
       employeeId: user.employee_id || (user.role !== 'Customer' ? user.id : null),
@@ -184,17 +204,46 @@ export const getMe = async (req: Request, res: Response) => {
       return res.status(401).json({ success: false, error: 'Unauthenticated.' });
     }
 
-    const userObj = { ...req.user };
-    if (!userObj.phone && (userObj.employeeId || userObj.userId)) {
+    let userObj: any = { ...req.user };
+
+    // Fetch latest user details from user_accounts to always reflect updated name, email, role
+    try {
+      const [accs]: any = await pool.query(
+        `SELECT id, username, name, email, role, employee_id, customer_id, phone FROM user_accounts WHERE id = ? OR username = ? OR (role = 'Super Admin' AND ? = 'Super Admin') LIMIT 1`,
+        [req.user.userId || req.user.id, req.user.username, req.user.role]
+      );
+      if (accs && accs.length > 0) {
+        const acc = accs[0];
+        userObj = {
+          ...userObj,
+          id: acc.id,
+          userId: acc.id,
+          username: acc.username,
+          name: acc.name || userObj.name,
+          email: acc.email || userObj.email,
+          role: acc.role || userObj.role,
+          employeeId: acc.employee_id || userObj.employeeId,
+          customerId: acc.customer_id || userObj.customerId,
+          phone: acc.phone || userObj.phone,
+        };
+      }
+    } catch (_) {}
+
+    // Also check employees table for fresh name and phone if available
+    try {
       const [empP]: any = await pool.query(
-        `SELECT phone, name FROM employees WHERE id = ? OR id = ? OR email = ? LIMIT 1`,
-        [userObj.employeeId, userObj.userId, userObj.email || '']
+        `SELECT phone, name FROM employees WHERE id = ? OR username = ? OR email = ? OR (role = 'Super Admin' AND ? = 'Super Admin') LIMIT 1`,
+        [userObj.employeeId || userObj.userId, userObj.username, userObj.email || '', userObj.role]
       );
       if (empP && empP.length > 0) {
-        userObj.phone = empP[0].phone;
-        if (!userObj.name) userObj.name = empP[0].name;
+        if (empP[0].name) {
+          userObj.name = empP[0].name;
+        }
+        if (empP[0].phone) {
+          userObj.phone = empP[0].phone;
+        }
       }
-    }
+    } catch (_) {}
 
     res.json({
       success: true,

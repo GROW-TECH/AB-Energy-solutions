@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   FileText, Plus, Search, Printer, Send, 
   Copy, Check, MessageSquare, ArrowLeft,
@@ -17,11 +17,13 @@ import { EditBomModal, EditCapacitySubsidyModal, EditCalculationModal } from '..
 
 interface QuotationsViewProps {
   initialLeadId?: string;
+  onClearInitialLead?: () => void;
   onNavigateToProject?: (projectId: string) => void;
 }
 
 export const QuotationsView: React.FC<QuotationsViewProps> = ({
   initialLeadId,
+  onClearInitialLead,
   onNavigateToProject,
 }) => {
   const { 
@@ -69,29 +71,28 @@ export const QuotationsView: React.FC<QuotationsViewProps> = ({
   const [discountAmount, setDiscountAmount] = useState<number>(10000);
   const [packageTier, setPackageTier] = useState<'Standard' | 'Premium Bifacial' | 'Commercial Heavy Duty'>('Premium Bifacial');
 
+  const consumedLeadIdRef = useRef<string | null>(null);
+
   // Handle initialLeadId prop passed from Leads view or Survey view
   useEffect(() => {
-    if (initialLeadId) {
+    if (initialLeadId && consumedLeadIdRef.current !== initialLeadId) {
+      consumedLeadIdRef.current = initialLeadId;
       const linkedSurvey = surveys.find(s => s.leadId === initialLeadId || s.id === initialLeadId);
       const existing = quotations.find(q => q.leadId === initialLeadId || (linkedSurvey && q.surveyId === linkedSurvey.id));
       if (existing) {
         setSelectedQuoteForPreview(existing);
         setSelectedVersionIdx(existing.versions && existing.versions.length > 0 ? existing.versions.length - 1 : 0);
         setActiveViewMode('document');
-      } else {
+      } else if (linkedSurvey && (linkedSurvey.status === 'Approved' || linkedSurvey.status === 'Completed')) {
         setSelectedLeadId(initialLeadId);
-        if (linkedSurvey && (linkedSurvey.status === 'Approved' || linkedSurvey.status === 'Completed')) {
-          setCapacityKw(linkedSurvey.recommendedKw);
-        } else {
-          const l = leads.find(item => item.id === initialLeadId);
-          if (l?.recommendedKw) {
-            setCapacityKw(l.recommendedKw);
-          }
-        }
+        setCapacityKw(linkedSurvey.recommendedKw || 5);
         setShowNewQuoteModal(true);
       }
+      if (onClearInitialLead) {
+        onClearInitialLead();
+      }
     }
-  }, [initialLeadId, surveys, quotations]);
+  }, [initialLeadId]);
 
   // Keep selectedQuoteForPreview continuously in-sync with latest quotation state (reflecting negotiation revisions)
   useEffect(() => {
@@ -253,6 +254,7 @@ export const QuotationsView: React.FC<QuotationsViewProps> = ({
     });
 
     setShowNewQuoteModal(false);
+    onClearInitialLead?.();
     setSelectedQuoteForPreview(newQ);
     setSelectedVersionIdx(0);
     setActiveViewMode('document');
@@ -1016,7 +1018,7 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                         Phone: <strong className="text-white">+91 95664 99678</strong> | Email: abenergysolutiontn@gmail.com
                       </div>
                       <div className="text-xs text-slate-300">
-                        1/359, Maruthi Nagar, Chinnakavandanur, Namakkal, TN - 636202
+                        No 13, Thammampatty Main Road, Maheswari Theatre Opposite Street, Vazhapadi, Salem, Tamil Nadu - 636115
                       </div>
                       <div className="text-[10px] text-emerald-400 font-semibold pt-0.5">
                         12+ Years Solar Experience &bull; TNEB C-Licence Certified Enterprise
@@ -1922,7 +1924,10 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                 <p className="text-xs text-slate-500 mt-0.5">Automated technical sizing &amp; Govt. central subsidy</p>
               </div>
               <button
-                onClick={() => setShowNewQuoteModal(false)}
+                onClick={() => {
+                  setShowNewQuoteModal(false);
+                  onClearInitialLead?.();
+                }}
                 className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 cursor-pointer"
               >
                 <X className="w-4 h-4" />
@@ -2129,7 +2134,10 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setShowNewQuoteModal(false)}
+                  onClick={() => {
+                    setShowNewQuoteModal(false);
+                    onClearInitialLead?.();
+                  }}
                   className="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
                 >
                   Cancel

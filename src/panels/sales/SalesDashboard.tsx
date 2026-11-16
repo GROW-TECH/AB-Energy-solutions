@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useCrm } from '../../context/CrmContext';
 import { Lead } from '../../types';
+import { checkLeadHasExistingQuote } from '../../utils/quotationEngine';
 
 interface SalesDashboardProps {
   onOpenNewLead: () => void;
@@ -505,14 +506,15 @@ export const SalesDashboard: React.FC<SalesDashboardProps> = ({
                   <div className="flex items-center gap-2 flex-shrink-0">
                     {(() => {
                       const linkedSurvey = surveys.find(s => s.leadId === lead.id || s.id === lead.surveyId);
-                      const isSurveyApproved = linkedSurvey?.status === 'Approved' || lead.status === 'Survey Completed' || lead.status === 'Quotation Sent' || lead.status === 'Negotiation' || lead.status === 'Won' || Boolean(lead.quotationId);
-                      if (isSurveyApproved) {
+                      const hasExistingQuote = checkLeadHasExistingQuote(lead, quotations, linkedSurvey);
+                      const isSurveyApproved = Boolean(linkedSurvey && linkedSurvey.status === 'Approved');
+                      if (hasExistingQuote || isSurveyApproved) {
                         return (
                           <button
                             onClick={() => onNavigateToQuotation(lead.id)}
                             className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer"
                           >
-                            Quote
+                            {hasExistingQuote ? 'View Quote' : 'Quote'}
                           </button>
                         );
                       }

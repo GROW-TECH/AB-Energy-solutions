@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Account & Data Deletion - AB Energy Solutions CRM</title>
+  <style>
+    :root {
+      --primary: #059669;
+      --primary-dark: #047857;
+      --danger: #dc2626;
+      --danger-dark: #b91c1c;
+      --slate-900: #0f172a;
+      --slate-800: #1e293b;
+      --slate-700: #334155;
+      --slate-600: #475569;
+      --slate-500: #64748b;
+      --slate-100: #f1f5f9;
+      --slate-50: #f8fafc;
+      --border: #e2e8f0;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.65;
+      color: var(--slate-700);
+      background-color: var(--slate-50);
+      padding: 24px 16px;
+    }
+    .container {
+      max-width: 820px;
+      margin: 0 auto;
+      background: #ffffff;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.05);
+      overflow: hidden;
+    }
+    header {
+      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      color: #ffffff;
+      padding: 36px 32px;
+      border-bottom: 3px solid var(--danger);
+    }
+    .badge {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      background: rgba(220, 38, 38, 0.25);
+      color: #fca5a5;
+      border: 1px solid rgba(220, 38, 38, 0.4);
+      padding: 4px 12px;
+      border-radius: 9999px;
+      margin-bottom: 12px;
+    }
+    header h1 {
+      font-size: 26px;
+      font-weight: 800;
+      color: #ffffff;
+      margin-bottom: 6px;
+    }
+    header p {
+      font-size: 13px;
+      color: #cbd5e1;
+    }
+    .content {
+      padding: 36px 32px;
+    }
+    h2 {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--slate-900);
+      margin: 28px 0 12px 0;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--border);
+    }
+    h3 {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--slate-800);
+      margin: 16px 0 8px 0;
+    }
+    p, ul, ol {
+      font-size: 14px;
+      margin-bottom: 14px;
+      color: var(--slate-600);
+    }
+    ul, ol {
+      padding-left: 24px;
+    }
+    li {
+      margin-bottom: 6px;
+    }
+    .step-card {
+      background: var(--slate-50);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px 20px;
+      margin: 16px 0;
+    }
+    .step-card h4 {
+      font-size: 14px;
+      color: var(--slate-900);
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .step-num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 22px;
+      height: 22px;
+      background: var(--primary);
+      color: white;
+      border-radius: 50%;
+      font-size: 11px;
+      font-weight: 800;
+    }
+    .form-box {
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      border-radius: 12px;
+      padding: 24px;
+      margin: 24px 0;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+    .form-group {
+      margin-bottom: 16px;
+    }
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--slate-800);
+      margin-bottom: 6px;
+    }
+    input[type="text"],
+    input[type="email"],
+    input[type="tel"],
+    select,
+    textarea {
+      width: 100%;
+      padding: 10px 14px;
+      font-size: 13px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      background: var(--slate-50);
+      color: var(--slate-900);
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input:focus, select:focus, textarea:focus {
+      border-color: var(--primary);
+      background: #ffffff;
+      box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.15);
+    }
+    .checkbox-wrap {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      margin: 16px 0;
+    }
+    .checkbox-wrap input {
+      margin-top: 3px;
+    }
+    .checkbox-wrap label {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--slate-600);
+      line-height: 1.4;
+    }
+    button.btn-delete {
+      background: var(--danger);
+      color: #ffffff;
+      border: none;
+      font-size: 13px;
+      font-weight: 700;
+      padding: 12px 24px;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background-color 0.15s;
+    }
+    button.btn-delete:hover {
+      background: var(--danger-dark);
+    }
+    .notice-box {
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      border-radius: 8px;
+      padding: 14px 16px;
+      margin: 16px 0;
+      font-size: 13px;
+      color: #991b1b;
+    }
+    .success-banner {
+      display: none;
+      background: #ecfdf5;
+      border: 1px solid #a7f3d0;
+      color: #065f46;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 16px;
+      font-size: 13px;
+    }
+    footer {
+      background: var(--slate-100);
+      text-align: center;
+      padding: 16px;
+      font-size: 12px;
+      color: var(--slate-500);
+      border-top: 1px solid var(--border);
+    }
+    a {
+      color: var(--primary);
+      text-decoration: none;
+      font-weight: 600;
+    }
+    a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <header>
+      <div class="badge">Google Play Data Safety Compliance</div>
+      <h1>Account &amp; Data Deletion</h1>
+      <p>AB Energy Solutions CRM &amp; Solar Business OS • Transparency &amp; User Control</p>
+    </header>
+
+    <div class="content">
+      <p>
+        At <strong>AB Energy Solutions</strong>, we respect your right to control your personal and professional information. Under Google Play Store Developer Guidelines and the Digital Personal Data Protection Act (DPDP), you can request the permanent removal of your account, authentication credentials, and associated personal records at any time.
+      </p>
+
+      <h2>1. How to Request Account Deletion</h2>
+      <p>You may initiate an account deletion through any of the three options below:</p>
+
+      <div class="step-card">
+        <h4><span class="step-num">A</span> Method 1: In-App Deletion (Fastest)</h4>
+        <ol>
+          <li>Open the <strong>AB Energy Solutions CRM</strong> app on your Android device.</li>
+          <li>Log in to your account.</li>
+          <li>Tap on your <strong>User Avatar / Name</strong> in the top navigation bar.</li>
+          <li>Click <strong>Account Profile &amp; Security</strong>.</li>
+          <li>Scroll to the bottom and click <strong>Request Account Deletion</strong>.</li>
+          <li>Confirm your selection to queue immediate deactivation.</li>
+        </ol>
+      </div>
+
+      <div class="step-card">
+        <h4><span class="step-num">B</span> Method 2: Online Deletion Request Form</h4>
+        <p>If you have uninstalled the app or cannot log in, submit the secure form below. Our Data Protection Team will verify and process your request:</p>
+
+        <div id="successMsg" class="success-banner">
+          <strong>Request Logged Successfully.</strong> A confirmation ticket has been generated. Our team will verify your registered contact and purge your personal data within 14 business days.
+        </div>
+
+        <form id="deletionForm" onsubmit="handleFormSubmit(event)" class="form-box">
+          <div class="form-group">
+            <label for="fullName">Full Name *</label>
+            <input type="text" id="fullName" required placeholder="e.g. Siva P">
+          </div>
+
+          <div class="form-group">
+            <label for="email">Registered Email Address *</label>
+            <input type="email" id="email" required placeholder="name@abenergy.com or client email">
+          </div>
+
+          <div class="form-group">
+            <label for="phone">Registered Mobile Number *</label>
+            <input type="tel" id="phone" required placeholder="+91 98765 43210">
+          </div>
+
+          <div class="form-group">
+            <label for="role">CRM Role / Account Type *</label>
+            <select id="role" required>
+              <option value="">Select your account type</option>
+              <option value="Customer">Solar Consumer / Customer Portal</option>
+              <option value="Sales Executive">Sales Executive</option>
+              <option value="Sales Manager">Sales Manager</option>
+              <option value="Survey Engineer">Site Survey Engineer</option>
+              <option value="Installation Lead">Installation Crew Member</option>
+              <option value="Purchase Team">Purchase &amp; Inventory Staff</option>
+              <option value="Accounts Team">Accounts / Finance Staff</option>
+              <option value="Other">Other / Vendor / Partner</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="reason">Reason for Deletion (Optional)</label>
+            <textarea id="reason" rows="3" placeholder="Please specify why you are deleting your account..."></textarea>
+          </div>
+
+          <div class="checkbox-wrap">
+            <input type="checkbox" id="confirmCheck" required>
+            <label for="confirmCheck">
+              I understand that deleting my account will permanently remove my login credentials, saved preferences, and personal call history, and that this action cannot be undone.
+            </label>
+          </div>
+
+          <button type="submit" class="btn-delete">Submit Account Deletion Request</button>
+        </form>
+      </div>
+
+      <div class="step-card">
+        <h4><span class="step-num">C</span> Method 3: Direct Email Request</h4>
+        <p>
+          Send an email to our support team at <a href="mailto:support@xiadot.com?subject=Account%20and%20Data%20Deletion%20Request">support@xiadot.com</a> with the subject line <strong>&quot;Account and Data Deletion Request&quot;</strong>. Please include your registered mobile number and email.
+        </p>
+      </div>
+
+      <h2>2. What Data Is Permanently Deleted</h2>
+      <ul>
+        <li><strong>Authentication Records:</strong> Username, password hash, biometric tokens, and active session tokens.</li>
+        <li><strong>User Profile:</strong> Name, personal contact details, assigned avatar, and employee profile notes.</li>
+        <li><strong>Call Tracking Records:</strong> Phone call duration logs, direction indicators, and call history recorded through the sales tracking bridge.</li>
+        <li><strong>Temporary Field Notes:</strong> Unsubmitted drafts, transient check-in caches, and personal preference cookies.</li>
+      </ul>
+
+      <h2>3. What Data Is Retained and Why</h2>
+      <div class="notice-box">
+        <strong>Statutory &amp; Regulatory Retention:</strong> Certain operational documents cannot be immediately purged due to legal and financial compliance requirements under Indian law:
+      </div>
+      <ul>
+        <li><strong>GST Tax Invoices &amp; Payment Receipts:</strong> Retained for a statutory period of 6 to 8 years in compliance with the Goods and Services Tax (GST) Act and the Indian Companies Act.</li>
+        <li><strong>Executed Solar EPC Contracts &amp; Warranties:</strong> Retained for the active warranty term of the solar system (up to 10-25 years on solar PV modules and inverters) to protect consumer statutory claims and grid interconnection guarantees.</li>
+        <li><strong>DISCOM &amp; CEIG Inspection Clearances:</strong> Retained as official statutory records for the connected electrical grid utility.</li>
+      </ul>
+
+      <h2>4. Processing Timeline</h2>
+      <ul>
+        <li><strong>Acknowledgment:</strong> Your deletion request is acknowledged within <strong>48 hours</strong>.</li>
+        <li><strong>Account Deactivation:</strong> Immediate upon receipt. Your login credentials will cease to function.</li>
+        <li><strong>Data Scrubbing:</strong> Personal identifiers and associated call logs are permanently deleted from production and backup clusters within <strong>14 to 30 calendar days</strong>.</li>
+      </ul>
+
+      <h2>5. Questions and Data Protection Inquiries</h2>
+      <p>
+        For inquiries regarding our data retention policies or this deletion process, please contact:
+      </p>
+      <p>
+        <strong>AB Energy Solutions / Xiadot Data Protection Office</strong><br>
+        Email: <a href="mailto:support@xiadot.com">support@xiadot.com</a><br>
+        Web Portal: <a href="https://xiadot.com/AB_Energy_Solutions/">https://xiadot.com/AB_Energy_Solutions/</a><br>
+        Privacy Policy: <a href="privacy-policy.html">Privacy Policy Documentation</a>
+      </p>
+    </div>
+
+    <footer>
+      &copy; 2026 AB Energy Solutions. All rights reserved. • ISO 9001:2015 Turnkey Solar EPC Operations.
+    </footer>
+  </div>
+
+  <script>
+    function handleFormSubmit(e) {
+      e.preventDefault();
+      document.getElementById('deletionForm').style.display = 'none';
+      document.getElementById('successMsg').style.display = 'block';
+      window.scrollTo({ top: 300, behavior: 'smooth' });
+    }
+  </script>
+
+</body>
+</html>

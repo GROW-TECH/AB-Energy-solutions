@@ -427,6 +427,7 @@ const AppContent: React.FC = () => {
         <SalesPanel
           initialSubTab="quotations"
           targetQuoteLeadId={targetQuoteLeadId}
+          onClearTargetQuoteLead={() => setTargetQuoteLeadId(undefined)}
           onTabChange={(tab) => setActiveNav(tab as NavItemKey)}
           onOpenNewLead={() => setShowNewLeadModal(true)}
           onNavigateToQuotation={handleNavigateToQuotation}
@@ -479,6 +480,7 @@ const AppContent: React.FC = () => {
         <SalesPanel
           initialSubTab={subTab}
           targetQuoteLeadId={targetQuoteLeadId}
+          onClearTargetQuoteLead={() => setTargetQuoteLeadId(undefined)}
           onTabChange={(tab) => setActiveNav(tab as NavItemKey)}
           onOpenNewLead={() => setShowNewLeadModal(true)}
           onNavigateToQuotation={handleNavigateToQuotation}
@@ -558,6 +560,7 @@ const AppContent: React.FC = () => {
       <Sidebar
         currentTab={activeNav}
         onSelectTab={(tab: NavItemKey) => {
+          setTargetQuoteLeadId(undefined);
           setActiveNav(tab);
           setIsSidebarOpen(false);
         }}

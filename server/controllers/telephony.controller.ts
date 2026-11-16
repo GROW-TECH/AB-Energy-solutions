@@ -466,3 +466,25 @@ export const deleteCallLog = async (req: Request, res: Response) => {
   }
 };
 
+/**
+ * Clear All Call Logs (Admin / Reset function)
+ * DELETE /api/telephony/clear-all
+ */
+export const clearAllCallLogs = async (req: Request, res: Response) => {
+  try {
+    await pool.query('TRUNCATE TABLE call_logs');
+    return res.json({
+      success: true,
+      message: 'All call logs cleared successfully'
+    });
+  } catch (error: any) {
+    console.error('Error clearing call logs:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to clear call logs',
+      error: error.message
+    });
+  }
+};
+
+

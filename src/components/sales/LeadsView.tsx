@@ -8,6 +8,7 @@ import {
 import { useCrm } from '../../context/CrmContext';
 import { Lead, LeadStatus, LeadSource, Priority, CustomerApplicationType, SolarSystemType, SiteSurvey } from '../../types';
 import { initiateLeadCall } from '../../utils/telephonyBridge';
+import { checkLeadHasExistingQuote } from '../../utils/quotationEngine';
 
 interface LeadsViewProps {
   onOpenNewLead: () => void;
@@ -416,22 +417,15 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                   (lead.phone && s.phone === lead.phone) || 
                   (lead.name && s.leadName && s.leadName.toLowerCase() === lead.name.toLowerCase())
                 );
-                const isSurveyScheduledOrPending = 
-                  lead.status === 'Site Survey Scheduled' || 
-                  linkedSurvey?.status === 'Scheduled' || 
-                  linkedSurvey?.status === 'In Progress' || 
-                  linkedSurvey?.status === 'Submitted for Review';
-
-                const hasSurveyScheduled = Boolean(lead.surveyId || linkedSurvey || lead.status === 'Site Survey Scheduled' || lead.status === 'Qualified' || lead.status === 'Survey Completed');
-                const isSurveyApproved = 
-                  !isSurveyScheduledOrPending && (
-                    linkedSurvey?.status === 'Approved' || 
-                    lead.status === 'Survey Completed' || 
-                    lead.status === 'Quotation Sent' || 
-                    lead.status === 'Negotiation' || 
-                    lead.status === 'Won' || 
-                    Boolean(lead.quotationId)
-                  );
+                const hasExistingQuote = checkLeadHasExistingQuote(lead, quotations, linkedSurvey);
+                const isSurveyApproved = Boolean(linkedSurvey && linkedSurvey.status === 'Approved');
+                const hasSurveyScheduled = Boolean(
+                  linkedSurvey && (
+                    linkedSurvey.status === 'Scheduled' || 
+                    linkedSurvey.status === 'In Progress' || 
+                    linkedSurvey.status === 'Submitted for Review'
+                  )
+                );
 
                 return (
                   <div
@@ -578,7 +572,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                         <span>Call</span>
                       </button>
 
-                      {!hasSurveyScheduled && !isSurveyApproved && (
+                      {!hasExistingQuote && !isSurveyApproved && !hasSurveyScheduled && (
                         <button
                           onClick={() => {
                             setSurveyLeadToSchedule(lead);
@@ -596,7 +590,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                         </button>
                       )}
 
-                      {hasSurveyScheduled && !isSurveyApproved && (
+                      {!hasExistingQuote && !isSurveyApproved && hasSurveyScheduled && (
                         <button
                           onClick={() => {
                             setSurveyLeadToSchedule(lead);
@@ -613,13 +607,13 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                         </button>
                       )}
 
-                      {isSurveyApproved && (
+                      {(hasExistingQuote || isSurveyApproved) && (
                         <button
                           onClick={() => onNavigateToQuotation(lead.id)}
                           className="flex items-center gap-1 px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-xs font-semibold"
                         >
                           <FileText className="w-3.5 h-3.5" />
-                          <span>{lead.quotationId ? 'View Quote' : 'Quote'}</span>
+                          <span>{hasExistingQuote ? 'View Quote' : 'Quote'}</span>
                         </button>
                       )}
 
@@ -817,22 +811,17 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                           (lead.phone && s.phone === lead.phone) || 
                           (lead.name && s.leadName && s.leadName.toLowerCase() === lead.name.toLowerCase())
                         );
-                        const isSurveyScheduledOrPending = 
-                          lead.status === 'Site Survey Scheduled' || 
-                          linkedSurvey?.status === 'Scheduled' || 
-                          linkedSurvey?.status === 'In Progress' || 
-                          linkedSurvey?.status === 'Submitted for Review';
+                        const hasExistingQuote = checkLeadHasExistingQuote(lead, quotations, linkedSurvey);
 
-                        const hasSurveyScheduled = Boolean(lead.surveyId || linkedSurvey || lead.status === 'Site Survey Scheduled' || lead.status === 'Qualified' || lead.status === 'Survey Completed');
-                        const isSurveyApproved = 
-                          !isSurveyScheduledOrPending && (
-                            linkedSurvey?.status === 'Approved' || 
-                            lead.status === 'Survey Completed' || 
-                            lead.status === 'Quotation Sent' || 
-                            lead.status === 'Negotiation' || 
-                            lead.status === 'Won' || 
-                            Boolean(lead.quotationId)
-                          );
+                        const isSurveyApproved = Boolean(linkedSurvey && linkedSurvey.status === 'Approved');
+
+                        const hasSurveyScheduled = Boolean(
+                          linkedSurvey && (
+                            linkedSurvey.status === 'Scheduled' || 
+                            linkedSurvey.status === 'In Progress' || 
+                            linkedSurvey.status === 'Submitted for Review'
+                          )
+                        );
 
                         return (
                           <div className="flex items-center justify-end gap-1.5">
@@ -846,8 +835,8 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                               <Phone className="w-3.5 h-3.5" />
                             </button>
 
-                            {/* CASE 1: Survey NOT yet scheduled -> show "Survey" button */}
-                            {!hasSurveyScheduled && !isSurveyApproved && (
+                            {/* CASE 1: Survey NOT yet scheduled and no quote -> show "Survey" button */}
+                            {!hasExistingQuote && !isSurveyApproved && !hasSurveyScheduled && (
                               <button
                                 onClick={() => {
                                   setSurveyLeadToSchedule(lead);
@@ -867,7 +856,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                             )}
 
                             {/* CASE 2: Survey ALREADY scheduled -> show "Edit Survey" button (NOT create new) */}
-                            {hasSurveyScheduled && !isSurveyApproved && (
+                            {!hasExistingQuote && !isSurveyApproved && hasSurveyScheduled && (
                               <button
                                 onClick={() => {
                                   setSurveyLeadToSchedule(lead);
@@ -895,17 +884,17 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                               </button>
                             )}
 
-                            {/* CASE 3: Quote button ONLY appears after survey engineer completes BOM and PM approves */}
-                            {isSurveyApproved ? (
+                            {/* CASE 3: Quote button ONLY appears when quote already exists OR survey engineer completes BOM and PM approves */}
+                            {(hasExistingQuote || isSurveyApproved) && (
                               <button
                                 onClick={() => onNavigateToQuotation(lead.id)}
                                 className="flex items-center gap-1 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer"
-                                title={lead.quotationId ? "View Approved Quotation" : "Generate Proposal from Approved BOM"}
+                                title={hasExistingQuote ? "View Approved Quotation" : "Generate Proposal from Approved BOM"}
                               >
                                 <FileText className="w-3 h-3" />
-                                <span>{lead.quotationId ? 'View Quote' : 'Quote'}</span>
+                                <span>{hasExistingQuote ? 'View Quote' : 'Quote'}</span>
                               </button>
-                            ) : null}
+                            )}
 
                             <button
                               onClick={() => handleOpenEditLead(lead)}
@@ -1105,31 +1094,24 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                   s.id === selectedLead.surveyId || 
                   (selectedLead.phone && s.phone === selectedLead.phone)
                 );
-                const isSurveyScheduledOrPending = 
-                  selectedLead.status === 'Site Survey Scheduled' || 
-                  linkedSurvey?.status === 'Scheduled' || 
-                  linkedSurvey?.status === 'In Progress' || 
-                  linkedSurvey?.status === 'Submitted for Review';
+                const hasExistingQuote = checkLeadHasExistingQuote(selectedLead, quotations, linkedSurvey);
+                const isSurveyApproved = Boolean(linkedSurvey && linkedSurvey.status === 'Approved');
+                const hasSurveyScheduled = Boolean(
+                  linkedSurvey && (
+                    linkedSurvey.status === 'Scheduled' || 
+                    linkedSurvey.status === 'In Progress' || 
+                    linkedSurvey.status === 'Submitted for Review'
+                  )
+                );
 
-                const isSurveyApproved = 
-                  !isSurveyScheduledOrPending && (
-                    linkedSurvey?.status === 'Approved' || 
-                    selectedLead.status === 'Survey Completed' || 
-                    selectedLead.status === 'Quotation Sent' || 
-                    selectedLead.status === 'Negotiation' || 
-                    selectedLead.status === 'Won' || 
-                    Boolean(selectedLead.quotationId)
-                  );
-                const hasSurveyScheduled = Boolean(selectedLead.surveyId || linkedSurvey || selectedLead.status === 'Site Survey Scheduled' || selectedLead.status === 'Qualified');
-
-                if (isSurveyApproved) {
+                if (hasExistingQuote || isSurveyApproved) {
                   return (
                     <button
                       onClick={() => onNavigateToQuotation(selectedLead.id)}
                       className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors cursor-pointer"
                     >
                       <FileText className="w-3.5 h-3.5" />
-                      <span>{selectedLead.quotationId ? 'View Quotation' : 'Generate Quotation'}</span>
+                      <span>{hasExistingQuote ? 'View Quotation' : 'Generate Quotation'}</span>
                     </button>
                   );
                 }
@@ -1302,23 +1284,10 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                     s.id === selectedLead.surveyId || 
                     (selectedLead.phone && s.phone === selectedLead.phone)
                   );
-                  const isSurveyScheduledOrPending = 
-                    selectedLead.status === 'Site Survey Scheduled' || 
-                    linkedSurvey?.status === 'Scheduled' || 
-                    linkedSurvey?.status === 'In Progress' || 
-                    linkedSurvey?.status === 'Submitted for Review';
+                  const hasExistingQuote = checkLeadHasExistingQuote(selectedLead, quotations, linkedSurvey);
+                  const isSurveyApproved = Boolean(linkedSurvey && linkedSurvey.status === 'Approved');
 
-                  const isSurveyApproved = 
-                    !isSurveyScheduledOrPending && (
-                      linkedSurvey?.status === 'Approved' || 
-                      selectedLead.status === 'Survey Completed' || 
-                      selectedLead.status === 'Quotation Sent' || 
-                      selectedLead.status === 'Negotiation' || 
-                      selectedLead.status === 'Won' || 
-                      Boolean(selectedLead.quotationId)
-                    );
-
-                  if (isSurveyApproved) {
+                  if (hasExistingQuote || isSurveyApproved) {
                     return (
                       <button
                         onClick={() => {
@@ -1328,7 +1297,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                         className="w-full flex items-center justify-center gap-2 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors cursor-pointer"
                       >
                         <FileText className="w-4 h-4" />
-                        <span>{selectedLead.quotationId ? 'View Approved Quotation' : 'Generate Solar Quotation from Approved BOM'}</span>
+                        <span>{hasExistingQuote ? 'View Approved Quotation' : 'Generate Solar Quotation from Approved BOM'}</span>
                       </button>
                     );
                   }

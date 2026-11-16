@@ -136,6 +136,16 @@ export const createLead = async (req: Request, res: Response) => {
           if (n > maxNum) maxNum = n;
         }
       }
+      try {
+        const [quoteIds]: any = await pool.query("SELECT lead_id as id FROM quotations WHERE lead_id LIKE 'LD-2026-%'");
+        for (const row of quoteIds) {
+          const match = row.id?.match(/LD-2026-(\d+)/);
+          if (match) {
+            const n = parseInt(match[1], 10);
+            if (n > maxNum) maxNum = n;
+          }
+        }
+      } catch (_) {}
       finalId = `LD-2026-${String(maxNum + 1).padStart(3, '0')}`;
       l.id = finalId;
     }
@@ -279,6 +289,8 @@ export const updateLead = async (req: Request, res: Response) => {
 export const deleteLead = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    await pool.query('DELETE FROM quotations WHERE lead_id = ?', [id]).catch(() => {});
+    await pool.query('DELETE FROM site_surveys WHERE lead_id = ?', [id]).catch(() => {});
     await pool.query('DELETE FROM leads WHERE id = ?', [id]);
     res.json({ success: true, id });
   } catch (err: any) {

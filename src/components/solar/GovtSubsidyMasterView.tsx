@@ -3,7 +3,8 @@ import {
   Landmark, ShieldCheck, AlertTriangle, CheckCircle2, Clock, 
   ExternalLink, Search, Filter, Phone, MessageSquare, FileText, 
   Upload, Check, ArrowRight, User, Building, Zap, RefreshCw, 
-  Calendar, Eye, Info, ChevronRight, X, AlertCircle, FileCheck
+  Calendar, Eye, Info, ChevronRight, X, AlertCircle, FileCheck,
+  Trash2
 } from 'lucide-react';
 import { getApiUrl } from '../../utils/apiUrl';
 
@@ -193,6 +194,34 @@ export const GovtSubsidyMasterView: React.FC = () => {
     }
   };
 
+  const handleDeleteSubsidy = async (id: string, customerName?: string) => {
+    if (!window.confirm(`Are you sure you want to remove the subsidy record for "${customerName || id}"?`)) {
+      return;
+    }
+    try {
+      const res = await authFetch(`/api/subsidies/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        setSubsidies(prev => prev.filter(s => s.id !== id && s.project_id !== id));
+      }
+    } catch (err) {
+      console.error('Failed to delete subsidy record:', err);
+    }
+  };
+
+  const handleClearAllSubsidies = async () => {
+    if (!window.confirm('Are you sure you want to remove ALL existing subsidy data? This will clear the subsidy tracking table.')) {
+      return;
+    }
+    try {
+      const res = await authFetch('/api/subsidies', { method: 'DELETE' });
+      if (res.ok) {
+        setSubsidies([]);
+      }
+    } catch (err) {
+      console.error('Failed to clear subsidy records:', err);
+    }
+  };
+
   const getWhatsAppMessage = (record: SubsidyRecord) => {
     const stage = STAGES.find(s => s.step === record.current_stage);
     const cap = record.system_capacity_kw || 3;
@@ -274,11 +303,22 @@ export const GovtSubsidyMasterView: React.FC = () => {
             </a>
             <button
               onClick={fetchSubsidies}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-200 font-semibold text-sm border border-slate-700/80 transition-all"
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-200 font-semibold text-sm border border-slate-700/80 transition-all cursor-pointer"
             >
               <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
               Refresh
             </button>
+            {subsidies.length > 0 && (
+              <button
+                type="button"
+                onClick={handleClearAllSubsidies}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 font-semibold text-sm border border-rose-500/30 transition-all cursor-pointer"
+                title="Remove all existing mock and cached subsidy records"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Clear All Subsidy Data</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -517,6 +557,14 @@ export const GovtSubsidyMasterView: React.FC = () => {
                     <MessageSquare className="w-4 h-4" />
                   </button>
                   <button
+                    type="button"
+                    onClick={() => handleDeleteSubsidy(record.id, record.customer_name)}
+                    title="Delete subsidy record"
+                    className="p-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 transition-colors border border-rose-200 cursor-pointer"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                  <button
                     onClick={() => openDossier(record)}
                     className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-xs transition-all cursor-pointer"
                   >
@@ -680,13 +728,21 @@ export const GovtSubsidyMasterView: React.FC = () => {
                         <button
                           onClick={() => openWhatsApp(record)}
                           title="Send update via WhatsApp"
-                          className="p-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 transition-colors"
+                          className="p-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 transition-colors cursor-pointer"
                         >
                           <MessageSquare className="w-3.5 h-3.5" />
                         </button>
                         <button
+                          type="button"
+                          onClick={() => handleDeleteSubsidy(record.id, record.customer_name)}
+                          title="Delete subsidy record"
+                          className="p-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 transition-colors border border-rose-200 cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
                           onClick={() => openDossier(record)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-medium text-xs shadow-sm transition-all"
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-medium text-xs shadow-sm transition-all cursor-pointer"
                         >
                           <Eye className="w-3.5 h-3.5" />
                           Dossier

@@ -10,6 +10,17 @@ import {
 import { useCrm } from '../../context/CrmContext';
 import { SiteSurvey, SurveyPhoto, SurveyPhotoCategory, SurveyStatus, BomItem, Quotation } from '../../types';
 import { QuotationProposalModal } from '../common/QuotationProposalModal';
+import { getApiUrl } from '../../utils/apiUrl';
+
+export const resolveSurveyPhotoUrl = (photo?: { filePath?: string; base64Data?: string }) => {
+  if (!photo) return '';
+  if (photo.base64Data && photo.base64Data.startsWith('data:image')) return photo.base64Data;
+  if (!photo.filePath) return '';
+  if (photo.filePath.startsWith('http://') || photo.filePath.startsWith('https://') || photo.filePath.startsWith('data:image')) {
+    return photo.filePath;
+  }
+  return getApiUrl(photo.filePath);
+};
 
 interface SiteSurveysViewProps {
   onNavigateToQuotation: (leadId: string) => void;
@@ -2328,9 +2339,16 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
                           className="relative rounded-xl overflow-hidden border border-slate-200 group bg-slate-900 h-28 cursor-pointer shadow-2xs hover:shadow-md transition-shadow"
                         >
                           <img
-                            src={photo.filePath}
+                            src={resolveSurveyPhotoUrl(photo)}
                             alt={photo.caption || photo.category}
                             className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                            onError={(e) => {
+                              const target = e.currentTarget;
+                              if (photo.filePath && !target.dataset.fallbackTried) {
+                                target.dataset.fallbackTried = 'true';
+                                target.src = photo.filePath.startsWith('/') ? photo.filePath.slice(1) : photo.filePath;
+                              }
+                            }}
                           />
                           <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                             <Eye className="w-5 h-5 text-white" />
@@ -3149,9 +3167,16 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
                                 onClick={() => setPreviewPhoto(photo)}
                               >
                                 <img 
-                                  src={photo.filePath} 
+                                  src={resolveSurveyPhotoUrl(photo)} 
                                   alt={photo.caption || cat.label} 
                                   className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                                  onError={(e) => {
+                                    const target = e.currentTarget;
+                                    if (photo.filePath && !target.dataset.fallbackTried) {
+                                      target.dataset.fallbackTried = 'true';
+                                      target.src = photo.filePath.startsWith('/') ? photo.filePath.slice(1) : photo.filePath;
+                                    }
+                                  }}
                                 />
                                 <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
                                   <Eye className="w-4 h-4 text-white" />
@@ -4752,9 +4777,16 @@ export const SiteSurveysView: React.FC<SiteSurveysViewProps> = ({ onNavigateToQu
 
             <div className="rounded-xl overflow-hidden bg-slate-950 max-h-[50vh] sm:max-h-[55vh] flex items-center justify-center">
               <img 
-                src={previewPhoto.filePath} 
+                src={resolveSurveyPhotoUrl(previewPhoto)} 
                 alt="Audit evidence" 
                 className="max-h-[50vh] sm:max-h-[55vh] w-auto object-contain"
+                onError={(e) => {
+                  const target = e.currentTarget;
+                  if (previewPhoto.filePath && !target.dataset.fallbackTried) {
+                    target.dataset.fallbackTried = 'true';
+                    target.src = previewPhoto.filePath.startsWith('/') ? previewPhoto.filePath.slice(1) : previewPhoto.filePath;
+                  }
+                }}
               />
             </div>
 

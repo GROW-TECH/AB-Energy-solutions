@@ -593,7 +593,7 @@ export async function generateProposalPdf(data: ProposalPdfData): Promise<{ file
       doc.font('Helvetica').fontSize(8).fillColor('#CBD5E1')
          .text('Phone: +91 95664 99678   |   Email: abenergysolutiontn@gmail.com', 55, p6Y + 47);
       doc.font('Helvetica').fontSize(8).fillColor('#CBD5E1')
-         .text('1/359, Maruthi Nagar, Chinnakavandanur, Namakkal, TN - 636202', 55, p6Y + 60);
+         .text('No 13, Thammampatty Main Road, Maheswari Theatre Opposite Street, Vazhapadi, Salem, Tamil Nadu - 636115', 55, p6Y + 60);
       doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#34D399')
          .text('12+ Years Solar Experience   •   TNEB C-Licence Certified Enterprise', 55, p6Y + 74);
 
