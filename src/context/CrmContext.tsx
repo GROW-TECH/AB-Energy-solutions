@@ -30,6 +30,15 @@ export interface AuthUser {
   avatar?: string;
 }
 
+export interface PreviewUser {
+  id?: string;
+  userId?: string;
+  employeeId?: string;
+  name?: string;
+  username?: string;
+  role?: Role;
+}
+
 interface CrmContextType {
   showToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
   // Auth state & Actions
@@ -46,6 +55,9 @@ interface CrmContextType {
   // Role & Demo Preview
   activeRole: Role;
   previewRole: Role | null;
+  previewUser: PreviewUser | null;
+  setPreviewUser: (user: PreviewUser | null) => void;
+  viewAsUser: (targetUser: any) => void;
   setActiveRole: (role: Role) => void;
   setDemoPreviewRole: (role: Role | null) => void;
   selectedCustomerIdForPortal: string;
@@ -101,6 +113,7 @@ interface CrmContextType {
   deleteSiteSurvey: (surveyId: string) => Promise<{ success: boolean; error?: string }>;
   reloadSurvey: (surveyId: string) => Promise<SiteSurvey | null>;
   createQuotation: (quoteData: Partial<Quotation>) => Quotation;
+  deleteQuotation: (quotationId: string) => Promise<boolean>;
   setQuotations: React.Dispatch<React.SetStateAction<Quotation[]>>;
   createQuotationRevision: (quotationId: string, revisionData: Partial<Quotation>) => Promise<void>;
   approveQuotationDiscount: (quotationId: string) => Promise<boolean>;
@@ -181,6 +194,7 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return !!localStorage.getItem('ab_solar_token');
   });
   const [previewRole, setPreviewRole] = useState<Role | null>(null);
+  const [previewUser, setPreviewUser] = useState<PreviewUser | null>(null);
   const [activeRoleState, setActiveRoleState] = useState<Role>(() => {
     const saved = localStorage.getItem(`${STORAGE_KEY}_user`);
     return saved ? JSON.parse(saved).role : 'Super Admin';
@@ -192,8 +206,26 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (currentUser?.role === 'Super Admin') {
       setPreviewRole(role === 'Super Admin' ? null : role);
       setActiveRoleState(role);
+      if (role === 'Super Admin') {
+        setPreviewUser(null);
+      }
     } else {
       console.warn('Unauthorized role switch attempt blocked. Authenticated role is strictly enforced by server.');
+    }
+  };
+
+  const viewAsUser = (targetUser: any) => {
+    if (currentUser?.role === 'Super Admin') {
+      if (!targetUser) {
+        setPreviewUser(null);
+        setPreviewRole(null);
+        setActiveRoleState('Super Admin');
+        return;
+      }
+      setPreviewUser(targetUser);
+      const targetRole = targetUser.role || 'Sales Executive';
+      setPreviewRole(targetRole);
+      setActiveRoleState(targetRole);
     }
   };
 
@@ -201,11 +233,16 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (currentUser?.role === 'Super Admin') {
       setPreviewRole(role);
       if (role) setActiveRoleState(role);
-      else if (currentUser) setActiveRoleState(currentUser.role);
+      else if (currentUser) {
+        setActiveRoleState(currentUser.role);
+        setPreviewUser(null);
+      }
     }
   };
 
   const logout = async () => {
+    setPreviewUser(null);
+    setPreviewRole(null);
     try {
       const currentToken = localStorage.getItem('ab_solar_token');
       if (currentToken) {
@@ -290,7 +327,10 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return { success: false, error: data.error || data.message || 'Authentication failed' };
       }
 
-      const user: AuthUser = data.user;
+      const user: AuthUser = {
+        ...data.user,
+        id: data.user?.id || data.user?.userId || data.user?.employeeId,
+      };
       const newToken = data.token;
 
       localStorage.setItem('ab_solar_token', newToken);
@@ -585,8 +625,12 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (meRes.ok) {
           const meData = await meRes.json();
           if (meData.success && meData.user) {
-            setCurrentUser(meData.user);
-            localStorage.setItem(`${STORAGE_KEY}_user`, JSON.stringify(meData.user));
+            const formattedMe: AuthUser = {
+              ...meData.user,
+              id: meData.user.id || meData.user.userId || meData.user.employeeId,
+            };
+            setCurrentUser(formattedMe);
+            localStorage.setItem(`${STORAGE_KEY}_user`, JSON.stringify(formattedMe));
           }
         }
       } catch (_) {}
@@ -889,17 +933,21 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
     
-    // Estimate KW based on monthly bill (Tariff approx ₹8/kWh, 1kW generates 120 units/mo)
+    // Use user-specified KW if provided, otherwise estimate from bill or sanction load (no automatic 3kW forcing)
     const bill = leadData.monthlyBill || 0;
     const estKwFromBill = bill > 0 ? Math.round((bill / 8) / 120) : 0;
-    const estKw = Math.max(3, estKwFromBill || (leadData.sanctionLoad || 3));
-    const estBudget = estKw * 60000;
+    const estKw = leadData.recommendedKw !== undefined && leadData.recommendedKw !== null
+      ? Number(leadData.recommendedKw)
+      : (estKwFromBill || Number(leadData.sanctionLoad) || 0);
+    const estBudget = Number(leadData.estimatedBudget) || (estKw * 60000);
+    const ebNumber = (leadData.ebServiceNumber || leadData.consumerNumberDiscom || '').toString().trim();
 
     const newLead: Lead = {
       id: leadId,
       name: leadData.name || 'Solar Prospect',
       email: leadData.email || '',
       phone: leadData.phone || '',
+      alternatePhone: leadData.alternatePhone || undefined,
       city: leadData.city || '',
       state: leadData.state || '',
       address: leadData.address || '',
@@ -920,6 +968,8 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       connectionSpace: leadData.connectionSpace || 'Single Space',
       recommendedKw: estKw,
       estimatedBudget: estBudget,
+      ebServiceNumber: ebNumber,
+      consumerNumberDiscom: ebNumber,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       notes: leadData.notes || '',
@@ -997,6 +1047,20 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     authFetch(`/api/leads/${leadId}`, {
       method: 'DELETE',
     }).catch(err => console.error('Failed to delete lead from MySQL:', err));
+  };
+
+  const deleteQuotation = async (quotationId: string): Promise<boolean> => {
+    setQuotations(prev => prev.filter(q => q.id !== quotationId));
+    try {
+      let res = await authFetch(`/api/quotations/${quotationId}/delete`, { method: 'POST' });
+      if (!res.ok) {
+        res = await authFetch(`/api/quotations/${quotationId}`, { method: 'DELETE' });
+      }
+      return true;
+    } catch (err) {
+      console.error('Failed to delete quotation from MySQL:', err);
+      return false;
+    }
   };
 
   const autoAssignAllLeads = () => {
@@ -3142,6 +3206,9 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       updateEmployee,
       activeRole,
       previewRole,
+      previewUser,
+      setPreviewUser,
+      viewAsUser,
       setActiveRole,
       setDemoPreviewRole,
       selectedCustomerIdForPortal,
@@ -3186,6 +3253,7 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       deleteSiteSurvey,
       reloadSurvey,
       createQuotation,
+      deleteQuotation,
       setQuotations,
       createQuotationRevision,
       approveQuotationDiscount,

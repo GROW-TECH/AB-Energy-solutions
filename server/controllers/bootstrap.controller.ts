@@ -138,57 +138,94 @@ export const getBootstrapData = async (req: Request, res: Response) => {
     res.json({
       success: true,
       data: {
-        employees: employees.map((e: any) => ({
-          id: e.id,
-          name: e.name,
-          email: e.email,
-          phone: e.phone,
-          role: e.role,
-          department: e.department,
-          avatar: e.avatar,
-          activeLeadsCount: e.active_leads_count,
-          completedProjectsCount: e.completed_projects_count,
-          location: e.location,
-        })),
-        leads: leads.map((l: any) => ({
-          id: l.id,
-          name: l.name || '',
-          email: l.email || '',
-          phone: l.phone || '',
-          city: l.city || '',
-          state: l.state || 'Tamil Nadu',
-          address: l.address || '',
-          pincode: l.pincode || '',
-          source: l.source || 'Direct',
-          status: l.status || 'New',
-          priority: l.priority || 'Medium',
-          recommendedPriority: l.recommended_priority,
-          priorityOverrideReason: l.priority_override_reason,
-          buyingIntent: l.buying_intent,
-          assignedToId: l.assigned_to_id || '',
-          assignedToName: l.assigned_to_name || '',
-          monthlyBill: Number(l.monthly_bill) || 0,
-          sanctionLoad: Number(l.sanction_load) || 0,
-          roofAreaSqFt: Number(l.roof_area_sqft) || 0,
-          roofType: l.roof_type,
-          connectionSpace: l.connection_space || 'Single Space',
-          customerType: l.customer_type || 'Residential',
-          systemType: l.system_type || 'On-Grid',
-          recommendedKw: Number(l.recommended_kw) || 0,
-          estimatedBudget: Number(l.estimated_budget) || 0,
-          consumerNumberDiscom: l.consumer_number_discom || l.eb_service_number || '',
-          ebServiceNumber: l.eb_service_number || l.consumer_number_discom || '',
-          surveyId: l.survey_id || undefined,
-          quotationId: l.quotation_id || undefined,
-          notes: l.notes || '',
-          createdAt: l.created_at,
-          updatedAt: l.updated_at,
-          lastContactedAt: l.last_contacted_at,
-          lastModifiedBy: l.last_modified_by || undefined,
-          lastModifiedRole: l.last_modified_role || undefined,
-          lastModifiedAt: l.last_modified_at || undefined,
-          editHistory: typeof l.edit_history === 'string' ? JSON.parse(l.edit_history) : (l.edit_history || []),
-        })),
+        employees: (() => {
+          const seen = new Set<string>();
+          const list: any[] = [];
+          for (const e of employees) {
+            const key = (e.id || e.username || e.email || '').toLowerCase();
+            if (!seen.has(key)) {
+              seen.add(key);
+              list.push({
+                id: e.id,
+                name: e.name,
+                email: e.email,
+                phone: e.phone,
+                role: e.role,
+                department: e.department,
+                avatar: e.avatar,
+                activeLeadsCount: e.active_leads_count,
+                completedProjectsCount: e.completed_projects_count,
+                location: e.location,
+              });
+            }
+          }
+          return list;
+        })(),
+        leads: leads.map((l: any) => {
+          // Self-healing: verify quotationId actually belongs to this lead
+          let validQuotationId = l.quotation_id || undefined;
+          if (validQuotationId) {
+            const matchingQuote = quotations.find((q: any) => q.id === validQuotationId);
+            if (!matchingQuote) {
+              validQuotationId = undefined;
+              pool.query('UPDATE leads SET quotation_id = NULL WHERE id = ?', [l.id]).catch(() => {});
+            } else {
+              const cleanP = (p?: string) => (p ? p.replace(/\D/g, '').slice(-10) : '');
+              const lp = cleanP(l.phone);
+              const qp = cleanP(matchingQuote.customer_phone);
+              const ln = (l.name || '').trim().toLowerCase();
+              const qn = (matchingQuote.lead_name || '').trim().toLowerCase();
+              const phoneMatches = Boolean(lp && qp && lp === qp);
+              const nameMatches = Boolean(ln && qn && ln === qn);
+              // If neither phone nor name matches, it's an orphaned link belonging to another customer
+              if (!phoneMatches && !nameMatches) {
+                validQuotationId = undefined;
+                pool.query('UPDATE leads SET quotation_id = NULL WHERE id = ?', [l.id]).catch(() => {});
+              }
+            }
+          }
+
+          return {
+            id: l.id,
+            name: l.name || '',
+            email: l.email || '',
+            phone: l.phone || '',
+            alternatePhone: l.alternate_phone || undefined,
+            city: l.city || '',
+            state: l.state || 'Tamil Nadu',
+            address: l.address || '',
+            pincode: l.pincode || '',
+            source: l.source || 'Direct',
+            status: l.status || 'New',
+            priority: l.priority || 'Medium',
+            recommendedPriority: l.recommended_priority,
+            priorityOverrideReason: l.priority_override_reason,
+            buyingIntent: l.buying_intent,
+            assignedToId: l.assigned_to_id || '',
+            assignedToName: l.assigned_to_name || '',
+            monthlyBill: Number(l.monthly_bill) || 0,
+            sanctionLoad: Number(l.sanction_load) || 0,
+            roofAreaSqFt: Number(l.roof_area_sqft) || 0,
+            roofType: l.roof_type,
+            connectionSpace: l.connection_space || 'Single Space',
+            customerType: l.customer_type || 'Residential',
+            systemType: l.system_type || 'On-Grid',
+            recommendedKw: Number(l.recommended_kw) || 0,
+            estimatedBudget: Number(l.estimated_budget) || 0,
+            consumerNumberDiscom: l.consumer_number_discom || l.eb_service_number || '',
+            ebServiceNumber: l.eb_service_number || l.consumer_number_discom || '',
+            surveyId: l.survey_id || undefined,
+            quotationId: validQuotationId,
+            notes: l.notes || '',
+            createdAt: l.created_at,
+            updatedAt: l.updated_at,
+            lastContactedAt: l.last_contacted_at,
+            lastModifiedBy: l.last_modified_by || undefined,
+            lastModifiedRole: l.last_modified_role || undefined,
+            lastModifiedAt: l.last_modified_at || undefined,
+            editHistory: typeof l.edit_history === 'string' ? JSON.parse(l.edit_history) : (l.edit_history || []),
+          };
+        }),
         customers: customers.map((c: any) => formatCustomer(c, role, custUserMap[c.id])),
         surveys: surveys.map((s: any) => formatSurvey(s, photosBySurvey[s.id] || [], historyBySurvey[s.id] || [])),
         quotations: quotations.map((q: any) => ({

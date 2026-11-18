@@ -23,7 +23,7 @@ interface SolarPackage {
 export const SolarPackagesView: React.FC = () => {
   const { createQuotation, leads } = useCrm();
 
-  const [selectedLeadId, setSelectedLeadId] = useState(leads[0]?.id || '');
+  const [selectedLeadId, setSelectedLeadId] = useState('');
   const [quotedPackageId, setQuotedPackageId] = useState<string | null>(null);
 
   const packages: SolarPackage[] = [
@@ -111,6 +111,10 @@ export const SolarPackagesView: React.FC = () => {
   ];
 
   const handleCreatePackageQuote = (pkg: SolarPackage) => {
+    if (!selectedLeadId) {
+      alert('Please select a target lead from the dropdown before generating a package quotation.');
+      return;
+    }
     const lead = leads.find(l => l.id === selectedLeadId);
     createQuotation({
       leadId: selectedLeadId,
@@ -144,6 +148,7 @@ export const SolarPackagesView: React.FC = () => {
             onChange={e => setSelectedLeadId(e.target.value)}
             className="p-2 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-800"
           >
+            <option value="" disabled>-- Select Lead --</option>
             {leads.map(l => (
               <option key={l.id} value={l.id}>
                 {l.name} ({l.city}) - Needs ~{l.recommendedKw}kW

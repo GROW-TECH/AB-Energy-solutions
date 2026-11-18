@@ -21,7 +21,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
   onNavigateToQuotation,
   onNavigateToSurvey,
 }) => {
-  const { leads, updateLead, qualifyLead, deleteLead, timeline, activeRole, currentUser, employees, surveys, quotations, rescheduleSurveyAction } = useCrm();
+  const { leads, updateLead, qualifyLead, deleteLead, timeline, activeRole, currentUser, previewUser, employees, surveys, quotations, rescheduleSurveyAction } = useCrm();
 
   const isExecutive = activeRole === 'Sales Executive';
   const isManager = activeRole === 'Sales Manager' || activeRole === 'Super Admin';
@@ -55,19 +55,42 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
   };
 
   const isLeadAssignedToMe = (lead: Lead) => {
-    if (!currentUser) return false;
-    const userEmpId = currentUser.employeeId;
-    const userId = currentUser.id;
-    const userName = (currentUser.name || '').trim().toLowerCase();
+    // Determine effective user: previewUser if Super Admin is previewing via "View As", otherwise currentUser
+    const effectiveUser = previewUser || currentUser;
+    if (!effectiveUser) return false;
 
-    if (userEmpId && lead.assignedToId === userEmpId) return true;
-    if (userId && lead.assignedToId === userId) return true;
-    if (lead.assignedToName && userName) {
-      const aName = lead.assignedToName.trim().toLowerCase();
-      if (aName === userName) return true;
+    const userEmpId = (effectiveUser.employeeId || '').toLowerCase().trim();
+    const userId = (((effectiveUser as any).userId || effectiveUser.id || '') as string).toLowerCase().trim();
+    const userName = (effectiveUser.name || '').trim().toLowerCase();
+    const userLogin = (((effectiveUser as any).username || '') as string).trim().toLowerCase();
+
+    const leadAssignedId = (lead.assignedToId || '').toLowerCase().trim();
+    const leadAssignedName = (lead.assignedToName || '').trim().toLowerCase();
+
+    // 1. Match by Employee ID
+    if (userEmpId && (leadAssignedId === userEmpId || leadAssignedId.includes(userEmpId))) return true;
+
+    // 2. Match by User ID
+    if (userId && (leadAssignedId === userId || leadAssignedId.includes(userId))) return true;
+
+    // 3. Match by Username / Login handle
+    if (userLogin && (leadAssignedId === userLogin || leadAssignedName === userLogin)) return true;
+
+    // 4. Match by Name (exact or first name substring)
+    if (leadAssignedName && userName) {
+      if (leadAssignedName === userName) return true;
       const first = userName.split(' ')[0];
-      if (first.length >= 3 && aName.includes(first)) return true;
+      if (first.length >= 3 && leadAssignedName.includes(first)) return true;
+      const leadFirst = leadAssignedName.split(' ')[0];
+      if (leadFirst.length >= 3 && userName.includes(leadFirst)) return true;
     }
+
+    // 5. Special fallback: If Super Admin switched to Sales Executive role to preview,
+    // and hasn't selected a specific user, show the active queue
+    if (currentUser?.role === 'Super Admin' && activeRole === 'Sales Executive' && !previewUser) {
+      return true;
+    }
+
     return false;
   };
 
@@ -84,44 +107,71 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
   const [editForm, setEditForm] = useState({
     name: '',
     phone: '',
+    alternatePhone: '',
     email: '',
     city: '',
     address: '',
     monthlyBill: 0,
     sanctionLoad: 0,
-    recommendedKw: 5,
+    recommendedKw: 0,
+    ebServiceNumber: '',
     roofType: 'RCC Flat' as Lead['roofType'],
     roofAreaSqFt: 0,
     priority: 'Medium' as Priority,
     source: 'Website' as LeadSource,
     notes: '',
+    assignedToId: '',
   });
 
   const handleOpenEditLead = (lead: Lead) => {
     setEditingLead(lead);
+    const matchedRep = salesExecutives.find(r => 
+      r.id === lead.assignedToId || 
+      r.employeeId === lead.assignedToId || 
+      (r.name && lead.assignedToName && r.name.toLowerCase() === lead.assignedToName.toLowerCase())
+    );
     setEditForm({
       name: lead.name || '',
       phone: lead.phone || '',
+      alternatePhone: lead.alternatePhone || (lead as any).alternate_phone || '',
       email: lead.email || '',
       city: lead.city || '',
       address: lead.address || '',
       monthlyBill: lead.monthlyBill || 0,
       sanctionLoad: lead.sanctionLoad || 0,
-      recommendedKw: lead.recommendedKw || 5,
+      recommendedKw: lead.recommendedKw !== undefined && lead.recommendedKw !== null ? lead.recommendedKw : 0,
+      ebServiceNumber: lead.ebServiceNumber || lead.consumerNumberDiscom || '',
       roofType: lead.roofType || 'RCC Flat',
       roofAreaSqFt: lead.roofAreaSqFt || 0,
       priority: lead.priority || 'Medium',
       source: lead.source || 'Website',
       notes: lead.notes || '',
+      assignedToId: matchedRep ? matchedRep.id : (lead.assignedToId || ''),
     });
   };
 
   const handleSaveEditLead = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingLead) return;
-    updateLead(editingLead.id, editForm);
+    const cleanKw = Number(editForm.recommendedKw) || 0;
+    const cleanEb = (editForm.ebServiceNumber || '').trim();
+    const cleanAltPhone = (editForm.alternatePhone || '').replace(/\D/g, '').slice(0, 10);
+    const matchedRep = salesExecutives.find(r => r.id === editForm.assignedToId);
+    const updatedPayload: any = {
+      ...editForm,
+      alternatePhone: cleanAltPhone || undefined,
+      alternate_phone: cleanAltPhone || undefined,
+      recommendedKw: cleanKw,
+      ebServiceNumber: cleanEb,
+      consumerNumberDiscom: cleanEb,
+    };
+    if (isManager && editForm.assignedToId) {
+      updatedPayload.assignedToId = matchedRep ? matchedRep.id : editForm.assignedToId;
+      updatedPayload.assignedToName = matchedRep ? matchedRep.name : (editingLead.assignedToName || undefined);
+    }
+    updateLead(editingLead.id, updatedPayload);
     if (selectedLead?.id === editingLead.id) {
-      setSelectedLead({ ...selectedLead, ...editForm });
+      setSelectedLead({ ...selectedLead, ...updatedPayload });
     }
     showToast(`Lead ${editingLead.name} (${editingLead.id}) updated successfully!`, 'success');
     setEditingLead(null);
@@ -411,11 +461,10 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
               </div>
             ) : (
               paginatedLeads.map(lead => {
+                // Strict relational ID matching only - NEVER match by name or phone to prevent ghost survey inheritance
                 const linkedSurvey = surveys.find(s => 
-                  s.leadId === lead.id || 
-                  s.id === lead.surveyId || 
-                  (lead.phone && s.phone === lead.phone) || 
-                  (lead.name && s.leadName && s.leadName.toLowerCase() === lead.name.toLowerCase())
+                  (lead.surveyId && s.id === lead.surveyId) || 
+                  (lead.id && s.leadId === lead.id)
                 );
                 const hasExistingQuote = checkLeadHasExistingQuote(lead, quotations, linkedSurvey);
                 const isSurveyApproved = Boolean(linkedSurvey && linkedSurvey.status === 'Approved');
@@ -522,9 +571,13 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                     {/* Sizing & Monthly Bill Grid */}
                     <div className="grid grid-cols-2 gap-2 text-xs p-2.5 bg-slate-50/80 rounded-xl border border-slate-100">
                       <div>
-                        <span className="text-[10px] text-slate-400 block font-semibold">System Feasibility</span>
-                        <span className="font-bold text-slate-900 font-mono">{lead.recommendedKw} kW</span>
-                        <span className="text-[10px] text-emerald-700 block font-medium">Est: ₹{(lead.estimatedBudget / 100000).toFixed(1)}L</span>
+                        <span className="text-[10px] text-slate-400 block font-semibold">System Capacity</span>
+                        <span className="font-bold text-slate-900 font-mono">{lead.recommendedKw || 0} kW</span>
+                        {(lead.ebServiceNumber || lead.consumerNumberDiscom) && (
+                          <span className="text-[10px] text-blue-700 block font-mono font-medium truncate mt-0.5" title={`EB: ${lead.ebServiceNumber || lead.consumerNumberDiscom}`}>
+                            EB: {lead.ebServiceNumber || lead.consumerNumberDiscom}
+                          </span>
+                        )}
                       </div>
                       <div>
                         <span className="text-[10px] text-slate-400 block font-semibold">Monthly Energy Bill</span>
@@ -572,7 +625,8 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                         <span>Call</span>
                       </button>
 
-                      {!hasExistingQuote && !isSurveyApproved && !hasSurveyScheduled && (
+                      {/* CASE 1: Survey NOT yet scheduled and no quote -> show green "Survey" button */}
+                      {!hasSurveyScheduled && !isSurveyApproved && !hasExistingQuote && (
                         <button
                           onClick={() => {
                             setSurveyLeadToSchedule(lead);
@@ -590,7 +644,8 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                         </button>
                       )}
 
-                      {!hasExistingQuote && !isSurveyApproved && hasSurveyScheduled && (
+                      {/* CASE 2: Survey ALREADY scheduled -> show "Edit Survey" button */}
+                      {hasSurveyScheduled && !isSurveyApproved && (
                         <button
                           onClick={() => {
                             setSurveyLeadToSchedule(lead);
@@ -607,6 +662,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                         </button>
                       )}
 
+                      {/* CASE 3: Quote button ONLY appears when quote already exists OR survey engineer completes BOM and PM approves */}
                       {(hasExistingQuote || isSurveyApproved) && (
                         <button
                           onClick={() => onNavigateToQuotation(lead.id)}
@@ -708,18 +764,25 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                     </td>
 
                     <td className="py-3 px-4">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleInitiateCall(lead);
-                        }}
-                        className="font-medium text-slate-800 hover:text-emerald-700 font-mono flex items-center gap-1.5 transition-colors cursor-pointer group/call"
-                        title="Click to Call Lead"
-                      >
-                        <Phone className="w-3.5 h-3.5 text-emerald-600 group-hover/call:scale-110 transition-transform" />
-                        <span className="group-hover/call:underline">{lead.phone}</span>
-                      </button>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleInitiateCall(lead);
+                          }}
+                          className="font-medium text-slate-800 hover:text-emerald-700 font-mono flex items-center gap-1.5 transition-colors cursor-pointer group/call"
+                          title="Click to Call Lead"
+                        >
+                          <Phone className="w-3.5 h-3.5 text-emerald-600 group-hover/call:scale-110 transition-transform" />
+                          <span className="group-hover/call:underline">{lead.phone}</span>
+                        </button>
+                        {lead.alternatePhone && (
+                          <span className="text-[10px] text-slate-500 font-mono" title="Alternate Phone Number">
+                            (Alt: {lead.alternatePhone})
+                          </span>
+                        )}
+                      </div>
                       {lead.email && <div className="text-[10px] text-slate-500 truncate max-w-[180px]">{lead.email}</div>}
                       <div className="text-[11px] text-slate-500 truncate max-w-[180px]" title={lead.address || `${lead.city}, ${lead.state}`}>
                         {lead.address || `${lead.city}, ${lead.state}`}
@@ -728,12 +791,15 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
 
                     <td className="py-3 px-4">
                       <div className="font-bold text-slate-900 flex items-center gap-1">
-                        <span>{lead.recommendedKw} kW</span>
+                        <span>{lead.recommendedKw || 0} kW</span>
                         <span className="text-[10px] font-normal text-slate-500">System</span>
                       </div>
-                      <div className="text-[10px] text-emerald-700 font-medium">
-                        Est: ₹{(lead.estimatedBudget / 100000).toFixed(1)} Lakhs
-                      </div>
+                      {(lead.ebServiceNumber || lead.consumerNumberDiscom) && (
+                        <div className="text-[10px] text-blue-700 font-mono font-medium flex items-center gap-1 mt-0.5" title="EB Service / Consumer Number">
+                          <span className="text-[9px] uppercase font-bold text-blue-500 bg-blue-50 px-1 py-0.5 rounded">EB:</span>
+                          <span className="truncate max-w-[130px]">{lead.ebServiceNumber || lead.consumerNumberDiscom}</span>
+                        </div>
+                      )}
                     </td>
 
                     <td className="py-3 px-4">
@@ -746,34 +812,41 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                     </td>
 
                     <td className="py-3 px-4" onClick={e => e.stopPropagation()}>
-                      {isManager ? (
-                        <div className="flex flex-col gap-1">
-                          <select
-                            value={lead.assignedToId || ''}
-                            onChange={e => {
-                              const repId = e.target.value;
-                              const rep = employees.find(emp => emp.id === repId);
-                              if (rep) {
-                                updateLead(lead.id, {
-                                  assignedToId: rep.id,
-                                  assignedToName: rep.name
-                                });
-                                showToast(`Lead assigned to ${rep.name}!`, 'success');
-                              }
-                            }}
-                            className="text-xs font-semibold bg-emerald-50/80 border border-emerald-300 text-emerald-900 rounded-lg px-2 py-1 focus:ring-2 focus:ring-emerald-500 cursor-pointer shadow-xs max-w-[170px]"
-                            title="Assign lead to a sales executive"
-                          >
-                            <option value="" disabled>Select Executive</option>
-                            {salesExecutives.map(rep => (
-                              <option key={rep.id} value={rep.id}>
-                                {rep.name}
-                              </option>
-                            ))}
-                          </select>
-                          <span className="text-[10px] text-slate-400 font-medium">Click to reassign</span>
-                        </div>
-                      ) : (
+                      {isManager ? (() => {
+                        const matchedRep = salesExecutives.find(r => 
+                          r.id === lead.assignedToId || 
+                          r.employeeId === lead.assignedToId || 
+                          (r.name && lead.assignedToName && r.name.toLowerCase() === lead.assignedToName.toLowerCase())
+                        );
+                        return (
+                          <div className="flex flex-col gap-1">
+                            <select
+                              value={matchedRep ? matchedRep.id : (lead.assignedToId || '')}
+                              onChange={e => {
+                                const repId = e.target.value;
+                                const rep = employees.find(emp => emp.id === repId);
+                                if (rep) {
+                                  updateLead(lead.id, {
+                                    assignedToId: rep.id,
+                                    assignedToName: rep.name
+                                  });
+                                  showToast(`Lead assigned to ${rep.name}!`, 'success');
+                                }
+                              }}
+                              className="text-xs font-semibold bg-emerald-50/80 border border-emerald-300 text-emerald-900 rounded-lg px-2 py-1 focus:ring-2 focus:ring-emerald-500 cursor-pointer shadow-xs max-w-[170px]"
+                              title="Assign lead to a sales executive"
+                            >
+                              <option value="" disabled>Select Executive</option>
+                              {salesExecutives.map(rep => (
+                                <option key={rep.id} value={rep.id}>
+                                  {rep.name}
+                                </option>
+                              ))}
+                            </select>
+                            <span className="text-[10px] text-slate-400 font-medium">Click to reassign</span>
+                          </div>
+                        );
+                      })() : (
                         <div>
                           <div className="font-semibold text-slate-800">{lead.assignedToName || 'Unassigned'}</div>
                           <div className="text-[10px] text-slate-400">Sales Representative</div>
@@ -805,11 +878,10 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
 
                     <td className="py-3 px-4 text-right" onClick={e => e.stopPropagation()}>
                       {(() => {
+                        // Strict relational ID matching only - NEVER match by name or phone to prevent ghost survey inheritance
                         const linkedSurvey = surveys.find(s => 
-                          s.leadId === lead.id || 
-                          s.id === lead.surveyId || 
-                          (lead.phone && s.phone === lead.phone) || 
-                          (lead.name && s.leadName && s.leadName.toLowerCase() === lead.name.toLowerCase())
+                          (lead.surveyId && s.id === lead.surveyId) || 
+                          (lead.id && s.leadId === lead.id)
                         );
                         const hasExistingQuote = checkLeadHasExistingQuote(lead, quotations, linkedSurvey);
 
@@ -835,8 +907,8 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                               <Phone className="w-3.5 h-3.5" />
                             </button>
 
-                            {/* CASE 1: Survey NOT yet scheduled and no quote -> show "Survey" button */}
-                            {!hasExistingQuote && !isSurveyApproved && !hasSurveyScheduled && (
+                            {/* CASE 1: Survey NOT yet scheduled and no quote -> show green "Survey" button */}
+                            {!hasSurveyScheduled && !isSurveyApproved && !hasExistingQuote && (
                               <button
                                 onClick={() => {
                                   setSurveyLeadToSchedule(lead);
@@ -855,8 +927,8 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                               </button>
                             )}
 
-                            {/* CASE 2: Survey ALREADY scheduled -> show "Edit Survey" button (NOT create new) */}
-                            {!hasExistingQuote && !isSurveyApproved && hasSurveyScheduled && (
+                            {/* CASE 2: Survey ALREADY scheduled -> show "Edit Survey" button */}
+                            {hasSurveyScheduled && !isSurveyApproved && (
                               <button
                                 onClick={() => {
                                   setSurveyLeadToSchedule(lead);
@@ -1089,10 +1161,10 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
               </button>
 
               {(() => {
+                // Strict relational ID matching only
                 const linkedSurvey = surveys.find(s => 
-                  s.leadId === selectedLead.id || 
-                  s.id === selectedLead.surveyId || 
-                  (selectedLead.phone && s.phone === selectedLead.phone)
+                  (selectedLead.surveyId && s.id === selectedLead.surveyId) || 
+                  (selectedLead.id && s.leadId === selectedLead.id)
                 );
                 const hasExistingQuote = checkLeadHasExistingQuote(selectedLead, quotations, linkedSurvey);
                 const isSurveyApproved = Boolean(linkedSurvey && linkedSurvey.status === 'Approved');
@@ -1209,6 +1281,12 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                         <Phone className="w-3.5 h-3.5" />
                       </button>
                     </div>
+                    {selectedLead.alternatePhone && (
+                      <div className="text-[10px] text-slate-500 font-mono mt-1">
+                        <span className="text-[9px] uppercase font-bold text-slate-400 mr-1">Alt:</span>
+                        <span>{selectedLead.alternatePhone}</span>
+                      </div>
+                    )}
                   </div>
                   <div>
                     <span className="text-[10px] text-slate-400">Email</span>
@@ -1247,6 +1325,12 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                     <span className="text-[10px] text-slate-400">Connection Space</span>
                     <div className="font-semibold text-slate-800">{selectedLead.connectionSpace || 'Single Space'}</div>
                   </div>
+                  {(selectedLead.ebServiceNumber || selectedLead.consumerNumberDiscom) && (
+                    <div className="col-span-2 bg-blue-50/60 p-2.5 rounded-lg border border-blue-200">
+                      <span className="text-[10px] text-blue-600 font-semibold uppercase">EB Service / Consumer No.</span>
+                      <div className="font-mono font-bold text-blue-900 mt-0.5">{selectedLead.ebServiceNumber || selectedLead.consumerNumberDiscom}</div>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1279,10 +1363,10 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
               {/* Quick Action: Generate Proposal (Gated behind approved survey & BOM) */}
               <div>
                 {(() => {
+                  // Strict relational ID matching only
                   const linkedSurvey = surveys.find(s => 
-                    s.leadId === selectedLead.id || 
-                    s.id === selectedLead.surveyId || 
-                    (selectedLead.phone && s.phone === selectedLead.phone)
+                    (selectedLead.surveyId && s.id === selectedLead.surveyId) || 
+                    (selectedLead.id && s.leadId === selectedLead.id)
                   );
                   const hasExistingQuote = checkLeadHasExistingQuote(selectedLead, quotations, linkedSurvey);
                   const isSurveyApproved = Boolean(linkedSurvey && linkedSurvey.status === 'Approved');
@@ -1446,7 +1530,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
             </div>
 
             <form onSubmit={handleSaveEditLead} className="space-y-3.5 text-xs">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Customer Name *</label>
                   <input
@@ -1463,7 +1547,22 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                     type="tel"
                     required
                     value={editForm.phone}
-                    onChange={e => setEditForm({ ...editForm, phone: e.target.value })}
+                    onChange={e => setEditForm({ ...editForm, phone: e.target.value.replace(/\D/g, '').slice(0, 10) })}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 font-mono"
+                  />
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block font-bold text-slate-700">Alternate Mobile No.</label>
+                    <span className="text-[10px] text-slate-400 font-mono">
+                      {editForm.alternatePhone?.length === 10 ? '10/10' : 'Optional'}
+                    </span>
+                  </div>
+                  <input
+                    type="tel"
+                    placeholder="e.g. 9876543210"
+                    value={editForm.alternatePhone}
+                    onChange={e => setEditForm({ ...editForm, alternatePhone: e.target.value.replace(/\D/g, '').slice(0, 10) })}
                     className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 font-mono"
                   />
                 </div>
@@ -1501,7 +1600,33 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                 />
               </div>
 
-              <div className="grid grid-cols-3 gap-2.5">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Solar Capacity (kW) *</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    required
+                    value={editForm.recommendedKw}
+                    onChange={e => setEditForm({ ...editForm, recommendedKw: Number(e.target.value) })}
+                    className="w-full p-2.5 bg-emerald-50/50 border border-emerald-400 rounded-xl focus:ring-2 focus:ring-emerald-500 font-mono font-bold text-emerald-900"
+                    placeholder="e.g. 5"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">EB Consumer / Service No.</label>
+                  <input
+                    type="text"
+                    value={editForm.ebServiceNumber}
+                    onChange={e => setEditForm({ ...editForm, ebServiceNumber: e.target.value })}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 font-mono"
+                    placeholder="e.g. 03-024-004-1234"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Monthly Bill (₹)</label>
                   <input
@@ -1518,16 +1643,6 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                     value={editForm.sanctionLoad}
                     onChange={e => setEditForm({ ...editForm, sanctionLoad: Number(e.target.value) })}
                     className="w-full p-2 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Capacity (kWp)</label>
-                  <input
-                    type="number"
-                    step="0.5"
-                    value={editForm.recommendedKw}
-                    onChange={e => setEditForm({ ...editForm, recommendedKw: Number(e.target.value) })}
-                    className="w-full p-2 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 font-mono font-bold text-emerald-800"
                   />
                 </div>
               </div>
@@ -1559,6 +1674,24 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                   </select>
                 </div>
               </div>
+
+              {isManager && (
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Assigned Sales Executive</label>
+                  <select
+                    value={editForm.assignedToId}
+                    onChange={e => setEditForm({ ...editForm, assignedToId: e.target.value })}
+                    className="w-full p-2.5 bg-emerald-50/50 border border-emerald-300 rounded-xl focus:ring-2 focus:ring-emerald-500 font-semibold text-slate-800"
+                  >
+                    <option value="" disabled>Select Executive</option>
+                    {salesExecutives.map(rep => (
+                      <option key={rep.id} value={rep.id}>
+                        {rep.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Notes / Remarks</label>

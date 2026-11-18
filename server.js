@@ -1109,57 +1109,93 @@ var getBootstrapData = async (req, res) => {
     res.json({
       success: true,
       data: {
-        employees: employees.map((e) => ({
-          id: e.id,
-          name: e.name,
-          email: e.email,
-          phone: e.phone,
-          role: e.role,
-          department: e.department,
-          avatar: e.avatar,
-          activeLeadsCount: e.active_leads_count,
-          completedProjectsCount: e.completed_projects_count,
-          location: e.location
-        })),
-        leads: leads.map((l) => ({
-          id: l.id,
-          name: l.name || "",
-          email: l.email || "",
-          phone: l.phone || "",
-          city: l.city || "",
-          state: l.state || "Tamil Nadu",
-          address: l.address || "",
-          pincode: l.pincode || "",
-          source: l.source || "Direct",
-          status: l.status || "New",
-          priority: l.priority || "Medium",
-          recommendedPriority: l.recommended_priority,
-          priorityOverrideReason: l.priority_override_reason,
-          buyingIntent: l.buying_intent,
-          assignedToId: l.assigned_to_id || "",
-          assignedToName: l.assigned_to_name || "",
-          monthlyBill: Number(l.monthly_bill) || 0,
-          sanctionLoad: Number(l.sanction_load) || 0,
-          roofAreaSqFt: Number(l.roof_area_sqft) || 0,
-          roofType: l.roof_type,
-          connectionSpace: l.connection_space || "Single Space",
-          customerType: l.customer_type || "Residential",
-          systemType: l.system_type || "On-Grid",
-          recommendedKw: Number(l.recommended_kw) || 0,
-          estimatedBudget: Number(l.estimated_budget) || 0,
-          consumerNumberDiscom: l.consumer_number_discom || l.eb_service_number || "",
-          ebServiceNumber: l.eb_service_number || l.consumer_number_discom || "",
-          surveyId: l.survey_id || void 0,
-          quotationId: l.quotation_id || void 0,
-          notes: l.notes || "",
-          createdAt: l.created_at,
-          updatedAt: l.updated_at,
-          lastContactedAt: l.last_contacted_at,
-          lastModifiedBy: l.last_modified_by || void 0,
-          lastModifiedRole: l.last_modified_role || void 0,
-          lastModifiedAt: l.last_modified_at || void 0,
-          editHistory: typeof l.edit_history === "string" ? JSON.parse(l.edit_history) : l.edit_history || []
-        })),
+        employees: (() => {
+          const seen = /* @__PURE__ */ new Set();
+          const list = [];
+          for (const e of employees) {
+            const key = (e.id || e.username || e.email || "").toLowerCase();
+            if (!seen.has(key)) {
+              seen.add(key);
+              list.push({
+                id: e.id,
+                name: e.name,
+                email: e.email,
+                phone: e.phone,
+                role: e.role,
+                department: e.department,
+                avatar: e.avatar,
+                activeLeadsCount: e.active_leads_count,
+                completedProjectsCount: e.completed_projects_count,
+                location: e.location
+              });
+            }
+          }
+          return list;
+        })(),
+        leads: leads.map((l) => {
+          let validQuotationId = l.quotation_id || void 0;
+          if (validQuotationId) {
+            const matchingQuote = quotations.find((q) => q.id === validQuotationId);
+            if (!matchingQuote) {
+              validQuotationId = void 0;
+              pool.query("UPDATE leads SET quotation_id = NULL WHERE id = ?", [l.id]).catch(() => {
+              });
+            } else {
+              const cleanP = (p) => p ? p.replace(/\D/g, "").slice(-10) : "";
+              const lp = cleanP(l.phone);
+              const qp = cleanP(matchingQuote.customer_phone);
+              const ln = (l.name || "").trim().toLowerCase();
+              const qn = (matchingQuote.lead_name || "").trim().toLowerCase();
+              const phoneMatches = Boolean(lp && qp && lp === qp);
+              const nameMatches = Boolean(ln && qn && ln === qn);
+              if (!phoneMatches && !nameMatches) {
+                validQuotationId = void 0;
+                pool.query("UPDATE leads SET quotation_id = NULL WHERE id = ?", [l.id]).catch(() => {
+                });
+              }
+            }
+          }
+          return {
+            id: l.id,
+            name: l.name || "",
+            email: l.email || "",
+            phone: l.phone || "",
+            alternatePhone: l.alternate_phone || void 0,
+            city: l.city || "",
+            state: l.state || "Tamil Nadu",
+            address: l.address || "",
+            pincode: l.pincode || "",
+            source: l.source || "Direct",
+            status: l.status || "New",
+            priority: l.priority || "Medium",
+            recommendedPriority: l.recommended_priority,
+            priorityOverrideReason: l.priority_override_reason,
+            buyingIntent: l.buying_intent,
+            assignedToId: l.assigned_to_id || "",
+            assignedToName: l.assigned_to_name || "",
+            monthlyBill: Number(l.monthly_bill) || 0,
+            sanctionLoad: Number(l.sanction_load) || 0,
+            roofAreaSqFt: Number(l.roof_area_sqft) || 0,
+            roofType: l.roof_type,
+            connectionSpace: l.connection_space || "Single Space",
+            customerType: l.customer_type || "Residential",
+            systemType: l.system_type || "On-Grid",
+            recommendedKw: Number(l.recommended_kw) || 0,
+            estimatedBudget: Number(l.estimated_budget) || 0,
+            consumerNumberDiscom: l.consumer_number_discom || l.eb_service_number || "",
+            ebServiceNumber: l.eb_service_number || l.consumer_number_discom || "",
+            surveyId: l.survey_id || void 0,
+            quotationId: validQuotationId,
+            notes: l.notes || "",
+            createdAt: l.created_at,
+            updatedAt: l.updated_at,
+            lastContactedAt: l.last_contacted_at,
+            lastModifiedBy: l.last_modified_by || void 0,
+            lastModifiedRole: l.last_modified_role || void 0,
+            lastModifiedAt: l.last_modified_at || void 0,
+            editHistory: typeof l.edit_history === "string" ? JSON.parse(l.edit_history) : l.edit_history || []
+          };
+        }),
         customers: customers.map((c) => formatCustomer(c, role, custUserMap[c.id])),
         surveys: surveys.map((s) => formatSurvey(s, photosBySurvey[s.id] || [], historyBySurvey[s.id] || [])),
         quotations: quotations.map((q) => ({
@@ -1718,51 +1754,76 @@ async function runAuthMigration() {
       ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255) NULL,
       ADD COLUMN IF NOT EXISTS password_salt VARCHAR(64) NULL;
     `);
-    for (const acc of DEMO_ACCOUNTS) {
-      const [existingUser] = await pool.query(
-        "SELECT id, username FROM user_accounts WHERE username = ? OR email = ? LIMIT 1",
-        [acc.username, acc.email]
-      );
-      const { hash, salt } = hashPassword(acc.defaultPassword);
-      if (!existingUser || existingUser.length === 0) {
+    await pool.query(`
+      ALTER TABLE leads 
+      ADD COLUMN IF NOT EXISTS eb_service_number VARCHAR(100) NULL,
+      ADD COLUMN IF NOT EXISTS consumer_number_discom VARCHAR(100) NULL,
+      ADD COLUMN IF NOT EXISTS alternate_phone VARCHAR(50) NULL;
+    `).catch(() => {
+    });
+    const [userCountRows] = await pool.query("SELECT COUNT(*) as count FROM user_accounts");
+    const totalUsers = Number(userCountRows?.[0]?.count) || 0;
+    if (totalUsers === 0) {
+      for (const acc of DEMO_ACCOUNTS) {
+        const { hash, salt } = hashPassword(acc.defaultPassword);
         const userId = acc.employeeId || acc.customerId || `USR-${Date.now().toString().slice(-6)}`;
         await pool.query(
           `INSERT INTO user_accounts (id, username, email, password_hash, password_salt, role, employee_id, customer_id, name, is_active)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)`,
           [userId, acc.username, acc.email, hash, salt, acc.role, acc.employeeId || null, acc.customerId || null, acc.name]
         );
-      }
-      if (acc.employeeId) {
-        const [empRow] = await pool.query(
-          "SELECT id FROM employees WHERE id = ? OR email = ? LIMIT 1",
-          [acc.employeeId, acc.email]
-        );
-        if (!empRow || empRow.length === 0) {
+        if (acc.employeeId) {
           await pool.query(
             `INSERT INTO employees (id, name, email, phone, role, department, username, password_hash, password_salt, active_leads_count, completed_projects_count, location)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'Bengaluru HQ')`,
             [acc.employeeId, acc.name, acc.email, acc.phone, acc.role, acc.department, acc.username, hash, salt]
           );
-        } else {
+        }
+        if (acc.customerId) {
           await pool.query(
-            `UPDATE employees 
+            `UPDATE customers 
              SET username = COALESCE(username, ?),
                  password_hash = COALESCE(password_hash, ?),
                  password_salt = COALESCE(password_salt, ?)
              WHERE id = ?`,
-            [acc.username, hash, salt, empRow[0].id]
+            [acc.username, hash, salt, acc.customerId]
           );
         }
       }
-      if (acc.customerId) {
-        await pool.query(
-          `UPDATE customers 
-           SET username = COALESCE(username, ?),
-               password_hash = COALESCE(password_hash, ?),
-               password_salt = COALESCE(password_salt, ?)
-           WHERE id = ?`,
-          [acc.username, hash, salt, acc.customerId]
-        );
+    } else {
+      try {
+        await pool.query(`
+          DELETE FROM user_accounts 
+          WHERE (username = 'salesmanager' AND name = 'Ananya Deshmukh' AND email = 'ananya.d@abenergy.in')
+             OR (username = 'customer' AND name LIKE '%Nandini Dairy%' AND email = 'procurement@nandinidairy.coop')
+             OR (username IN ('salesexecutive', 'surveyengineer') AND name LIKE '%Vikram Mehta%' AND email LIKE '%vikram%@abenergy.in')
+             OR (username = 'auditor' AND name LIKE '%Ramesh Sundaram%' AND email = 'auditor@abenergy.in')
+        `);
+        await pool.query(`
+          DELETE FROM employees 
+          WHERE id IN ('EMP-02', 'EMP-03', 'EMP-06', 'EMP-09')
+        `);
+        const demoWorkerEmpIds = ["EMP-04", "EMP-05", "EMP-07"];
+        for (const demoId of demoWorkerEmpIds) {
+          const [demoRows] = await pool.query("SELECT username FROM employees WHERE id = ?", [demoId]);
+          if (demoRows && demoRows.length > 0) {
+            const uName = demoRows[0].username;
+            if (uName) {
+              const [otherRows] = await pool.query("SELECT id FROM employees WHERE username = ? AND id != ? LIMIT 1", [uName, demoId]);
+              if (otherRows && otherRows.length > 0) {
+                await pool.query("DELETE FROM employees WHERE id = ?", [demoId]);
+              }
+            }
+          }
+        }
+        await pool.query(`
+          UPDATE leads 
+          SET assigned_to_id = 'EMP-2040', assigned_to_name = 'Sowmiya' 
+          WHERE assigned_to_id = 'USR-772040' OR assigned_to_name = 'Sowmiya'
+        `).catch(() => {
+        });
+      } catch (cleanupErr) {
+        console.warn("[Auth Migration] Production demo cleanup notice:", cleanupErr.message);
       }
     }
     return { success: true, message: "Authentication tables and demo accounts provisioned successfully." };
@@ -1923,6 +1984,7 @@ var login = async (req, res) => {
       }
     }
     const tokenPayload = {
+      id: user.id,
       userId: user.id,
       username: user.username,
       email: user.email,
@@ -1952,7 +2014,7 @@ var getMe = async (req, res) => {
     let userObj = { ...req.user };
     try {
       const [accs] = await pool.query(
-        `SELECT id, username, name, email, role, employee_id, customer_id, phone FROM user_accounts WHERE id = ? OR username = ? OR (role = 'Super Admin' AND ? = 'Super Admin') LIMIT 1`,
+        `SELECT id, username, name, email, role, employee_id, customer_id FROM user_accounts WHERE id = ? OR username = ? OR (role = 'Super Admin' AND ? = 'Super Admin') LIMIT 1`,
         [req.user.userId || req.user.id, req.user.username, req.user.role]
       );
       if (accs && accs.length > 0) {
@@ -1966,8 +2028,7 @@ var getMe = async (req, res) => {
           email: acc.email || userObj.email,
           role: acc.role || userObj.role,
           employeeId: acc.employee_id || userObj.employeeId,
-          customerId: acc.customer_id || userObj.customerId,
-          phone: acc.phone || userObj.phone
+          customerId: acc.customer_id || userObj.customerId
         };
       }
     } catch (_) {
@@ -2215,24 +2276,30 @@ var createLead = async (req, res) => {
           finalAssignedId = execs[0].id;
           finalAssignedName = execs[0].name;
         } else {
-          finalAssignedId = "EMP-06";
-          finalAssignedName = "Vikram Mehta";
+          finalAssignedId = "EMP-2040";
+          finalAssignedName = "Sowmiya";
         }
       } catch {
-        finalAssignedId = "EMP-06";
-        finalAssignedName = "Vikram Mehta";
+        finalAssignedId = "EMP-2040";
+        finalAssignedName = "Sowmiya";
       }
     }
     l.assignedToId = finalAssignedId;
     l.assignedToName = finalAssignedName;
+    const ebServiceNumber = (l.ebServiceNumber || l.eb_service_number || l.consumerNumberDiscom || l.consumer_number_discom || "").toString().trim();
+    const rawAltPhone = (l.alternatePhone || l.alternate_phone || "").toString();
+    const cleanAltPhone = rawAltPhone.replace(/\D/g, "").slice(0, 10) || null;
+    const recommendedKw = Number(l.recommendedKw !== void 0 ? l.recommendedKw : l.recommended_kw !== void 0 ? l.recommended_kw : 0) || 0;
+    const estimatedBudget = Number(l.estimatedBudget) || recommendedKw * 6e4;
     await pool.query(
-      `INSERT INTO leads (id, name, email, phone, city, state, address, pincode, source, status, priority, recommended_priority, priority_override_reason, buying_intent, assigned_to_id, assigned_to_name, monthly_bill, sanction_load, roof_area_sqft, roof_type, connection_space, recommended_kw, estimated_budget, notes, customer_type, system_type, created_at, updated_at, last_contacted_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO leads (id, name, email, phone, alternate_phone, city, state, address, pincode, source, status, priority, recommended_priority, priority_override_reason, buying_intent, assigned_to_id, assigned_to_name, monthly_bill, sanction_load, roof_area_sqft, roof_type, connection_space, recommended_kw, estimated_budget, notes, customer_type, system_type, created_at, updated_at, last_contacted_at, eb_service_number, consumer_number_discom)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         l.id,
         l.name.trim(),
         l.email || null,
         cleanPhone,
+        cleanAltPhone,
         l.city || "",
         l.state || "",
         l.address || "",
@@ -2245,24 +2312,30 @@ var createLead = async (req, res) => {
         l.buyingIntent || null,
         finalAssignedId,
         finalAssignedName,
-        l.monthlyBill || 0,
-        l.sanctionLoad || 0,
-        l.roofAreaSqFt || 0,
+        Number(l.monthlyBill) || 0,
+        Number(l.sanctionLoad) || 0,
+        Number(l.roofAreaSqFt) || 0,
         l.roofType || null,
         connectionSpace,
-        l.recommendedKw || 0,
-        l.estimatedBudget || 0,
+        recommendedKw,
+        estimatedBudget,
         l.notes || "",
         customerType,
         systemType,
         l.createdAt || (/* @__PURE__ */ new Date()).toISOString(),
         l.updatedAt || (/* @__PURE__ */ new Date()).toISOString(),
-        l.lastContactedAt || null
+        l.lastContactedAt || null,
+        ebServiceNumber,
+        ebServiceNumber
       ]
     );
     l.customerType = customerType;
     l.systemType = systemType;
     l.connectionSpace = connectionSpace;
+    l.recommendedKw = recommendedKw;
+    l.ebServiceNumber = ebServiceNumber;
+    l.consumerNumberDiscom = ebServiceNumber;
+    l.alternatePhone = cleanAltPhone || void 0;
     res.json({ success: true, lead: l });
   } catch (err) {
     console.error("Error creating lead:", err);
@@ -2286,6 +2359,12 @@ var updateLead = async (req, res) => {
       if (clean.length !== 10) return res.status(400).json({ success: false, error: "Mobile number must be 10 digits" });
       fields.push("phone = ?");
       values.push(clean);
+    }
+    if (updates.alternatePhone !== void 0 || updates.alternate_phone !== void 0) {
+      const altRaw = (updates.alternatePhone ?? updates.alternate_phone ?? "").toString();
+      const cleanAlt = altRaw.replace(/\D/g, "").slice(0, 10);
+      fields.push("alternate_phone = ?");
+      values.push(cleanAlt || null);
     }
     if (updates.pincode !== void 0) {
       if (!updates.pincode.toString().trim()) return res.status(400).json({ success: false, error: "Pincode cannot be empty" });
@@ -2319,6 +2398,44 @@ var updateLead = async (req, res) => {
     if (updates.connectionSpace !== void 0 || updates.connection_space !== void 0) {
       fields.push("connection_space = ?");
       values.push(updates.connectionSpace || updates.connection_space);
+    }
+    if (updates.recommendedKw !== void 0 || updates.recommended_kw !== void 0) {
+      const rKw = Number(updates.recommendedKw !== void 0 ? updates.recommendedKw : updates.recommended_kw) || 0;
+      fields.push("recommended_kw = ?");
+      values.push(rKw);
+      fields.push("estimated_budget = ?");
+      values.push(rKw * 6e4);
+    }
+    if (updates.ebServiceNumber !== void 0 || updates.eb_service_number !== void 0 || updates.consumerNumberDiscom !== void 0 || updates.consumer_number_discom !== void 0) {
+      const ebVal = (updates.ebServiceNumber ?? updates.eb_service_number ?? updates.consumerNumberDiscom ?? updates.consumer_number_discom ?? "").toString().trim();
+      fields.push("eb_service_number = ?");
+      values.push(ebVal);
+      fields.push("consumer_number_discom = ?");
+      values.push(ebVal);
+    }
+    if (updates.city !== void 0) {
+      fields.push("city = ?");
+      values.push(updates.city.trim());
+    }
+    if (updates.address !== void 0) {
+      fields.push("address = ?");
+      values.push(updates.address.trim());
+    }
+    if (updates.monthlyBill !== void 0 || updates.monthly_bill !== void 0) {
+      fields.push("monthly_bill = ?");
+      values.push(Number(updates.monthlyBill ?? updates.monthly_bill) || 0);
+    }
+    if (updates.sanctionLoad !== void 0 || updates.sanction_load !== void 0) {
+      fields.push("sanction_load = ?");
+      values.push(Number(updates.sanctionLoad ?? updates.sanction_load) || 0);
+    }
+    if (updates.roofAreaSqFt !== void 0 || updates.roof_area_sqft !== void 0) {
+      fields.push("roof_area_sqft = ?");
+      values.push(Number(updates.roofAreaSqFt ?? updates.roof_area_sqft) || 0);
+    }
+    if (updates.roofType !== void 0 || updates.roof_type !== void 0) {
+      fields.push("roof_type = ?");
+      values.push(updates.roofType ?? updates.roof_type);
     }
     if (updates.notes !== void 0) {
       fields.push("notes = ?");
@@ -4593,6 +4710,20 @@ var downloadProposalPdf = async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 };
+var deleteQuotation = async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query("UPDATE leads SET quotation_id = NULL WHERE quotation_id = ?", [id]).catch(() => {
+    });
+    await pool.query("UPDATE site_surveys SET quotation_id = NULL WHERE quotation_id = ?", [id]).catch(() => {
+    });
+    await pool.query("DELETE FROM quotations WHERE id = ?", [id]);
+    return res.json({ success: true, message: `Quotation ${id} deleted successfully`, id });
+  } catch (err) {
+    console.error("Error deleting quotation:", err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
 
 // server/routes/quotations.routes.ts
 var quotationsRouter = Router4();
@@ -4647,6 +4778,18 @@ quotationsRouter.post(
   acceptQuotation
 );
 quotationsRouter.get("/:id/pdf", optionalAuth, downloadProposalPdf);
+quotationsRouter.delete(
+  "/:id",
+  authenticateToken,
+  requireRole(["Sales Manager", "Super Admin"]),
+  deleteQuotation
+);
+quotationsRouter.post(
+  "/:id/delete",
+  authenticateToken,
+  requireRole(["Sales Manager", "Super Admin"]),
+  deleteQuotation
+);
 
 // server/routes/customers.routes.ts
 import { Router as Router5 } from "express";
@@ -5645,7 +5788,7 @@ var getUsers = async (req, res) => {
       SELECT u.id, u.username, u.email, u.role, u.name, u.is_active, u.created_at,
              e.department, e.phone, e.location, e.active_leads_count, e.completed_projects_count
       FROM user_accounts u
-      LEFT JOIN employees e ON (u.employee_id = e.id OR u.username = e.username)
+      LEFT JOIN employees e ON (u.employee_id = e.id OR (u.employee_id IS NULL AND u.username = e.username))
     `;
     const params = [];
     if (currentUser.role === "Sales Manager") {
@@ -5657,20 +5800,27 @@ var getUsers = async (req, res) => {
     }
     query += ` ORDER BY u.created_at DESC`;
     const [rows] = await pool.query(query, params);
-    const formattedUsers = rows.map((r) => ({
-      id: r.id,
-      username: r.username,
-      email: r.email,
-      phone: r.phone || "",
-      name: r.name,
-      role: r.role,
-      department: r.department || "",
-      location: r.location || "",
-      isActive: Boolean(r.is_active),
-      createdAt: r.created_at,
-      activeLeadsCount: r.active_leads_count || 0,
-      completedProjectsCount: r.completed_projects_count || 0
-    }));
+    const seenUserIds = /* @__PURE__ */ new Set();
+    const formattedUsers = [];
+    for (const r of rows) {
+      if (!seenUserIds.has(r.id)) {
+        seenUserIds.add(r.id);
+        formattedUsers.push({
+          id: r.id,
+          username: r.username,
+          email: r.email,
+          phone: r.phone || "",
+          name: r.name,
+          role: r.role,
+          department: r.department || "",
+          location: r.location || "",
+          isActive: Boolean(r.is_active),
+          createdAt: r.created_at,
+          activeLeadsCount: r.active_leads_count || 0,
+          completedProjectsCount: r.completed_projects_count || 0
+        });
+      }
+    }
     res.json({
       success: true,
       data: formattedUsers,

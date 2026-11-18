@@ -1330,3 +1330,16 @@ export const downloadProposalPdf = async (req: Request, res: Response) => {
     res.status(500).json({ success: false, error: err.message });
   }
 };
+
+export const deleteQuotation = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    await pool.query('UPDATE leads SET quotation_id = NULL WHERE quotation_id = ?', [id]).catch(() => {});
+    await pool.query('UPDATE site_surveys SET quotation_id = NULL WHERE quotation_id = ?', [id]).catch(() => {});
+    await pool.query('DELETE FROM quotations WHERE id = ?', [id]);
+    return res.json({ success: true, message: `Quotation ${id} deleted successfully`, id });
+  } catch (err: any) {
+    console.error('Error deleting quotation:', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};

@@ -33,6 +33,7 @@ export const TeamView: React.FC = () => {
     employees, 
     activeRole, 
     setActiveRole, 
+    viewAsUser,
     currentUser, 
     authFetch, 
     projects, 
@@ -1032,7 +1033,10 @@ export const TeamView: React.FC = () => {
                       )}
                       {isSuperAdmin && (
                         <button
-                          onClick={() => setActiveRole(user.role)}
+                          onClick={() => {
+                            if (viewAsUser) viewAsUser(user);
+                            else setActiveRole(user.role);
+                          }}
                           className="px-2 py-1 bg-slate-900 text-white font-bold rounded-lg text-[10px] cursor-pointer"
                         >
                           View As
@@ -1245,7 +1249,10 @@ export const TeamView: React.FC = () => {
 
                             {isSuperAdmin && (
                               <button
-                                onClick={() => setActiveRole(user.role)}
+                                onClick={() => {
+                                  if (viewAsUser) viewAsUser(user);
+                                  else setActiveRole(user.role);
+                                }}
                                 className="px-2 py-1 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-[10px] transition-colors cursor-pointer shrink-0"
                                 title={`Switch perspective to ${user.role}`}
                               >

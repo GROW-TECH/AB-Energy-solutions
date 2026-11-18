@@ -174,6 +174,7 @@ export const login = async (req: Request, res: Response) => {
     }
 
     const tokenPayload = {
+      id: user.id,
       userId: user.id,
       username: user.username,
       email: user.email,
@@ -209,7 +210,7 @@ export const getMe = async (req: Request, res: Response) => {
     // Fetch latest user details from user_accounts to always reflect updated name, email, role
     try {
       const [accs]: any = await pool.query(
-        `SELECT id, username, name, email, role, employee_id, customer_id, phone FROM user_accounts WHERE id = ? OR username = ? OR (role = 'Super Admin' AND ? = 'Super Admin') LIMIT 1`,
+        `SELECT id, username, name, email, role, employee_id, customer_id FROM user_accounts WHERE id = ? OR username = ? OR (role = 'Super Admin' AND ? = 'Super Admin') LIMIT 1`,
         [req.user.userId || req.user.id, req.user.username, req.user.role]
       );
       if (accs && accs.length > 0) {
@@ -224,7 +225,6 @@ export const getMe = async (req: Request, res: Response) => {
           role: acc.role || userObj.role,
           employeeId: acc.employee_id || userObj.employeeId,
           customerId: acc.customer_id || userObj.customerId,
-          phone: acc.phone || userObj.phone,
         };
       }
     } catch (_) {}

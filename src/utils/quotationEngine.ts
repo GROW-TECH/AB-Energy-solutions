@@ -689,31 +689,36 @@ export function checkLeadHasExistingQuote(
 ): boolean {
   if (!lead || !lead.id) return false;
 
-  // 1. If lead explicitly has a quotationId assigned, verify that it actually exists in quotations
-  if (lead.quotationId && quotations.some(q => q.id === lead.quotationId)) {
-    return true;
-  }
-
   const cleanPhone = (p?: string) => (p ? p.replace(/\D/g, '').slice(-10) : '');
   const leadPhoneClean = cleanPhone(lead.phone);
   const leadNameClean = lead.name?.trim().toLowerCase();
 
   return quotations.some(q => {
-    // 2. Must match lead ID AND either customer phone or customer name to avoid ghost quotation inheritance
-    if (q.leadId === lead.id) {
-      const qPhoneClean = cleanPhone(q.customerPhone);
-      const qNameClean = q.leadName?.trim().toLowerCase();
+    // 1. Must match by Lead ID, explicit Quotation ID, or verified Survey ID
+    const matchesId = (q.leadId === lead.id) || 
+                      (lead.quotationId && q.id === lead.quotationId) ||
+                      (linkedSurvey && linkedSurvey.leadId === lead.id && linkedSurvey.id && q.surveyId === linkedSurvey.id);
 
-      if (leadPhoneClean && qPhoneClean && leadPhoneClean === qPhoneClean) return true;
-      if (leadNameClean && qNameClean && leadNameClean === qNameClean) return true;
+    if (!matchesId) return false;
+
+    // 2. CRITICAL IDENTITY VERIFICATION:
+    // Protect against ghost quotes from deleted/reused clients (e.g. an old quote for "Jagath" must NEVER attach to "Maheshwari").
+    // If the quotation has customer phone or name, at least one MUST match the current lead!
+    const qPhoneClean = cleanPhone(q.customerPhone);
+    const qNameClean = q.leadName?.trim().toLowerCase();
+
+    // If both have phone numbers, verify phone match
+    if (leadPhoneClean && qPhoneClean) {
+      return leadPhoneClean === qPhoneClean;
     }
 
-    // 3. Or matches via verified linked survey for this specific lead
-    if (linkedSurvey && linkedSurvey.leadId === lead.id && linkedSurvey.id && q.surveyId === linkedSurvey.id) {
-      return true;
+    // If phone is missing, verify name match
+    if (leadNameClean && qNameClean) {
+      return leadNameClean === qNameClean;
     }
 
-    return false;
+    // If quotation has neither, only trust exact leadId match with matching survey
+    return Boolean(q.leadId === lead.id && (!lead.name || lead.name === q.leadName));
   });
 }
 

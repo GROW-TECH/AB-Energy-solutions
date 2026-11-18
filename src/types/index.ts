@@ -90,6 +90,7 @@ export interface Employee {
   name: string;
   email: string;
   phone: string;
+  alternatePhone?: string;
   role: Role;
   department: string;
   avatar?: string;
@@ -108,6 +109,7 @@ export interface Lead {
   name: string;
   email: string;
   phone: string;
+  alternatePhone?: string;
   city: string;
   state: string;
   address: string;

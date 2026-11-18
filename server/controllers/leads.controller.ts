@@ -172,35 +172,46 @@ export const createLead = async (req: Request, res: Response) => {
           finalAssignedId = execs[0].id;
           finalAssignedName = execs[0].name;
         } else {
-          finalAssignedId = 'EMP-06';
-          finalAssignedName = 'Vikram Mehta';
+          finalAssignedId = 'EMP-2040';
+          finalAssignedName = 'Sowmiya';
         }
       } catch {
-        finalAssignedId = 'EMP-06';
-        finalAssignedName = 'Vikram Mehta';
+        finalAssignedId = 'EMP-2040';
+        finalAssignedName = 'Sowmiya';
       }
     }
 
     l.assignedToId = finalAssignedId;
     l.assignedToName = finalAssignedName;
 
+    const ebServiceNumber = (l.ebServiceNumber || l.eb_service_number || l.consumerNumberDiscom || l.consumer_number_discom || '').toString().trim();
+    const rawAltPhone = (l.alternatePhone || l.alternate_phone || '').toString();
+    const cleanAltPhone = rawAltPhone.replace(/\D/g, '').slice(0, 10) || null;
+    const recommendedKw = Number(l.recommendedKw !== undefined ? l.recommendedKw : (l.recommended_kw !== undefined ? l.recommended_kw : 0)) || 0;
+    const estimatedBudget = Number(l.estimatedBudget) || (recommendedKw * 60000);
+
     await pool.query(
-      `INSERT INTO leads (id, name, email, phone, city, state, address, pincode, source, status, priority, recommended_priority, priority_override_reason, buying_intent, assigned_to_id, assigned_to_name, monthly_bill, sanction_load, roof_area_sqft, roof_type, connection_space, recommended_kw, estimated_budget, notes, customer_type, system_type, created_at, updated_at, last_contacted_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO leads (id, name, email, phone, alternate_phone, city, state, address, pincode, source, status, priority, recommended_priority, priority_override_reason, buying_intent, assigned_to_id, assigned_to_name, monthly_bill, sanction_load, roof_area_sqft, roof_type, connection_space, recommended_kw, estimated_budget, notes, customer_type, system_type, created_at, updated_at, last_contacted_at, eb_service_number, consumer_number_discom)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        l.id, l.name.trim(), l.email || null, cleanPhone, l.city || '', l.state || '', l.address || '', l.pincode.toString().trim(),
+        l.id, l.name.trim(), l.email || null, cleanPhone, cleanAltPhone, l.city || '', l.state || '', l.address || '', l.pincode.toString().trim(),
         l.source || 'Website', l.status || 'New', l.priority || 'Medium',
         l.recommendedPriority || null, l.priorityOverrideReason || null, l.buyingIntent || null,
-        finalAssignedId, finalAssignedName, l.monthlyBill || 0,
-        l.sanctionLoad || 0, l.roofAreaSqFt || 0, l.roofType || null, connectionSpace, l.recommendedKw || 0,
-        l.estimatedBudget || 0, l.notes || '', customerType, systemType,
-        l.createdAt || new Date().toISOString(), l.updatedAt || new Date().toISOString(), l.lastContactedAt || null
+        finalAssignedId, finalAssignedName, Number(l.monthlyBill) || 0,
+        Number(l.sanctionLoad) || 0, Number(l.roofAreaSqFt) || 0, l.roofType || null, connectionSpace, recommendedKw,
+        estimatedBudget, l.notes || '', customerType, systemType,
+        l.createdAt || new Date().toISOString(), l.updatedAt || new Date().toISOString(), l.lastContactedAt || null,
+        ebServiceNumber, ebServiceNumber
       ]
     );
 
     l.customerType = customerType;
     l.systemType = systemType;
     l.connectionSpace = connectionSpace;
+    l.recommendedKw = recommendedKw;
+    l.ebServiceNumber = ebServiceNumber;
+    l.consumerNumberDiscom = ebServiceNumber;
+    l.alternatePhone = cleanAltPhone || undefined;
     res.json({ success: true, lead: l });
   } catch (err: any) {
     console.error('Error creating lead:', err);
@@ -225,6 +236,11 @@ export const updateLead = async (req: Request, res: Response) => {
       if (clean.length !== 10) return res.status(400).json({ success: false, error: 'Mobile number must be 10 digits' });
       fields.push('phone = ?'); values.push(clean);
     }
+    if (updates.alternatePhone !== undefined || updates.alternate_phone !== undefined) {
+      const altRaw = (updates.alternatePhone ?? updates.alternate_phone ?? '').toString();
+      const cleanAlt = altRaw.replace(/\D/g, '').slice(0, 10);
+      fields.push('alternate_phone = ?'); values.push(cleanAlt || null);
+    }
     if (updates.pincode !== undefined) {
       if (!updates.pincode.toString().trim()) return res.status(400).json({ success: false, error: 'Pincode cannot be empty' });
       fields.push('pincode = ?'); values.push(updates.pincode.toString().trim());
@@ -241,6 +257,30 @@ export const updateLead = async (req: Request, res: Response) => {
     }
     if (updates.connectionSpace !== undefined || updates.connection_space !== undefined) {
       fields.push('connection_space = ?'); values.push(updates.connectionSpace || updates.connection_space);
+    }
+    if (updates.recommendedKw !== undefined || updates.recommended_kw !== undefined) {
+      const rKw = Number(updates.recommendedKw !== undefined ? updates.recommendedKw : updates.recommended_kw) || 0;
+      fields.push('recommended_kw = ?'); values.push(rKw);
+      fields.push('estimated_budget = ?'); values.push(rKw * 60000);
+    }
+    if (updates.ebServiceNumber !== undefined || updates.eb_service_number !== undefined || updates.consumerNumberDiscom !== undefined || updates.consumer_number_discom !== undefined) {
+      const ebVal = (updates.ebServiceNumber ?? updates.eb_service_number ?? updates.consumerNumberDiscom ?? updates.consumer_number_discom ?? '').toString().trim();
+      fields.push('eb_service_number = ?'); values.push(ebVal);
+      fields.push('consumer_number_discom = ?'); values.push(ebVal);
+    }
+    if (updates.city !== undefined) { fields.push('city = ?'); values.push(updates.city.trim()); }
+    if (updates.address !== undefined) { fields.push('address = ?'); values.push(updates.address.trim()); }
+    if (updates.monthlyBill !== undefined || updates.monthly_bill !== undefined) {
+      fields.push('monthly_bill = ?'); values.push(Number(updates.monthlyBill ?? updates.monthly_bill) || 0);
+    }
+    if (updates.sanctionLoad !== undefined || updates.sanction_load !== undefined) {
+      fields.push('sanction_load = ?'); values.push(Number(updates.sanctionLoad ?? updates.sanction_load) || 0);
+    }
+    if (updates.roofAreaSqFt !== undefined || updates.roof_area_sqft !== undefined) {
+      fields.push('roof_area_sqft = ?'); values.push(Number(updates.roofAreaSqFt ?? updates.roof_area_sqft) || 0);
+    }
+    if (updates.roofType !== undefined || updates.roof_type !== undefined) {
+      fields.push('roof_type = ?'); values.push(updates.roofType ?? updates.roof_type);
     }
     if (updates.notes !== undefined) { fields.push('notes = ?'); values.push(updates.notes); }
     if (updates.updatedAt !== undefined) { fields.push('updated_at = ?'); values.push(updates.updatedAt); }

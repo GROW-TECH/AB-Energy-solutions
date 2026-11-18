@@ -14,7 +14,7 @@ export const getUsers = async (req: Request, res: Response) => {
       SELECT u.id, u.username, u.email, u.role, u.name, u.is_active, u.created_at,
              e.department, e.phone, e.location, e.active_leads_count, e.completed_projects_count
       FROM user_accounts u
-      LEFT JOIN employees e ON (u.employee_id = e.id OR u.username = e.username)
+      LEFT JOIN employees e ON (u.employee_id = e.id OR (u.employee_id IS NULL AND u.username = e.username))
     `;
     const params: any[] = [];
 
@@ -33,20 +33,28 @@ export const getUsers = async (req: Request, res: Response) => {
 
     const [rows]: any = await pool.query(query, params);
 
-    const formattedUsers = rows.map((r: any) => ({
-      id: r.id,
-      username: r.username,
-      email: r.email,
-      phone: r.phone || '',
-      name: r.name,
-      role: r.role,
-      department: r.department || '',
-      location: r.location || '',
-      isActive: Boolean(r.is_active),
-      createdAt: r.created_at,
-      activeLeadsCount: r.active_leads_count || 0,
-      completedProjectsCount: r.completed_projects_count || 0,
-    }));
+    // Guarantee each user account in user_accounts is returned exactly once
+    const seenUserIds = new Set<string>();
+    const formattedUsers: any[] = [];
+    for (const r of rows) {
+      if (!seenUserIds.has(r.id)) {
+        seenUserIds.add(r.id);
+        formattedUsers.push({
+          id: r.id,
+          username: r.username,
+          email: r.email,
+          phone: r.phone || '',
+          name: r.name,
+          role: r.role,
+          department: r.department || '',
+          location: r.location || '',
+          isActive: Boolean(r.is_active),
+          createdAt: r.created_at,
+          activeLeadsCount: r.active_leads_count || 0,
+          completedProjectsCount: r.completed_projects_count || 0,
+        });
+      }
+    }
 
     res.json({
       success: true,

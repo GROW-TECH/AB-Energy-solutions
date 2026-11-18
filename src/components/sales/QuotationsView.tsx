@@ -5,7 +5,7 @@ import {
   Download, Filter, ChevronLeft, ChevronRight, CheckCircle2,
   Share2, ShieldCheck, FileSpreadsheet, X, Clock,
   Pencil, Sparkles, CheckCircle, AlertCircle, Layers,
-  ExternalLink, Truck, Phone, Upload, Image as ImageIcon
+  ExternalLink, Truck, Phone, Upload, Image as ImageIcon, Trash2
 } from 'lucide-react';
 import { useCrm } from '../../context/CrmContext';
 import { Quotation } from '../../types';
@@ -28,7 +28,7 @@ export const QuotationsView: React.FC<QuotationsViewProps> = ({
 }) => {
   const { 
     quotations, setQuotations, leads, updateLead, surveys, projects, sendQuotation, acceptQuotation, 
-    createQuotation, approveQuotationDiscount, recordCustomerAcceptance,
+    createQuotation, deleteQuotation, approveQuotationDiscount, recordCustomerAcceptance,
     editQuotationData, updateQuotationPriority, currentUser, activeRole,
     recordPayment, updateProject
   } = useCrm();
@@ -41,7 +41,7 @@ export const QuotationsView: React.FC<QuotationsViewProps> = ({
   const [priorityFilter, setPriorityFilter] = useState<'All' | 'High' | 'Medium' | 'Low'>('All');
   const [repFilter, setRepFilter] = useState<string>('all');
   const [activeViewMode, setActiveViewMode] = useState<'grid' | 'document'>('grid');
-  const [selectedQuoteForPreview, setSelectedQuoteForPreview] = useState<Quotation | null>(quotations[0] || null);
+  const [selectedQuoteForPreview, setSelectedQuoteForPreview] = useState<Quotation | null>(null);
   const [selectedVersionIdx, setSelectedVersionIdx] = useState<number>(0);
 
   // Active version for document preview
@@ -66,7 +66,7 @@ export const QuotationsView: React.FC<QuotationsViewProps> = ({
   const [advanceScreenshot, setAdvanceScreenshot] = useState<string>('');
 
   // New quote modal fields
-  const [selectedLeadId, setSelectedLeadId] = useState<string>(initialLeadId || leads[0]?.id || '');
+  const [selectedLeadId, setSelectedLeadId] = useState<string>(initialLeadId || '');
   const [capacityKw, setCapacityKw] = useState<number>(5);
   const [discountAmount, setDiscountAmount] = useState<number>(10000);
   const [packageTier, setPackageTier] = useState<'Standard' | 'Premium Bifacial' | 'Commercial Heavy Duty'>('Premium Bifacial');
@@ -77,8 +77,24 @@ export const QuotationsView: React.FC<QuotationsViewProps> = ({
   useEffect(() => {
     if (initialLeadId && consumedLeadIdRef.current !== initialLeadId) {
       consumedLeadIdRef.current = initialLeadId;
-      const linkedSurvey = surveys.find(s => s.leadId === initialLeadId || s.id === initialLeadId);
-      const existing = quotations.find(q => q.leadId === initialLeadId || (linkedSurvey && q.surveyId === linkedSurvey.id));
+      const linkedSurvey = surveys.find(s => (s.id && s.id === initialLeadId) || (s.leadId && s.leadId === initialLeadId));
+      const targetLead = leads.find(l => l.id === initialLeadId);
+      const cleanPhone = (p?: string) => (p ? p.replace(/\D/g, '').slice(-10) : '');
+      const lPhone = targetLead ? cleanPhone(targetLead.phone) : '';
+      const lName = targetLead?.name?.trim().toLowerCase();
+
+      const existing = quotations.find(q => {
+        const matchesId = q.leadId === initialLeadId || (linkedSurvey && q.surveyId === linkedSurvey.id);
+        if (!matchesId) return false;
+        // Verify customer identity to prevent displaying an orphaned quote for another customer (e.g. Jagath vs Maheshwari)
+        if (targetLead) {
+          const qPhone = cleanPhone(q.customerPhone);
+          const qName = q.leadName?.trim().toLowerCase();
+          if (lPhone && qPhone) return lPhone === qPhone;
+          if (lName && qName) return lName === qName;
+        }
+        return true;
+      });
       if (existing) {
         setSelectedQuoteForPreview(existing);
         setSelectedVersionIdx(existing.versions && existing.versions.length > 0 ? existing.versions.length - 1 : 0);
@@ -87,6 +103,10 @@ export const QuotationsView: React.FC<QuotationsViewProps> = ({
         setSelectedLeadId(initialLeadId);
         setCapacityKw(linkedSurvey.recommendedKw || 5);
         setShowNewQuoteModal(true);
+      } else {
+        // No quotation exists for this lead - do NOT display another client's quotation
+        setSelectedQuoteForPreview(null);
+        setActiveViewMode('grid');
       }
       if (onClearInitialLead) {
         onClearInitialLead();
@@ -446,6 +466,24 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                 <ExternalLink className="w-3.5 h-3.5 text-slate-500" />
                 <span>Open in Tab</span>
               </a>
+
+              {/* DELETE OBSOLETE / ORPHANED QUOTE (Manager / Super Admin) */}
+              {isSalesManager && (
+                <button
+                  onClick={async () => {
+                    if (window.confirm(`Are you sure you want to permanently delete quotation ${selectedQuoteForPreview.quotationNumber || selectedQuoteForPreview.id} for ${selectedQuoteForPreview.leadName}?`)) {
+                      await deleteQuotation(selectedQuoteForPreview.id);
+                      setSelectedQuoteForPreview(null);
+                      setActiveViewMode('grid');
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-rose-50 border border-rose-200 hover:bg-rose-100 font-semibold text-rose-700 rounded-lg shadow-xs transition-colors cursor-pointer"
+                  title="Permanently delete this quotation from database"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                  <span>Delete Quote</span>
+                </button>
+              )}
 
               {/* EDIT BOM & PRICING (Sales Executive / Sales Manager / Admin) */}
               {selectedQuoteForPreview.status !== 'Converted_To_Project' && selectedQuoteForPreview.status !== 'Accepted' && (currentUser?.role === 'Sales Executive' || currentUser?.role === 'Sales Manager' || currentUser?.role === 'Super Admin') && (
@@ -1952,6 +1990,7 @@ AB Energy Solutions | support@abenergy.in | Bengaluru`;
                   }}
                   className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 font-medium"
                 >
+                  <option value="" disabled>-- Select Lead / Client --</option>
                   {leads.map(l => (
                     <option key={l.id} value={l.id}>
                       {l.name} - {l.recommendedKw} kW ({l.city} - {l.phone})

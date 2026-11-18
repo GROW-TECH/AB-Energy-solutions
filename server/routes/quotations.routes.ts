@@ -10,7 +10,8 @@ import {
   editQuotation,
   recordCustomerAcceptance,
   acceptQuotation,
-  downloadProposalPdf
+  downloadProposalPdf,
+  deleteQuotation
 } from '../controllers/quotations.controller.js';
 import { authenticateToken, optionalAuth, requireRole } from '../middleware/auth.js';
 
@@ -88,3 +89,17 @@ quotationsRouter.post(
 
 // 11. Download Official PDF Proposal
 quotationsRouter.get('/:id/pdf', optionalAuth, downloadProposalPdf);
+
+// 12. Delete Quotation (Super Admin & Sales Manager) - supports both DELETE and POST for cPanel compatibility
+quotationsRouter.delete(
+  '/:id',
+  authenticateToken,
+  requireRole(['Sales Manager', 'Super Admin']),
+  deleteQuotation
+);
+quotationsRouter.post(
+  '/:id/delete',
+  authenticateToken,
+  requireRole(['Sales Manager', 'Super Admin']),
+  deleteQuotation
+);

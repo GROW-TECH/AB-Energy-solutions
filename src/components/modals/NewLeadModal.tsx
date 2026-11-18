@@ -33,6 +33,7 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
   // 1. Contact & Site Details (NO pre-filled fake defaults)
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [alternatePhone, setAlternatePhone] = useState('');
   const [email, setEmail] = useState('');
   const [city, setCity] = useState('');
   const [state, setState] = useState('');
@@ -41,6 +42,8 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
   const [customerType, setCustomerType] = useState<CustomerApplicationType>('Residential');
   const [systemType, setSystemType] = useState<SolarSystemType>('On-Grid');
   const [formError, setFormError] = useState<string | null>(null);
+  const [recommendedKw, setRecommendedKw] = useState<number | ''>('');
+  const [ebServiceNumber, setEbServiceNumber] = useState<string>('');
   const [monthlyBill, setMonthlyBill] = useState<number | ''>('');
   const [sanctionLoad, setSanctionLoad] = useState<number | ''>('');
   const [roofAreaSqFt, setRoofAreaSqFt] = useState<number | ''>('');
@@ -88,14 +91,20 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
     setPhone(digitsOnly);
   };
 
-  // Preliminary Solar Sizing calculation (Dynamic based on user input)
+  const handleAlternatePhoneChange = (val: string) => {
+    const digitsOnly = val.replace(/\D/g, '').slice(0, 10);
+    setAlternatePhone(digitsOnly);
+  };
+
+  // Preliminary Solar Sizing calculation (Dynamic based on user input, never force 3kW default)
   const numBill = Number(monthlyBill) || 0;
   const numLoad = Number(sanctionLoad) || 0;
+  const userKw = Number(recommendedKw) || 0;
   const calculatedUnitsPerMonth = numBill > 0 ? Math.round(numBill / 8) : 0;
-  const calculatedKw = Math.max(
+  const calculatedKw = userKw > 0 ? userKw : Math.max(
     numLoad > 0 ? numLoad : 0,
     calculatedUnitsPerMonth > 0 ? Math.round(calculatedUnitsPerMonth / 120) : 0
-  ) || (numBill > 0 || numLoad > 0 ? 3 : 0);
+  );
 
   const estimatedCost = calculatedKw * 60000;
   const estimatedSubsidy = calculatedKw > 0 ? (calculatedKw <= 3 ? 78000 : 78000) : 0;
@@ -221,6 +230,7 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
       const created = createLead({
         name: name.trim(),
         phone,
+        alternatePhone: alternatePhone.trim() || undefined,
         email: email.trim(),
         city: city.trim(),
         state: state.trim(),
@@ -230,6 +240,9 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
         systemType,
         monthlyBill: numBill,
         sanctionLoad: numLoad,
+        recommendedKw: recommendedKw !== '' ? Number(recommendedKw) : (calculatedKw || 0),
+        ebServiceNumber: ebServiceNumber.trim(),
+        consumerNumberDiscom: ebServiceNumber.trim(),
         roofAreaSqFt: Number(roofAreaSqFt) || 0,
         roofType,
         connectionSpace,
@@ -239,8 +252,8 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
         priorityOverrideReason: hasManualPriorityOverride && priority !== recommendation?.recommendedPriority ? priorityOverrideReason : undefined,
         buyingIntent,
         notes: notes.trim(),
-        assignedToId: assignedToId !== 'auto' ? assignedToId : undefined,
-        assignedToName: selectedRep ? selectedRep.name : undefined,
+        assignedToId: isExecutive ? (currentUser?.employeeId || currentUser?.id) : (assignedToId !== 'auto' ? assignedToId : undefined),
+        assignedToName: isExecutive ? currentUser?.name : (selectedRep ? selectedRep.name : undefined),
         status: newSurveyId ? 'Site Survey Scheduled' : 'New',
         surveyId: newSurveyId,
       });
@@ -273,6 +286,7 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
   const resetForm = () => {
     setName('');
     setPhone('');
+    setAlternatePhone('');
     setEmail('');
     setCity('');
     setState('');
@@ -281,6 +295,8 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
     setCustomerType('Residential');
     setSystemType('On-Grid');
     setFormError(null);
+    setRecommendedKw('');
+    setEbServiceNumber('');
     setMonthlyBill('');
     setSanctionLoad('');
     setRoofAreaSqFt('');
@@ -397,7 +413,7 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
           )}
 
           {/* Contact Details */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="block text-[11px] font-bold text-slate-700 mb-1">
                 Full Name / Entity Name *
@@ -433,6 +449,31 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
                     isDuplicate 
                       ? 'border-rose-400 focus:ring-rose-400 bg-rose-50/30' 
                       : phone.length === 10
+                      ? 'border-emerald-400 focus:ring-emerald-500'
+                      : 'border-slate-300 focus:ring-emerald-500'
+                  }`}
+                />
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-[11px] font-bold text-slate-700">
+                  Alternate Mobile No.
+                </label>
+                <span className={`text-[10px] font-mono font-medium ${alternatePhone.length === 10 ? 'text-emerald-600 font-bold' : 'text-slate-400'}`}>
+                  {alternatePhone.length > 0 ? `${alternatePhone.length}/10 digits` : 'Optional'}
+                </span>
+              </div>
+              <div className="relative">
+                <span className="absolute left-3 top-2.5 text-slate-400 text-xs font-semibold pointer-events-none">+91</span>
+                <input
+                  type="tel"
+                  placeholder="9876543210"
+                  value={alternatePhone}
+                  onChange={e => handleAlternatePhoneChange(e.target.value)}
+                  className={`w-full text-xs p-2.5 pl-11 bg-white border rounded-lg focus:ring-2 focus:outline-hidden placeholder:text-slate-400 ${
+                    alternatePhone.length === 10
                       ? 'border-emerald-400 focus:ring-emerald-500'
                       : 'border-slate-300 focus:ring-emerald-500'
                   }`}
@@ -525,7 +566,7 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
                   onChange={e => setAssignedToId(e.target.value)}
                   className="w-full text-xs p-2.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-hidden font-medium text-slate-800"
                 >
-                  <option value="auto">⚡ Auto-Assign (Lowest Lead Count)</option>
+                  <option value="auto">Auto-Assign (Lowest Lead Count)</option>
                   {salesExecutives.map(exec => {
                     const activeCount = leads.filter(l => 
                       (l.assignedToId === exec.id || l.assignedToId === exec.employeeId || l.assignedToName?.toLowerCase() === exec.name.toLowerCase()) && 
@@ -544,7 +585,35 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
 
 
           {/* Energy & Site Sizing Parameters */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+            <div>
+              <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                Solar Capacity (kW) *
+              </label>
+              <input
+                type="number"
+                min={0}
+                step="any"
+                placeholder="e.g. 5"
+                value={recommendedKw === '' ? '' : recommendedKw}
+                onChange={e => setRecommendedKw(e.target.value === '' ? '' : Number(e.target.value))}
+                className="w-full text-xs p-2.5 bg-emerald-50/40 border border-emerald-400 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-hidden font-bold font-mono text-emerald-900 placeholder:text-slate-400 placeholder:font-normal"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                EB Consumer / Service No.
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. 04-201-005-1234"
+                value={ebServiceNumber}
+                onChange={e => setEbServiceNumber(e.target.value)}
+                className="w-full text-xs p-2.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-hidden font-mono text-slate-900 placeholder:text-slate-400"
+              />
+            </div>
+
             <div>
               <label className="block text-[11px] font-bold text-slate-700 mb-1">
                 Monthly Bill (₹ INR)
@@ -573,7 +642,9 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
                 className="w-full text-xs p-2.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-hidden placeholder:text-slate-400"
               />
             </div>
+          </div>
 
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
             <div>
               <label className="block text-[11px] font-bold text-slate-700 mb-1">
                 Roof Area (Sq. Ft.)
@@ -588,9 +659,7 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
                 className="w-full text-xs p-2.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-hidden placeholder:text-slate-400"
               />
             </div>
-          </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
             <div>
               <label className="block text-[11px] font-bold text-slate-700 mb-1">
                 Roof Type
@@ -637,7 +706,9 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
                 <option value="Future (> 3 months)">Future (&gt; 3 months)</option>
               </select>
             </div>
+          </div>
 
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="block text-[11px] font-bold text-slate-700 mb-1">
                 City / Town
@@ -650,9 +721,7 @@ export const NewLeadModal: React.FC<NewLeadModalProps> = ({ isOpen, onClose }) =
                 className="w-full text-xs p-2.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-hidden placeholder:text-slate-400"
               />
             </div>
-          </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-[11px] font-bold text-slate-700 mb-1">
                 State

@@ -153,61 +153,89 @@ export async function runAuthMigration(): Promise<{ success: boolean; message: s
       ADD COLUMN IF NOT EXISTS password_salt VARCHAR(64) NULL;
     `);
 
-    // 4. Idempotently provision the 9 demo accounts
-    for (const acc of DEMO_ACCOUNTS) {
-      // Check if user account already exists in user_accounts
-      const [existingUser]: any = await pool.query(
-        'SELECT id, username FROM user_accounts WHERE username = ? OR email = ? LIMIT 1',
-        [acc.username, acc.email]
-      );
+    // Ensure leads table has EB service number, DISCOM consumer number, and alternate phone columns
+    await pool.query(`
+      ALTER TABLE leads 
+      ADD COLUMN IF NOT EXISTS eb_service_number VARCHAR(100) NULL,
+      ADD COLUMN IF NOT EXISTS consumer_number_discom VARCHAR(100) NULL,
+      ADD COLUMN IF NOT EXISTS alternate_phone VARCHAR(50) NULL;
+    `).catch(() => {});
 
-      const { hash, salt } = hashPassword(acc.defaultPassword);
+    // 4. Provision initial demo accounts ONLY on brand-new setup (if user_accounts is completely empty)
+    const [userCountRows]: any = await pool.query('SELECT COUNT(*) as count FROM user_accounts');
+    const totalUsers = Number(userCountRows?.[0]?.count) || 0;
 
-      if (!existingUser || existingUser.length === 0) {
+    if (totalUsers === 0) {
+      for (const acc of DEMO_ACCOUNTS) {
+        const { hash, salt } = hashPassword(acc.defaultPassword);
         const userId = acc.employeeId || acc.customerId || `USR-${Date.now().toString().slice(-6)}`;
         await pool.query(
           `INSERT INTO user_accounts (id, username, email, password_hash, password_salt, role, employee_id, customer_id, name, is_active)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)`,
           [userId, acc.username, acc.email, hash, salt, acc.role, acc.employeeId || null, acc.customerId || null, acc.name]
         );
-      }
 
-      // If it's an employee account, ensure employee row exists in employees table
-      if (acc.employeeId) {
-        const [empRow]: any = await pool.query(
-          'SELECT id FROM employees WHERE id = ? OR email = ? LIMIT 1',
-          [acc.employeeId, acc.email]
-        );
-
-        if (!empRow || empRow.length === 0) {
+        if (acc.employeeId) {
           await pool.query(
             `INSERT INTO employees (id, name, email, phone, role, department, username, password_hash, password_salt, active_leads_count, completed_projects_count, location)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'Bengaluru HQ')`,
             [acc.employeeId, acc.name, acc.email, acc.phone, acc.role, acc.department, acc.username, hash, salt]
           );
-        } else {
-          // Safely attach username and hash if missing
+        }
+
+        if (acc.customerId) {
           await pool.query(
-            `UPDATE employees 
+            `UPDATE customers 
              SET username = COALESCE(username, ?),
                  password_hash = COALESCE(password_hash, ?),
                  password_salt = COALESCE(password_salt, ?)
              WHERE id = ?`,
-            [acc.username, hash, salt, empRow[0].id]
+            [acc.username, hash, salt, acc.customerId]
           );
         }
       }
+    } else {
+      // 5. Active Production Database: Clean up unwanted demo accounts & redundant duplicate demo employees
+      try {
+        // (a) Delete unwanted demo user accounts if they still exist with original demo name & demo email
+        await pool.query(`
+          DELETE FROM user_accounts 
+          WHERE (username = 'salesmanager' AND name = 'Ananya Deshmukh' AND email = 'ananya.d@abenergy.in')
+             OR (username = 'customer' AND name LIKE '%Nandini Dairy%' AND email = 'procurement@nandinidairy.coop')
+             OR (username IN ('salesexecutive', 'surveyengineer') AND name LIKE '%Vikram Mehta%' AND email LIKE '%vikram%@abenergy.in')
+             OR (username = 'auditor' AND name LIKE '%Ramesh Sundaram%' AND email = 'auditor@abenergy.in')
+        `);
 
-      // If it's a customer account, ensure customer record has credentials linked
-      if (acc.customerId) {
-        await pool.query(
-          `UPDATE customers 
-           SET username = COALESCE(username, ?),
-               password_hash = COALESCE(password_hash, ?),
-               password_salt = COALESCE(password_salt, ?)
-           WHERE id = ?`,
-          [acc.username, hash, salt, acc.customerId]
-        );
+        // (b) Delete unwanted demo employee records matching those specific IDs
+        await pool.query(`
+          DELETE FROM employees 
+          WHERE id IN ('EMP-02', 'EMP-03', 'EMP-06', 'EMP-09')
+        `);
+
+        // (c) Clean up duplicate demo employee rows (EMP-04, EMP-05, EMP-07) IF a real client employee row exists for that username
+        const demoWorkerEmpIds = ['EMP-04', 'EMP-05', 'EMP-07'];
+        for (const demoId of demoWorkerEmpIds) {
+          const [demoRows]: any = await pool.query('SELECT username FROM employees WHERE id = ?', [demoId]);
+          if (demoRows && demoRows.length > 0) {
+            const uName = demoRows[0].username;
+            if (uName) {
+              const [otherRows]: any = await pool.query('SELECT id FROM employees WHERE username = ? AND id != ? LIMIT 1', [uName, demoId]);
+              if (otherRows && otherRows.length > 0) {
+                // Real client employee row exists (e.g. at Valapady). Delete redundant demo worker row!
+                await pool.query('DELETE FROM employees WHERE id = ?', [demoId]);
+              }
+            }
+          }
+        }
+
+        // (d) Normalize lead assignments for Sowmiya so assigned_to_id is EMP-2040 (standard employee ID)
+        await pool.query(`
+          UPDATE leads 
+          SET assigned_to_id = 'EMP-2040', assigned_to_name = 'Sowmiya' 
+          WHERE assigned_to_id = 'USR-772040' OR assigned_to_name = 'Sowmiya'
+        `).catch(() => {});
+      } catch (cleanupErr: any) {
+        console.warn('[Auth Migration] Production demo cleanup notice:', cleanupErr.message);
       }
     }
 
