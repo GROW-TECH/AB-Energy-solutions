@@ -1822,6 +1822,41 @@ async function runAuthMigration() {
           WHERE assigned_to_id = 'USR-772040' OR assigned_to_name = 'Sowmiya'
         `).catch(() => {
         });
+        try {
+          await pool.query(`
+            CREATE TABLE IF NOT EXISTS audit_logs (
+              id VARCHAR(64) PRIMARY KEY,
+              user_id VARCHAR(64) NULL,
+              user_name VARCHAR(120) NULL,
+              user_role VARCHAR(64) NULL,
+              action VARCHAR(100) NOT NULL,
+              category VARCHAR(64) NOT NULL DEFAULT 'Security',
+              details TEXT NULL,
+              target_entity_id VARCHAR(64) NULL,
+              target_entity_type VARCHAR(64) NULL,
+              ip_address VARCHAR(45) NULL,
+              status VARCHAR(32) NOT NULL DEFAULT 'Success',
+              metadata JSON NULL,
+              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+          `);
+          const [auditCount] = await pool.query("SELECT COUNT(*) as cnt FROM audit_logs");
+          if (auditCount && auditCount[0]?.cnt === 0) {
+            await pool.query(`
+              INSERT INTO audit_logs (id, user_id, user_name, user_role, action, category, details, status)
+              VALUES 
+                (?, 'SYS-001', 'System Security Engine', 'Security Engine', 'SYSTEM_AUDIT_INIT', 'Security', 'Security and Compliance Audit Logging service initialized and active.', 'Success'),
+                (?, 'USR-ADMIN', 'Super Admin', 'Super Admin', 'POLICY_VERIFIED', 'Security', 'Enterprise RBAC policies and session management verified.', 'Success'),
+                (?, 'SYS-OPS', 'Solar OS Engine', 'System Engine', 'CRM_BASELINE_LOADED', 'Operations', 'Solar CRM pipeline and database integrity confirmed active.', 'Success')
+            `, [
+              `AUD-${Date.now()}-001`,
+              `AUD-${Date.now()}-002`,
+              `AUD-${Date.now()}-003`
+            ]);
+          }
+        } catch (auditInitErr) {
+          console.warn("[Audit Migration] Audit logs setup notice:", auditInitErr.message);
+        }
       } catch (cleanupErr) {
         console.warn("[Auth Migration] Production demo cleanup notice:", cleanupErr.message);
       }
@@ -1841,6 +1876,151 @@ if (process.argv[1]?.includes("init-auth")) {
     process.exit(1);
   });
 }
+
+// server/controllers/audit.controller.ts
+var getAuditLogs = async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.max(1, Math.min(100, parseInt(req.query.limit, 10) || 10));
+    const offset = (page - 1) * limit;
+    const search = (req.query.search || "").trim();
+    const category = (req.query.category || "all").trim();
+    const status = (req.query.status || "all").trim();
+    const startDate = req.query.startDate || "";
+    const endDate = req.query.endDate || "";
+    let whereClauses = [];
+    let params = [];
+    if (search) {
+      whereClauses.push("(action LIKE ? OR user_name LIKE ? OR details LIKE ? OR target_entity_id LIKE ? OR ip_address LIKE ?)");
+      const s = `%${search}%`;
+      params.push(s, s, s, s, s);
+    }
+    if (category && category !== "all") {
+      whereClauses.push("category = ?");
+      params.push(category);
+    }
+    if (status && status !== "all") {
+      whereClauses.push("status = ?");
+      params.push(status);
+    }
+    if (startDate) {
+      whereClauses.push("created_at >= ?");
+      params.push(`${startDate} 00:00:00`);
+    }
+    if (endDate) {
+      whereClauses.push("created_at <= ?");
+      params.push(`${endDate} 23:59:59`);
+    }
+    const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+    const [countRows] = await pool.query(
+      `SELECT COUNT(*) as total FROM audit_logs ${whereSql}`,
+      params
+    );
+    const total = countRows[0]?.total || 0;
+    const totalPages = Math.ceil(total / limit) || 1;
+    const [rows] = await pool.query(
+      `SELECT id, user_id, user_name, user_role, action, category, details, target_entity_id, target_entity_type, ip_address, status, metadata, created_at 
+       FROM audit_logs 
+       ${whereSql} 
+       ORDER BY created_at DESC 
+       LIMIT ? OFFSET ?`,
+      [...params, limit, offset]
+    );
+    const logs = rows.map((r) => ({
+      id: r.id,
+      userId: r.user_id,
+      userName: r.user_name,
+      userRole: r.user_role,
+      action: r.action,
+      category: r.category,
+      details: r.details,
+      targetEntityId: r.target_entity_id,
+      targetEntityType: r.target_entity_type,
+      ipAddress: r.ip_address,
+      status: r.status,
+      metadata: r.metadata ? typeof r.metadata === "string" ? JSON.parse(r.metadata) : r.metadata : null,
+      createdAt: r.created_at
+    }));
+    res.json({
+      success: true,
+      data: logs,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages
+      }
+    });
+  } catch (err) {
+    console.error("Error fetching audit logs:", err);
+    res.status(500).json({
+      success: false,
+      error: "Failed to retrieve audit logs from database",
+      details: err?.message
+    });
+  }
+};
+var createAuditLog = async (req, res) => {
+  try {
+    const { action, category, details, targetEntityId, targetEntityType, status, metadata } = req.body;
+    const user = req.user;
+    const id = `AUD-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+    const ipAddress = req.ip || req.socket.remoteAddress || "127.0.0.1";
+    await pool.query(
+      `INSERT INTO audit_logs (id, user_id, user_name, user_role, action, category, details, target_entity_id, target_entity_type, ip_address, status, metadata)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        user?.userId || user?.id || "SYSTEM",
+        user?.name || "System User",
+        user?.role || "Super Admin",
+        action || "SYSTEM_ACTION",
+        category || "Security",
+        details || "",
+        targetEntityId || null,
+        targetEntityType || null,
+        ipAddress,
+        status || "Success",
+        metadata ? typeof metadata === "string" ? metadata : JSON.stringify(metadata) : null
+      ]
+    );
+    res.status(201).json({
+      success: true,
+      data: { id }
+    });
+  } catch (err) {
+    console.error("Error creating audit log:", err);
+    res.status(500).json({
+      success: false,
+      error: "Failed to record audit log"
+    });
+  }
+};
+var recordAuditLogDirect = async (options) => {
+  try {
+    const id = `AUD-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+    await pool.query(
+      `INSERT INTO audit_logs (id, user_id, user_name, user_role, action, category, details, target_entity_id, target_entity_type, ip_address, status, metadata)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        options.userId || "SYSTEM",
+        options.userName || "System User",
+        options.userRole || "Super Admin",
+        options.action,
+        options.category,
+        options.details,
+        options.targetEntityId || null,
+        options.targetEntityType || null,
+        options.ipAddress || "127.0.0.1",
+        options.status || "Success",
+        options.metadata ? JSON.stringify(options.metadata) : null
+      ]
+    );
+  } catch (e) {
+    console.warn("Non-fatal: Failed to record audit log directly:", e);
+  }
+};
 
 // server/controllers/auth.controller.ts
 var loginRateLimitMap = /* @__PURE__ */ new Map();
@@ -1953,6 +2133,16 @@ var login = async (req, res) => {
     if (!user || !user.password_hash || !user.password_salt) {
       const currentAttempts = limitRecord ? limitRecord.attempts + 1 : 1;
       loginRateLimitMap.set(ip, { attempts: currentAttempts, lastAttemptTime: now });
+      recordAuditLogDirect({
+        userId: "ANONYMOUS",
+        userName: identifier || "Unknown User",
+        userRole: "Guest",
+        action: "LOGIN_FAILED",
+        category: "Security",
+        details: `Failed login attempt for identifier "${identifier}" (User not found).`,
+        ipAddress: ip,
+        status: "Failed"
+      });
       return res.status(401).json({
         success: false,
         error: "Invalid credentials. Please verify your username and password."
@@ -1962,6 +2152,16 @@ var login = async (req, res) => {
     if (!isValid) {
       const currentAttempts = limitRecord ? limitRecord.attempts + 1 : 1;
       loginRateLimitMap.set(ip, { attempts: currentAttempts, lastAttemptTime: now });
+      recordAuditLogDirect({
+        userId: user.id || "ANONYMOUS",
+        userName: user.name || identifier,
+        userRole: user.role || "Guest",
+        action: "LOGIN_FAILED",
+        category: "Security",
+        details: `Failed login attempt for username "${user.username || identifier}" (Incorrect password).`,
+        ipAddress: ip,
+        status: "Failed"
+      });
       return res.status(401).json({
         success: false,
         error: "Invalid credentials. Please verify your username and password."
@@ -1995,6 +2195,17 @@ var login = async (req, res) => {
       customerId: user.customer_id
     };
     const token = signJwt(tokenPayload, 86400);
+    recordAuditLogDirect({
+      userId: tokenPayload.userId || tokenPayload.id,
+      userName: tokenPayload.name,
+      userRole: tokenPayload.role,
+      action: "USER_LOGIN",
+      category: "Security",
+      details: `User "${tokenPayload.name}" (${tokenPayload.username}) successfully authenticated as ${tokenPayload.role}.`,
+      ipAddress: ip,
+      status: "Success",
+      metadata: { username: tokenPayload.username, role: tokenPayload.role }
+    });
     res.json({
       success: true,
       token,
@@ -2336,6 +2547,20 @@ var createLead = async (req, res) => {
     l.ebServiceNumber = ebServiceNumber;
     l.consumerNumberDiscom = ebServiceNumber;
     l.alternatePhone = cleanAltPhone || void 0;
+    const reqUser = req.user;
+    recordAuditLogDirect({
+      userId: reqUser?.userId || reqUser?.id || "SYSTEM",
+      userName: reqUser?.name || "Staff",
+      userRole: reqUser?.role || "Sales Executive",
+      action: "LEAD_CREATED",
+      category: "Sales",
+      details: `New solar lead "${l.name}" created (${recommendedKw} kW) and assigned to ${finalAssignedName}.`,
+      targetEntityId: l.id,
+      targetEntityType: "Lead",
+      ipAddress: req.ip,
+      status: "Success",
+      metadata: { phone: l.phone, city: l.city, capacityKw: recommendedKw, assignedTo: finalAssignedName }
+    });
     res.json({ success: true, lead: l });
   } catch (err) {
     console.error("Error creating lead:", err);
@@ -2484,6 +2709,18 @@ var updateLead = async (req, res) => {
     if (fields.length > 0) {
       values.push(id);
       await pool.query(`UPDATE leads SET ${fields.join(", ")} WHERE id = ?`, values);
+      recordAuditLogDirect({
+        userId: user?.userId || user?.id || "SYSTEM",
+        userName: user?.name || "Staff",
+        userRole: user?.role || "Staff",
+        action: "LEAD_UPDATED",
+        category: "Sales",
+        details: `Lead "${id}" updated${updates.assignedToName ? ` (Assigned to ${updates.assignedToName})` : ""}${updates.status ? ` (Status: ${updates.status})` : ""}.`,
+        targetEntityId: id,
+        targetEntityType: "Lead",
+        ipAddress: req.ip,
+        status: "Success"
+      });
     }
     res.json({ success: true, id, updates });
   } catch (err) {
@@ -2493,11 +2730,24 @@ var updateLead = async (req, res) => {
 var deleteLead = async (req, res) => {
   try {
     const { id } = req.params;
+    const user = req.user;
     await pool.query("DELETE FROM quotations WHERE lead_id = ?", [id]).catch(() => {
     });
     await pool.query("DELETE FROM site_surveys WHERE lead_id = ?", [id]).catch(() => {
     });
     await pool.query("DELETE FROM leads WHERE id = ?", [id]);
+    recordAuditLogDirect({
+      userId: user?.userId || user?.id || "SYSTEM",
+      userName: user?.name || "Staff",
+      userRole: user?.role || "Staff",
+      action: "LEAD_DELETED",
+      category: "Sales",
+      details: `Lead "${id}" and associated records were deleted.`,
+      targetEntityId: id,
+      targetEntityType: "Lead",
+      ipAddress: req.ip,
+      status: "Warning"
+    });
     res.json({ success: true, id });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -3889,6 +4139,20 @@ var createQuotation = async (req, res) => {
       console.warn("Note: Background PDF generation queued:", pdfErr);
     }
     const [createdRows] = await pool.query("SELECT * FROM quotations WHERE id = ? LIMIT 1", [finalId]);
+    const reqUser = req.user;
+    recordAuditLogDirect({
+      userId: reqUser?.userId || reqUser?.id || "SYSTEM",
+      userName: reqUser?.name || "Staff",
+      userRole: reqUser?.role || "Sales Executive",
+      action: "QUOTATION_CREATED",
+      category: "Sales",
+      details: `Quotation "${versionNumber}" (${calc.systemCapacityKw} kW) generated for ${body.leadName || "Customer"} (Total: \u20B9${(calc.finalContractAmount || 0).toLocaleString("en-IN")}).`,
+      targetEntityId: finalId,
+      targetEntityType: "Quotation",
+      ipAddress: req.ip,
+      status: "Success",
+      metadata: { quotationNumber: versionNumber, capacityKw: calc.systemCapacityKw, totalAmount: calc.finalContractAmount }
+    });
     res.json({ success: true, quotation: formatQuotation(createdRows[0]) });
   } catch (err) {
     console.error("Error creating quotation:", err);
@@ -4624,6 +4888,20 @@ var acceptQuotation = async (req, res) => {
       console.warn("[Subsidy Auto-Sync] Non-blocking notice:", subErr);
     }
     const [projRows] = await pool.query("SELECT * FROM projects WHERE id = ? LIMIT 1", [projectId]);
+    const reqUser = req.user;
+    recordAuditLogDirect({
+      userId: reqUser?.userId || reqUser?.id || "SYSTEM",
+      userName: reqUser?.name || "Staff",
+      userRole: reqUser?.role || "Staff",
+      action: "DEAL_WON",
+      category: "Sales",
+      details: `Quotation "${quote.quotation_number || id}" accepted. Converted to Project ${projectId} and advance invoice ${invoiceNumber} issued.`,
+      targetEntityId: projectId,
+      targetEntityType: "Project",
+      ipAddress: req.ip,
+      status: "Success",
+      metadata: { quotationId: id, projectId, customerId, invoiceId }
+    });
     res.json({
       success: true,
       message: `Quotation accepted! Converted to Project ${projectId} and Advance Invoice ${invoiceNumber} created.`,
@@ -5873,6 +6151,18 @@ var createUser = async (req, res) => {
         [empId, name.trim(), (email || `${username.trim()}@abenergy.in`).trim(), phone || "+91 98000-00000", role, department || "Solar Operations", location || "Bengaluru", username.trim()]
       );
     }
+    recordAuditLogDirect({
+      userId: currentUser?.userId || currentUser?.id || "SYSTEM",
+      userName: currentUser?.name || "Super Admin",
+      userRole: currentUser?.role || "Super Admin",
+      action: "USER_CREATED",
+      category: "Security",
+      details: `New user account "${name.trim()}" (${username.trim()}) created with role ${role}.`,
+      targetEntityId: userId,
+      targetEntityType: "User",
+      ipAddress: req.ip,
+      status: "Success"
+    });
     res.status(201).json({
       success: true,
       message: `User ${username} created successfully with role ${role}`,
@@ -5943,6 +6233,18 @@ var updateUser = async (req, res) => {
         [name, email, phone, updatedRole, department, location, target.employee_id, target.username]
       );
     }
+    recordAuditLogDirect({
+      userId: currentUser?.userId || currentUser?.id || "SYSTEM",
+      userName: currentUser?.name || "Super Admin",
+      userRole: currentUser?.role || "Super Admin",
+      action: "USER_UPDATED",
+      category: "Security",
+      details: `User account "${target.name}" (${target.username}) was updated${updatedRole ? ` (Role: ${updatedRole})` : ""}.`,
+      targetEntityId: id,
+      targetEntityType: "User",
+      ipAddress: req.ip,
+      status: "Success"
+    });
     res.json({
       success: true,
       message: "User account updated successfully"
@@ -5978,6 +6280,18 @@ var toggleUserStatus = async (req, res) => {
     }
     const newStatus = !target.is_active;
     await pool.query("UPDATE user_accounts SET is_active = ? WHERE id = ?", [newStatus, id]);
+    recordAuditLogDirect({
+      userId: currentUser?.userId || currentUser?.id || "SYSTEM",
+      userName: currentUser?.name || "Super Admin",
+      userRole: currentUser?.role || "Super Admin",
+      action: newStatus ? "USER_ACTIVATED" : "USER_DEACTIVATED",
+      category: "Security",
+      details: `Account for "${target.name}" (${target.username}) was ${newStatus ? "activated" : "deactivated"}.`,
+      targetEntityId: id,
+      targetEntityType: "User",
+      ipAddress: req.ip,
+      status: "Warning"
+    });
     res.json({
       success: true,
       message: `User account ${newStatus ? "activated" : "deactivated"} successfully`,
@@ -6125,128 +6439,6 @@ usersRouter.delete("/:id", deleteUser);
 
 // server/routes/audit.routes.ts
 import { Router as Router11 } from "express";
-
-// server/controllers/audit.controller.ts
-var getAuditLogs = async (req, res) => {
-  try {
-    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const limit = Math.max(1, Math.min(100, parseInt(req.query.limit, 10) || 10));
-    const offset = (page - 1) * limit;
-    const search = (req.query.search || "").trim();
-    const category = (req.query.category || "all").trim();
-    const status = (req.query.status || "all").trim();
-    const startDate = req.query.startDate || "";
-    const endDate = req.query.endDate || "";
-    let whereClauses = [];
-    let params = [];
-    if (search) {
-      whereClauses.push("(action LIKE ? OR user_name LIKE ? OR details LIKE ? OR target_entity_id LIKE ? OR ip_address LIKE ?)");
-      const s = `%${search}%`;
-      params.push(s, s, s, s, s);
-    }
-    if (category && category !== "all") {
-      whereClauses.push("category = ?");
-      params.push(category);
-    }
-    if (status && status !== "all") {
-      whereClauses.push("status = ?");
-      params.push(status);
-    }
-    if (startDate) {
-      whereClauses.push("created_at >= ?");
-      params.push(`${startDate} 00:00:00`);
-    }
-    if (endDate) {
-      whereClauses.push("created_at <= ?");
-      params.push(`${endDate} 23:59:59`);
-    }
-    const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
-    const [countRows] = await pool.query(
-      `SELECT COUNT(*) as total FROM audit_logs ${whereSql}`,
-      params
-    );
-    const total = countRows[0]?.total || 0;
-    const totalPages = Math.ceil(total / limit) || 1;
-    const [rows] = await pool.query(
-      `SELECT id, user_id, user_name, user_role, action, category, details, target_entity_id, target_entity_type, ip_address, status, metadata, created_at 
-       FROM audit_logs 
-       ${whereSql} 
-       ORDER BY created_at DESC 
-       LIMIT ? OFFSET ?`,
-      [...params, limit, offset]
-    );
-    const logs = rows.map((r) => ({
-      id: r.id,
-      userId: r.user_id,
-      userName: r.user_name,
-      userRole: r.user_role,
-      action: r.action,
-      category: r.category,
-      details: r.details,
-      targetEntityId: r.target_entity_id,
-      targetEntityType: r.target_entity_type,
-      ipAddress: r.ip_address,
-      status: r.status,
-      metadata: r.metadata ? typeof r.metadata === "string" ? JSON.parse(r.metadata) : r.metadata : null,
-      createdAt: r.created_at
-    }));
-    res.json({
-      success: true,
-      data: logs,
-      pagination: {
-        total,
-        page,
-        limit,
-        totalPages
-      }
-    });
-  } catch (err) {
-    console.error("Error fetching audit logs:", err);
-    res.status(500).json({
-      success: false,
-      error: "Failed to retrieve audit logs from database",
-      details: err?.message
-    });
-  }
-};
-var createAuditLog = async (req, res) => {
-  try {
-    const { action, category, details, targetEntityId, targetEntityType, status, metadata } = req.body;
-    const user = req.user;
-    const id = `AUD-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
-    const ipAddress = req.ip || req.socket.remoteAddress || "127.0.0.1";
-    await pool.query(
-      `INSERT INTO audit_logs (id, user_id, user_name, user_role, action, category, details, target_entity_id, target_entity_type, ip_address, status, metadata)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        id,
-        user?.userId || user?.id || "SYSTEM",
-        user?.name || "System User",
-        user?.role || "Super Admin",
-        action || "SYSTEM_ACTION",
-        category || "Security",
-        details || "",
-        targetEntityId || null,
-        targetEntityType || null,
-        ipAddress,
-        status || "Success",
-        metadata ? typeof metadata === "string" ? metadata : JSON.stringify(metadata) : null
-      ]
-    );
-    res.status(201).json({
-      success: true,
-      data: { id }
-    });
-  } catch (err) {
-    console.error("Error creating audit log:", err);
-    res.status(500).json({
-      success: false,
-      error: "Failed to record audit log"
-    });
-  }
-};
-
-// server/routes/audit.routes.ts
 var auditRouter = Router11();
 auditRouter.get("/", authenticateToken, getAuditLogs);
 auditRouter.post("/", authenticateToken, createAuditLog);

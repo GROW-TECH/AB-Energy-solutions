@@ -6,6 +6,7 @@ import { calculateQuotation, convertNumberToWords } from '../services/quotation-
 import type { QuotationCalculationInput } from '../services/quotation-engine.ts';
 import { generateProposalPdf } from '../services/pdf-generator.ts';
 import type { ProposalPdfData } from '../services/pdf-generator.ts';
+import { recordAuditLogDirect } from './audit.controller.ts';
 
 /**
  * Normalizes a quotation database row into the client Quotation object
@@ -489,6 +490,22 @@ export const createQuotation = async (req: Request, res: Response) => {
     }
 
     const [createdRows]: any = await pool.query('SELECT * FROM quotations WHERE id = ? LIMIT 1', [finalId]);
+    
+    const reqUser = (req as any).user;
+    recordAuditLogDirect({
+      userId: reqUser?.userId || reqUser?.id || 'SYSTEM',
+      userName: reqUser?.name || 'Staff',
+      userRole: reqUser?.role || 'Sales Executive',
+      action: 'QUOTATION_CREATED',
+      category: 'Sales',
+      details: `Quotation "${versionNumber}" (${calc.systemCapacityKw} kW) generated for ${body.leadName || 'Customer'} (Total: ₹${(calc.finalContractAmount || 0).toLocaleString('en-IN')}).`,
+      targetEntityId: finalId,
+      targetEntityType: 'Quotation',
+      ipAddress: req.ip,
+      status: 'Success',
+      metadata: { quotationNumber: versionNumber, capacityKw: calc.systemCapacityKw, totalAmount: calc.finalContractAmount },
+    });
+
     res.json({ success: true, quotation: formatQuotation(createdRows[0]) });
   } catch (err: any) {
     console.error('Error creating quotation:', err);
@@ -1231,6 +1248,22 @@ export const acceptQuotation = async (req: Request, res: Response) => {
     }
 
     const [projRows]: any = await pool.query('SELECT * FROM projects WHERE id = ? LIMIT 1', [projectId]);
+    
+    const reqUser = (req as any).user;
+    recordAuditLogDirect({
+      userId: reqUser?.userId || reqUser?.id || 'SYSTEM',
+      userName: reqUser?.name || 'Staff',
+      userRole: reqUser?.role || 'Staff',
+      action: 'DEAL_WON',
+      category: 'Sales',
+      details: `Quotation "${quote.quotation_number || id}" accepted. Converted to Project ${projectId} and advance invoice ${invoiceNumber} issued.`,
+      targetEntityId: projectId,
+      targetEntityType: 'Project',
+      ipAddress: req.ip,
+      status: 'Success',
+      metadata: { quotationId: id, projectId, customerId, invoiceId },
+    });
+
     res.json({
       success: true,
       message: `Quotation accepted! Converted to Project ${projectId} and Advance Invoice ${invoiceNumber} created.`,

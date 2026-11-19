@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { pool } from '../db.js';
+import { recordAuditLogDirect } from './audit.controller.js';
 
 export const recommendLeadPriority = async (req: Request, res: Response) => {
   try {
@@ -212,6 +213,22 @@ export const createLead = async (req: Request, res: Response) => {
     l.ebServiceNumber = ebServiceNumber;
     l.consumerNumberDiscom = ebServiceNumber;
     l.alternatePhone = cleanAltPhone || undefined;
+
+    const reqUser = (req as any).user;
+    recordAuditLogDirect({
+      userId: reqUser?.userId || reqUser?.id || 'SYSTEM',
+      userName: reqUser?.name || 'Staff',
+      userRole: reqUser?.role || 'Sales Executive',
+      action: 'LEAD_CREATED',
+      category: 'Sales',
+      details: `New solar lead "${l.name}" created (${recommendedKw} kW) and assigned to ${finalAssignedName}.`,
+      targetEntityId: l.id,
+      targetEntityType: 'Lead',
+      ipAddress: req.ip,
+      status: 'Success',
+      metadata: { phone: l.phone, city: l.city, capacityKw: recommendedKw, assignedTo: finalAssignedName },
+    });
+
     res.json({ success: true, lead: l });
   } catch (err: any) {
     console.error('Error creating lead:', err);
@@ -318,6 +335,19 @@ export const updateLead = async (req: Request, res: Response) => {
     if (fields.length > 0) {
       values.push(id);
       await pool.query(`UPDATE leads SET ${fields.join(', ')} WHERE id = ?`, values);
+
+      recordAuditLogDirect({
+        userId: user?.userId || user?.id || 'SYSTEM',
+        userName: user?.name || 'Staff',
+        userRole: user?.role || 'Staff',
+        action: 'LEAD_UPDATED',
+        category: 'Sales',
+        details: `Lead "${id}" updated${updates.assignedToName ? ` (Assigned to ${updates.assignedToName})` : ''}${updates.status ? ` (Status: ${updates.status})` : ''}.`,
+        targetEntityId: id,
+        targetEntityType: 'Lead',
+        ipAddress: req.ip,
+        status: 'Success',
+      });
     }
     res.json({ success: true, id, updates });
   } catch (err: any) {
@@ -329,9 +359,24 @@ export const updateLead = async (req: Request, res: Response) => {
 export const deleteLead = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const user = (req as any).user;
     await pool.query('DELETE FROM quotations WHERE lead_id = ?', [id]).catch(() => {});
     await pool.query('DELETE FROM site_surveys WHERE lead_id = ?', [id]).catch(() => {});
     await pool.query('DELETE FROM leads WHERE id = ?', [id]);
+
+    recordAuditLogDirect({
+      userId: user?.userId || user?.id || 'SYSTEM',
+      userName: user?.name || 'Staff',
+      userRole: user?.role || 'Staff',
+      action: 'LEAD_DELETED',
+      category: 'Sales',
+      details: `Lead "${id}" and associated records were deleted.`,
+      targetEntityId: id,
+      targetEntityType: 'Lead',
+      ipAddress: req.ip,
+      status: 'Warning',
+    });
+
     res.json({ success: true, id });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });

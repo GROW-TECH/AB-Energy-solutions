@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { pool } from '../db.js';
 import { verifyPassword, signJwt } from '../utils/security.js';
 import { DEMO_ACCOUNTS } from '../migrations/init-auth.js';
+import { recordAuditLogDirect } from './audit.controller.js';
 
 // Simple in-memory rate limiting for login attempts
 interface RateLimitRecord {
@@ -135,6 +136,17 @@ export const login = async (req: Request, res: Response) => {
       const currentAttempts = limitRecord ? limitRecord.attempts + 1 : 1;
       loginRateLimitMap.set(ip, { attempts: currentAttempts, lastAttemptTime: now });
 
+      recordAuditLogDirect({
+        userId: 'ANONYMOUS',
+        userName: identifier || 'Unknown User',
+        userRole: 'Guest',
+        action: 'LOGIN_FAILED',
+        category: 'Security',
+        details: `Failed login attempt for identifier "${identifier}" (User not found).`,
+        ipAddress: ip,
+        status: 'Failed',
+      });
+
       return res.status(401).json({
         success: false,
         error: 'Invalid credentials. Please verify your username and password.',
@@ -146,6 +158,17 @@ export const login = async (req: Request, res: Response) => {
     if (!isValid) {
       const currentAttempts = limitRecord ? limitRecord.attempts + 1 : 1;
       loginRateLimitMap.set(ip, { attempts: currentAttempts, lastAttemptTime: now });
+
+      recordAuditLogDirect({
+        userId: user.id || 'ANONYMOUS',
+        userName: user.name || identifier,
+        userRole: user.role || 'Guest',
+        action: 'LOGIN_FAILED',
+        category: 'Security',
+        details: `Failed login attempt for username "${user.username || identifier}" (Incorrect password).`,
+        ipAddress: ip,
+        status: 'Failed',
+      });
 
       return res.status(401).json({
         success: false,
@@ -186,6 +209,18 @@ export const login = async (req: Request, res: Response) => {
     };
 
     const token = signJwt(tokenPayload, 86400); // 24 hours
+
+    recordAuditLogDirect({
+      userId: tokenPayload.userId || tokenPayload.id,
+      userName: tokenPayload.name,
+      userRole: tokenPayload.role,
+      action: 'USER_LOGIN',
+      category: 'Security',
+      details: `User "${tokenPayload.name}" (${tokenPayload.username}) successfully authenticated as ${tokenPayload.role}.`,
+      ipAddress: ip,
+      status: 'Success',
+      metadata: { username: tokenPayload.username, role: tokenPayload.role },
+    });
 
     res.json({
       success: true,

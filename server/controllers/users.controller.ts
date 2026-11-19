@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { pool } from '../db.js';
 import { hashPassword } from '../utils/security.js';
+import { recordAuditLogDirect } from './audit.controller.js';
 
 export const getUsers = async (req: Request, res: Response) => {
   try {
@@ -124,6 +125,19 @@ export const createUser = async (req: Request, res: Response) => {
       );
     }
 
+    recordAuditLogDirect({
+      userId: currentUser?.userId || currentUser?.id || 'SYSTEM',
+      userName: currentUser?.name || 'Super Admin',
+      userRole: currentUser?.role || 'Super Admin',
+      action: 'USER_CREATED',
+      category: 'Security',
+      details: `New user account "${name.trim()}" (${username.trim()}) created with role ${role}.`,
+      targetEntityId: userId,
+      targetEntityType: 'User',
+      ipAddress: req.ip,
+      status: 'Success',
+    });
+
     res.status(201).json({
       success: true,
       message: `User ${username} created successfully with role ${role}`,
@@ -206,6 +220,19 @@ export const updateUser = async (req: Request, res: Response) => {
       );
     }
 
+    recordAuditLogDirect({
+      userId: currentUser?.userId || currentUser?.id || 'SYSTEM',
+      userName: currentUser?.name || 'Super Admin',
+      userRole: currentUser?.role || 'Super Admin',
+      action: 'USER_UPDATED',
+      category: 'Security',
+      details: `User account "${target.name}" (${target.username}) was updated${updatedRole ? ` (Role: ${updatedRole})` : ''}.`,
+      targetEntityId: id,
+      targetEntityType: 'User',
+      ipAddress: req.ip,
+      status: 'Success',
+    });
+
     res.json({
       success: true,
       message: 'User account updated successfully',
@@ -248,6 +275,19 @@ export const toggleUserStatus = async (req: Request, res: Response) => {
 
     const newStatus = !target.is_active;
     await pool.query('UPDATE user_accounts SET is_active = ? WHERE id = ?', [newStatus, id]);
+
+    recordAuditLogDirect({
+      userId: currentUser?.userId || currentUser?.id || 'SYSTEM',
+      userName: currentUser?.name || 'Super Admin',
+      userRole: currentUser?.role || 'Super Admin',
+      action: newStatus ? 'USER_ACTIVATED' : 'USER_DEACTIVATED',
+      category: 'Security',
+      details: `Account for "${target.name}" (${target.username}) was ${newStatus ? 'activated' : 'deactivated'}.`,
+      targetEntityId: id,
+      targetEntityType: 'User',
+      ipAddress: req.ip,
+      status: 'Warning',
+    });
 
     res.json({
       success: true,
